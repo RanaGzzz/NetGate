@@ -78,6 +78,7 @@ import com.example.ui.components.AppDetailBottomSheet
 import com.example.ui.components.AppRuleRow
 import com.example.ui.components.BatchSelectionBar
 import com.example.ui.components.ConnectionInfoSheet
+import com.example.ui.components.DnsProtectionSheet
 import com.example.ui.components.FirewallHeaderCard
 import com.example.ui.components.FirewallSettingsSheet
 import com.example.ui.components.FrostedBackdrop
@@ -241,6 +242,7 @@ fun FirewallScreen(
                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                     },
                                     onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                    onOpenDnsProtection = viewModel::openDnsProtection,
                                     onOpenSpeedTest = viewModel::openSpeedTest
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
@@ -289,6 +291,7 @@ fun FirewallScreen(
                                                 if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                             },
                                             onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                            onOpenDnsProtection = viewModel::openDnsProtection,
                                             onOpenSpeedTest = viewModel::openSpeedTest
                                         )
                                         Spacer(modifier = Modifier.height(14.dp))
@@ -345,6 +348,16 @@ fun FirewallScreen(
             details = uiState.connectionDetails,
             onRefresh = viewModel::refreshConnectionDetails,
             onDismiss = viewModel::closeConnectionInfo
+        )
+    }
+
+    if (uiState.isDnsProtectionOpen) {
+        DnsProtectionSheet(
+            connectionDetails = uiState.connectionDetails,
+            probeState = uiState.dnsProbeState,
+            onTestCloudflareDoh = viewModel::testCloudflareDoh,
+            onCopiedHostname = viewModel::notifyCopiedDnsHostname,
+            onDismiss = viewModel::closeDnsProtection
         )
     }
 

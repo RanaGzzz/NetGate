@@ -26,6 +26,7 @@ import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AppFilterMode
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DnsProbeState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
@@ -63,6 +64,8 @@ data class FirewallUiState(
     val inspectedAppPackage: String? = null,
     val isSettingsOpen: Boolean = false,
     val isConnectionInfoOpen: Boolean = false,
+    val isDnsProtectionOpen: Boolean = false,
+    val dnsProbeState: DnsProbeState = DnsProbeState(),
     val isSpeedTestOpen: Boolean = false,
     val speedTestState: SpeedTestState = SpeedTestState()
 ) {
@@ -105,6 +108,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val inspectedPackageFlow = MutableStateFlow<String?>(null)
     private val isSettingsOpenFlow = MutableStateFlow(false)
     private val isConnectionInfoOpenFlow = MutableStateFlow(false)
+    private val isDnsProtectionOpenFlow = MutableStateFlow(false)
+    private val dnsProbeStateFlow = MutableStateFlow(DnsProbeState())
     private val isSpeedTestOpenFlow = MutableStateFlow(false)
     private val speedTestRunner = SpeedTestRunner()
     private val speedTestStateFlow = MutableStateFlow(SpeedTestState())
@@ -191,13 +196,21 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         InteractionSnapshot(query, filter, selectionMode, selected, inspected)
     }
 
+    private val dnsUiFlow = combine(
+        isDnsProtectionOpenFlow,
+        dnsProbeStateFlow
+    ) { dnsOpen, dnsProbe ->
+        dnsOpen to dnsProbe
+    }
+
     private val sheetsFlow = combine(
         isSettingsOpenFlow,
         isConnectionInfoOpenFlow,
         isSpeedTestOpenFlow,
-        speedTestStateFlow
-    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest ->
-        SheetsSnapshot(settingsOpen, connInfoOpen, speedTestOpen, speedTest)
+        speedTestStateFlow,
+        dnsUiFlow
+    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest, (dnsOpen, dnsProbe) ->
+        SheetsSnapshot(settingsOpen, connInfoOpen, dnsOpen, dnsProbe, speedTestOpen, speedTest)
     }
 
     val uiState: StateFlow<FirewallUiState> = combine(
@@ -256,6 +269,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             inspectedAppPackage = interaction.inspected,
             isSettingsOpen = sheets.settingsOpen,
             isConnectionInfoOpen = sheets.connInfoOpen,
+            isDnsProtectionOpen = sheets.dnsOpen,
+            dnsProbeState = sheets.dnsProbeState,
             isSpeedTestOpen = sheets.speedTestOpen,
             speedTestState = sheets.speedTestState
         )
@@ -424,6 +439,36 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         isConnectionInfoOpenFlow.value = false
     }
 
+    fun openDnsProtection() {
+        refreshConnectionDetails()
+        isDnsProtectionOpenFlow.value = true
+    }
+
+    fun closeDnsProtection() {
+        isDnsProtectionOpenFlow.value = false
+    }
+
+    fun testCloudflareDoh() {
+        if (dnsProbeStateFlow.value.isTesting) return
+        viewModelScope.launch {
+            dnsProbeStateFlow.value = DnsProbeState(isTesting = true)
+            val result = repository.testCloudflareDohLatency()
+            dnsProbeStateFlow.value = result.fold(
+                onSuccess = { ms -> DnsProbeState(isTesting = false, latencyMs = ms) },
+                onFailure = { err ->
+                    DnsProbeState(
+                        isTesting = false,
+                        errorMessage = err.message ?: "Cloudflare DoH unreachable on current network"
+                    )
+                }
+            )
+        }
+    }
+
+    fun notifyCopiedDnsHostname(hostname: String) {
+        _snackbarMessages.tryEmit("Copied $hostname to clipboard")
+    }
+
     fun openSpeedTest() {
         refreshConnectionDetails()
         isSpeedTestOpenFlow.value = true
@@ -527,6 +572,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private data class SheetsSnapshot(
         val settingsOpen: Boolean,
         val connInfoOpen: Boolean,
+        val dnsOpen: Boolean,
+        val dnsProbeState: DnsProbeState,
         val speedTestOpen: Boolean,
         val speedTestState: SpeedTestState
     )

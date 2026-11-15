@@ -189,6 +189,17 @@ fun ConnectionInfoSheet(
                         "DNS Servers",
                         if (details.dnsServers.isNotEmpty()) details.dnsServers.joinToString(", ") else "Unavailable"
                     )
+                    InfoRow(
+                        "Private DNS",
+                        when {
+                            details.isCloudflarePrivateDns ->
+                                "Cloudflare (${details.privateDnsHostname ?: "1.1.1.1"})"
+                            details.isPrivateDnsActive && !details.privateDnsHostname.isNullOrBlank() ->
+                                details.privateDnsHostname
+                            details.isPrivateDnsActive -> "Automatic (Encrypted)"
+                            else -> "Off / ISP Default"
+                        }
+                    )
                     if (details.downstreamKbps > 0 || details.upstreamKbps > 0) {
                         InfoRow(
                             "Est. Bandwidth",

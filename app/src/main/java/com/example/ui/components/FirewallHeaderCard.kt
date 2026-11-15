@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Shield
@@ -62,6 +63,7 @@ fun FirewallHeaderCard(
     activeBlockedNowCount: Int,
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
+    onOpenDnsProtection: () -> Unit,
     onOpenSpeedTest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -278,7 +280,7 @@ fun FirewallHeaderCard(
                         if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
                     ),
                     modifier = Modifier
-                        .weight(1.45f)
+                        .weight(1.2f)
                         .clip(RoundedCornerShape(14.dp))
                         .clickable(onClick = onOpenConnectionInfo)
                         .testTag("connection_info_button")
@@ -286,7 +288,7 @@ fun FirewallHeaderCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 11.dp, vertical = 10.dp),
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -298,9 +300,9 @@ fun FirewallHeaderCard(
                                 imageVector = Icons.Rounded.Info,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = quickConnectionSummary,
                                 style = MaterialTheme.typography.labelMedium,
@@ -313,7 +315,57 @@ fun FirewallHeaderCard(
                             imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                             contentDescription = "Open Wi-Fi and connection info",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(17.dp)
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                val isCfDnsActive = connectionDetails.isCloudflarePrivateDns
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isCfDnsActive) {
+                        EmeraldPrimary.copy(alpha = if (isDark) 0.22f else 0.18f)
+                    } else if (isDark) {
+                        Color.White.copy(alpha = 0.08f)
+                    } else {
+                        Color.White.copy(alpha = 0.65f)
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        if (isCfDnsActive) {
+                            EmeraldPrimary.copy(alpha = 0.55f)
+                        } else if (isDark) {
+                            Color.White.copy(alpha = 0.14f)
+                        } else {
+                            Color.White.copy(alpha = 0.85f)
+                        }
+                    ),
+                    modifier = Modifier
+                        .weight(0.85f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenDnsProtection)
+                        .testTag("dns_protection_button")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Dns,
+                            contentDescription = null,
+                            tint = if (isCfDnsActive) EmeraldPrimary else MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isCfDnsActive) "1.1.1.1 On" else "1.1.1.1 DNS",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -326,7 +378,7 @@ fun FirewallHeaderCard(
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
                     ),
                     modifier = Modifier
-                        .weight(0.95f)
+                        .weight(0.85f)
                         .clip(RoundedCornerShape(14.dp))
                         .clickable(onClick = onOpenSpeedTest)
                         .testTag("speed_test_button")
@@ -334,7 +386,7 @@ fun FirewallHeaderCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
@@ -342,11 +394,11 @@ fun FirewallHeaderCard(
                             imageVector = Icons.Rounded.Speed,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Speed Test",
+                            text = "Speed",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             maxLines = 1

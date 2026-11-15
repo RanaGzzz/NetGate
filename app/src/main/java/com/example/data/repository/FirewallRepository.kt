@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.Inet6Address
+import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 
 class FirewallRepository(
     private val context: Context,
@@ -321,6 +323,25 @@ class FirewallRepository(
             null
         }
 
+        val privateDnsActive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            linkProps?.isPrivateDnsActive == true
+        } else {
+            false
+        }
+        val privateDnsServer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            linkProps?.privateDnsServerName
+        } else {
+            null
+        }
+        val privateDnsMode = runCatching {
+            Settings.Global.getString(context.contentResolver, "private_dns_mode")
+        }.getOrNull()
+        val privateDnsSpecifier = runCatching {
+            Settings.Global.getString(context.contentResolver, "private_dns_specifier")
+        }.getOrNull()
+        val resolvedPrivateDnsHost = privateDnsServer
+            ?: privateDnsSpecifier?.takeIf { privateDnsMode == "hostname" && it.isNotBlank() }
+
         return ConnectionDetails(
             activeNetworkType = activeType,
             isWifiRadioEnabled = isWifiRadioOn || wifiNetwork != null,
@@ -336,6 +357,9 @@ class FirewallRepository(
             isValidated = primaryCaps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ?: false,
             downstreamKbps = primaryCaps?.linkDownstreamBandwidthKbps ?: 0,
             upstreamKbps = primaryCaps?.linkUpstreamBandwidthKbps ?: 0,
+            isPrivateDnsActive = privateDnsActive || (privateDnsMode == "hostname" && !resolvedPrivateDnsHost.isNullOrBlank()),
+            privateDnsHostname = resolvedPrivateDnsHost,
+            privateDnsMode = privateDnsMode,
             wifiRssiDbm = rssi,
             wifiSignalLabel = signalLabel,
             wifiLinkSpeedMbps = linkSpeed,
@@ -344,6 +368,34 @@ class FirewallRepository(
             wifiBandLabel = bandLabel,
             wifiStandardLabel = wifiStandardLabel
         )
+    }
+
+    suspend fun testCloudflareDohLatency(): Result<Int> = withContext(Dispatchers.IO) {
+        var connection: HttpsURLConnection? = null
+        try {
+            val url = URL("https://cloudflare-dns.com/dns-query?name=cloudflare.com&type=A")
+            val startNs = System.nanoTime()
+            connection = (url.openConnection() as HttpsURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 5000
+                readTimeout = 5000
+                useCaches = false
+                setRequestProperty("Accept", "application/dns-json")
+                setRequestProperty("Connection", "close")
+            }
+            val code = connection.responseCode
+            connection.inputStream.use { it.readBytes() }
+            val elapsedMs = ((System.nanoTime() - startNs) / 1_000_000L).toInt().coerceAtLeast(1)
+            if (code in 200..299) {
+                Result.success(elapsedMs)
+            } else {
+                Result.failure(IllegalStateException("HTTP $code from Cloudflare DoH"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            runCatching { connection?.disconnect() }
+        }
     }
 
     suspend fun isFirewallEnabledOnce(): Boolean = preferencesFlow.first().isFirewallEnabled

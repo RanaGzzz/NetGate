@@ -28,6 +28,44 @@ enum class ThemeMode(val label: String) {
     DARK("Night")
 }
 
+enum class DnsProviderPreset(
+    val title: String,
+    val subtitle: String,
+    val hostname: String
+) {
+    CLOUDFLARE_FAST(
+        title = "Cloudflare 1.1.1.1",
+        subtitle = "Fastest encrypted DNS to bypass ISP DNS filtering",
+        hostname = "one.one.one.one"
+    ),
+    CLOUDFLARE_SECURITY(
+        title = "Cloudflare Malware Block",
+        subtitle = "1.1.1.2 — Blocks malware & phishing domains",
+        hostname = "security.cloudflare-dns.com"
+    ),
+    CLOUDFLARE_FAMILY(
+        title = "Cloudflare Family",
+        subtitle = "1.1.1.3 — Blocks malware & adult content",
+        hostname = "family.cloudflare-dns.com"
+    ),
+    GOOGLE_DNS(
+        title = "Google Public DNS",
+        subtitle = "8.8.8.8 — Encrypted DNS-over-TLS",
+        hostname = "dns.google"
+    ),
+    QUAD9_DNS(
+        title = "Quad9 Security",
+        subtitle = "9.9.9.9 — Threat-blocking encrypted DNS",
+        hostname = "dns.quad9.net"
+    )
+}
+
+data class DnsProbeState(
+    val isTesting: Boolean = false,
+    val latencyMs: Int? = null,
+    val errorMessage: String? = null
+)
+
 data class InstalledAppInfo(
     val packageName: String,
     val appName: String,
@@ -69,6 +107,10 @@ data class ConnectionDetails(
     val isValidated: Boolean = false,
     val downstreamKbps: Int = 0,
     val upstreamKbps: Int = 0,
+    // Private DNS status
+    val isPrivateDnsActive: Boolean = false,
+    val privateDnsHostname: String? = null,
+    val privateDnsMode: String? = null,
     // Wi-Fi specific telemetry
     val wifiRssiDbm: Int? = null,
     val wifiSignalLabel: String? = null,
@@ -77,7 +119,16 @@ data class ConnectionDetails(
     val wifiFrequencyMhz: Int? = null,
     val wifiBandLabel: String? = null,
     val wifiStandardLabel: String? = null
-)
+) {
+    val isCloudflarePrivateDns: Boolean
+        get() {
+            val host = privateDnsHostname?.lowercase().orEmpty()
+            return isPrivateDnsActive && (
+                host.contains("one.one.one.one") ||
+                    host.contains("cloudflare-dns.com")
+                )
+        }
+}
 
 data class FirewallPreferencesState(
     val isFirewallEnabled: Boolean = false,
