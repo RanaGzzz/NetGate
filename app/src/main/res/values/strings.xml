@@ -8,4 +8,9 @@
     <string name="action_settings">Firewall Settings</string>
     <string name="search_apps_hint">Search installed apps…</string>
     <string name="open_system_app_info">Open System App Info</string>
+    <string name="nav_firewall">Firewall</string>
+    <string name="nav_data_usage">Data Usage</string>
+    <string name="data_usage_title">Data Usage</string>
+    <string name="data_usage_subtitle">Blocked vs. Allowed Apps</string>
+    <string name="grant_usage_access">Grant Usage Access</string>
 </resources>

@@ -23,14 +23,20 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.FirewallPreferences
 import com.example.data.local.NetGateDatabase
 import com.example.data.model.ActiveNetworkType
+import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
+import com.example.data.model.AppUsageBreakdownItem
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DataUsageSummary
 import com.example.data.model.DnsProbeState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
 import com.example.data.model.ThemeMode
+import com.example.data.model.UsageChartMode
+import com.example.data.model.UsageFilterCategory
+import com.example.data.model.UsageTimeRange
 import com.example.data.network.SpeedTestPhase
 import com.example.data.network.SpeedTestRunner
 import com.example.data.network.SpeedTestState
@@ -50,7 +56,19 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+data class DataUsageUiState(
+    val hasUsageAccess: Boolean = false,
+    val isSyncing: Boolean = false,
+    val timeRange: UsageTimeRange = UsageTimeRange.LAST_7D,
+    val chartMode: UsageChartMode = UsageChartMode.TOTAL,
+    val filterCategory: UsageFilterCategory = UsageFilterCategory.ALL,
+    val summary: DataUsageSummary = DataUsageSummary(),
+    val appItems: List<AppUsageBreakdownItem> = emptyList(),
+    val errorMessage: String? = null
+)
+
 data class FirewallUiState(
+    val currentDestination: AppDestination = AppDestination.FIREWALL,
     val isLoading: Boolean = true,
     val allManagedApps: List<ManagedApp> = emptyList(),
     val filteredApps: List<ManagedApp> = emptyList(),
@@ -67,7 +85,8 @@ data class FirewallUiState(
     val isDnsProtectionOpen: Boolean = false,
     val dnsProbeState: DnsProbeState = DnsProbeState(),
     val isSpeedTestOpen: Boolean = false,
-    val speedTestState: SpeedTestState = SpeedTestState()
+    val speedTestState: SpeedTestState = SpeedTestState(),
+    val dataUsageState: DataUsageUiState = DataUsageUiState()
 ) {
     val effectiveNetworkType: ActiveNetworkType
         get() = if (vpnRuntimeState.isServiceRunning && vpnRuntimeState.activeNetworkType != ActiveNetworkType.NONE) {
@@ -96,9 +115,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val repository = FirewallRepository(
         context = application,
         ruleDao = database.appNetworkRuleDao(),
+        trafficUsageDao = database.appTrafficUsageDao(),
         preferences = preferences
     )
 
+    private val currentDestinationFlow = MutableStateFlow(AppDestination.FIREWALL)
     private val installedAppsFlow = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
     private val isLoadingAppsFlow = MutableStateFlow(true)
     private val searchQueryFlow = MutableStateFlow("")
@@ -115,6 +136,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val speedTestStateFlow = MutableStateFlow(SpeedTestState())
     private var speedTestJob: Job? = null
     private val connectionDetailsFlow = MutableStateFlow(repository.detectConnectionDetails())
+
+    private val hasUsageAccessFlow = MutableStateFlow(repository.hasUsageStatsPermission())
+    private val isSyncingUsageFlow = MutableStateFlow(false)
+    private val usageTimeRangeFlow = MutableStateFlow(UsageTimeRange.LAST_7D)
+    private val usageChartModeFlow = MutableStateFlow(UsageChartMode.TOTAL)
+    private val usageFilterFlow = MutableStateFlow(UsageFilterCategory.ALL)
+    private val usageErrorFlow = MutableStateFlow<String?>(null)
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
@@ -213,12 +241,60 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         SheetsSnapshot(settingsOpen, connInfoOpen, dnsOpen, dnsProbe, speedTestOpen, speedTest)
     }
 
+    private val usageControlsFlow = combine(
+        hasUsageAccessFlow,
+        isSyncingUsageFlow,
+        usageTimeRangeFlow,
+        usageChartModeFlow,
+        usageFilterFlow
+    ) { hasAccess, syncing, range, chartMode, filterCat ->
+        UsageControlsSnapshot(hasAccess, syncing, range, chartMode, filterCat)
+    }
+
+    private val usageStateFlow = combine(
+        usageControlsFlow,
+        repository.trafficSummaryFlow,
+        repository.trafficUsageWithRulesFlow,
+        installedAppsFlow,
+        usageErrorFlow
+    ) { controls, summary, rawRows, installedApps, errMsg ->
+        val appMetaMap = installedApps.associateBy { it.packageName }
+        val allItems = rawRows.map { row ->
+            val meta = appMetaMap[row.packageName]
+            AppUsageBreakdownItem(
+                packageName = row.packageName,
+                appName = meta?.appName ?: row.packageName,
+                isSystemApp = meta?.isSystemApp ?: false,
+                wifiBytes = row.wifiBytes,
+                mobileBytes = row.mobileBytes,
+                blockWifi = row.blockWifi,
+                blockMobileData = row.blockMobileData
+            )
+        }
+        val filteredItems = when (controls.filterCategory) {
+            UsageFilterCategory.ALL -> allItems
+            UsageFilterCategory.BLOCKED -> allItems.filter { it.isBlocked }
+            UsageFilterCategory.ALLOWED -> allItems.filter { !it.isBlocked }
+        }
+        DataUsageUiState(
+            hasUsageAccess = controls.hasAccess,
+            isSyncing = controls.syncing,
+            timeRange = controls.timeRange,
+            chartMode = controls.chartMode,
+            filterCategory = controls.filterCategory,
+            summary = summary,
+            appItems = filteredItems,
+            errorMessage = errMsg
+        )
+    }
+
     val uiState: StateFlow<FirewallUiState> = combine(
         baseDataFlow,
         uiInteractionFlow,
         connectionDetailsFlow,
-        sheetsFlow
-    ) { base, interaction, connDetails, sheets ->
+        sheetsFlow,
+        combine(currentDestinationFlow, usageStateFlow) { dest, usage -> dest to usage }
+    ) { base, interaction, connDetails, sheets, (destination, dataUsage) ->
         val ruleMap = base.rules.associateBy { it.packageName }
 
         val visibleInstalled = base.installed.filter { app ->
@@ -256,6 +332,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
 
         FirewallUiState(
+            currentDestination = destination,
             isLoading = base.loading,
             allManagedApps = managedApps,
             filteredApps = filtered,
@@ -272,7 +349,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             isDnsProtectionOpen = sheets.dnsOpen,
             dnsProbeState = sheets.dnsProbeState,
             isSpeedTestOpen = sheets.speedTestOpen,
-            speedTestState = sheets.speedTestState
+            speedTestState = sheets.speedTestState,
+            dataUsageState = dataUsage
         )
     }.stateIn(
         scope = viewModelScope,
@@ -287,10 +365,68 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     fun refreshInstalledApps() {
         viewModelScope.launch {
             isLoadingAppsFlow.value = true
-            installedAppsFlow.value = repository.getInstalledApps()
+            val apps = repository.getInstalledApps()
+            installedAppsFlow.value = apps
             isLoadingAppsFlow.value = false
             refreshConnectionDetails()
+            if (repository.hasUsageStatsPermission()) {
+                hasUsageAccessFlow.value = true
+                syncDataUsageInternal(apps)
+            }
         }
+    }
+
+    fun selectDestination(destination: AppDestination) {
+        currentDestinationFlow.value = destination
+        if (destination == AppDestination.DATA_USAGE) {
+            if (isSelectionModeFlow.value) {
+                exitSelectionMode()
+            }
+            refreshDataUsage()
+        }
+    }
+
+    fun refreshDataUsage() {
+        val granted = repository.hasUsageStatsPermission()
+        hasUsageAccessFlow.value = granted
+        if (!granted) {
+            usageErrorFlow.value = null
+            return
+        }
+        viewModelScope.launch {
+            val apps = installedAppsFlow.value.ifEmpty {
+                repository.getInstalledApps().also { installedAppsFlow.value = it }
+            }
+            syncDataUsageInternal(apps)
+        }
+    }
+
+    fun setUsageTimeRange(range: UsageTimeRange) {
+        if (usageTimeRangeFlow.value == range) return
+        usageTimeRangeFlow.value = range
+        refreshDataUsage()
+    }
+
+    fun setUsageChartMode(mode: UsageChartMode) {
+        usageChartModeFlow.value = mode
+    }
+
+    fun setUsageFilterCategory(category: UsageFilterCategory) {
+        usageFilterFlow.value = category
+    }
+
+    private suspend fun syncDataUsageInternal(apps: List<InstalledAppInfo>) {
+        if (isSyncingUsageFlow.value) return
+        isSyncingUsageFlow.value = true
+        usageErrorFlow.value = null
+        val result = repository.syncNetworkTrafficUsageToRoom(
+            installedApps = apps,
+            periodDays = usageTimeRangeFlow.value.days
+        )
+        result.onFailure { err ->
+            usageErrorFlow.value = err.message ?: "Unable to query Android network stats"
+        }
+        isSyncingUsageFlow.value = false
     }
 
     suspend fun getAppIconBitmap(packageName: String): ImageBitmap? {
@@ -576,6 +712,14 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val dnsProbeState: DnsProbeState,
         val speedTestOpen: Boolean,
         val speedTestState: SpeedTestState
+    )
+
+    private data class UsageControlsSnapshot(
+        val hasAccess: Boolean,
+        val syncing: Boolean,
+        val timeRange: UsageTimeRange,
+        val chartMode: UsageChartMode,
+        val filterCategory: UsageFilterCategory
     )
 }
 

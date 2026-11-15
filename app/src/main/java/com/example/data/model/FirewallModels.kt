@@ -139,3 +139,67 @@ data class FirewallPreferencesState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val useDynamicColor: Boolean = true
 )
+
+enum class AppDestination(val label: String) {
+    FIREWALL("Firewall"),
+    DATA_USAGE("Data Usage")
+}
+
+enum class UsageTimeRange(val label: String, val days: Int) {
+    LAST_24H("24h", 1),
+    LAST_7D("7 Days", 7),
+    LAST_30D("30 Days", 30)
+}
+
+enum class UsageChartMode(val label: String) {
+    TOTAL("Total"),
+    SPLIT("Wi-Fi vs Data")
+}
+
+enum class UsageFilterCategory(val label: String) {
+    ALL("All"),
+    BLOCKED("Blocked"),
+    ALLOWED("Allowed")
+}
+
+data class DataUsageSummary(
+    val blockedTotalBytes: Long = 0L,
+    val blockedWifiBytes: Long = 0L,
+    val blockedMobileBytes: Long = 0L,
+    val allowedTotalBytes: Long = 0L,
+    val allowedWifiBytes: Long = 0L,
+    val allowedMobileBytes: Long = 0L,
+    val blockedAppsCount: Int = 0,
+    val allowedAppsCount: Int = 0,
+    val lastSyncedAt: Long = 0L
+) {
+    val grandTotalBytes: Long get() = blockedTotalBytes + allowedTotalBytes
+}
+
+data class AppUsageBreakdownItem(
+    val packageName: String,
+    val appName: String,
+    val isSystemApp: Boolean,
+    val wifiBytes: Long,
+    val mobileBytes: Long,
+    val blockWifi: Boolean,
+    val blockMobileData: Boolean
+) {
+    val totalBytes: Long get() = wifiBytes + mobileBytes
+    val isBlocked: Boolean get() = blockWifi || blockMobileData
+}
+
+fun formatDataBytes(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val kb = 1024.0
+    val mb = kb * 1024.0
+    val gb = mb * 1024.0
+    val tb = gb * 1024.0
+    return when {
+        bytes >= tb -> String.format(java.util.Locale.US, "%.2f TB", bytes / tb)
+        bytes >= gb -> String.format(java.util.Locale.US, "%.2f GB", bytes / gb)
+        bytes >= mb -> String.format(java.util.Locale.US, "%.1f MB", bytes / mb)
+        bytes >= kb -> String.format(java.util.Locale.US, "%.0f KB", bytes / kb)
+        else -> "$bytes B"
+    }
+}

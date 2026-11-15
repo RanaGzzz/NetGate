@@ -1,6 +1,9 @@
 package com.example.data.repository
 
 import android.Manifest
+import android.app.AppOpsManager
+import android.app.usage.NetworkStats
+import android.app.usage.NetworkStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -14,18 +17,24 @@ import android.net.wifi.ScanResult
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Process
 import android.provider.Settings
 import com.example.data.local.AppNetworkRuleDao
 import com.example.data.local.AppNetworkRuleEntity
+import com.example.data.local.AppTrafficUsageDao
+import com.example.data.local.AppTrafficUsageEntity
+import com.example.data.local.AppTrafficWithRuleTuple
 import com.example.data.local.FirewallPreferences
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DataUsageSummary
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -35,10 +44,27 @@ import javax.net.ssl.HttpsURLConnection
 class FirewallRepository(
     private val context: Context,
     private val ruleDao: AppNetworkRuleDao,
+    private val trafficUsageDao: AppTrafficUsageDao,
     val preferences: FirewallPreferences
 ) {
     val rulesFlow: Flow<List<AppNetworkRuleEntity>> = ruleDao.observeAllRules()
     val preferencesFlow: Flow<FirewallPreferencesState> = preferences.preferencesFlow
+    val trafficSummaryFlow: Flow<DataUsageSummary> = trafficUsageDao.observeBlockedVsAllowedSummary()
+        .map { tuple ->
+            DataUsageSummary(
+                blockedTotalBytes = tuple.blockedTotalBytes,
+                blockedWifiBytes = tuple.blockedWifiBytes,
+                blockedMobileBytes = tuple.blockedMobileBytes,
+                allowedTotalBytes = tuple.allowedTotalBytes,
+                allowedWifiBytes = tuple.allowedWifiBytes,
+                allowedMobileBytes = tuple.allowedMobileBytes,
+                blockedAppsCount = tuple.blockedAppsCount,
+                allowedAppsCount = tuple.allowedAppsCount,
+                lastSyncedAt = tuple.lastSyncedAt
+            )
+        }
+    val trafficUsageWithRulesFlow: Flow<List<AppTrafficWithRuleTuple>> =
+        trafficUsageDao.observeUsageJoinedWithRules()
 
     suspend fun getAllRulesOnce(): List<AppNetworkRuleEntity> = withContext(Dispatchers.IO) {
         ruleDao.getAllRulesOnce()
@@ -399,4 +425,133 @@ class FirewallRepository(
     }
 
     suspend fun isFirewallEnabledOnce(): Boolean = preferencesFlow.first().isFirewallEnabled
+
+    fun hasUsageStatsPermission(): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName
+            )
+        }
+        return when (mode) {
+            AppOpsManager.MODE_ALLOWED -> true
+            AppOpsManager.MODE_DEFAULT -> context.checkCallingOrSelfPermission(
+                Manifest.permission.PACKAGE_USAGE_STATS
+            ) == PackageManager.PERMISSION_GRANTED
+            else -> false
+        }
+    }
+
+    suspend fun syncNetworkTrafficUsageToRoom(
+        installedApps: List<InstalledAppInfo>,
+        periodDays: Int
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        if (!hasUsageStatsPermission()) {
+            return@withContext Result.failure(SecurityException("Usage Access permission required"))
+        }
+        val nsm = context.getSystemService(Context.NETWORK_STATS_SERVICE) as? NetworkStatsManager
+            ?: return@withContext Result.failure(IllegalStateException("NetworkStatsManager unavailable"))
+
+        try {
+            val endTime = System.currentTimeMillis()
+            val startTime = endTime - periodDays.toLong() * 86_400_000L
+
+            @Suppress("DEPRECATION")
+            val wifiByUid = queryBytesByUid(nsm, ConnectivityManager.TYPE_WIFI, startTime, endTime)
+            @Suppress("DEPRECATION")
+            val mobileByUid = queryBytesByUid(nsm, ConnectivityManager.TYPE_MOBILE, startTime, endTime)
+
+            val pm = context.packageManager
+            val existingRules = ruleDao.getAllRulesOnce().associateBy { it.packageName }
+
+            // Map installed apps to their Linux UID; attribute shared-UID traffic once to avoid double counting.
+            val appsByUid = mutableMapOf<Int, MutableList<InstalledAppInfo>>()
+            for (app in installedApps) {
+                val uid = runCatching {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        pm.getApplicationInfo(
+                            app.packageName,
+                            PackageManager.ApplicationInfoFlags.of(0L)
+                        ).uid
+                    } else {
+                        @Suppress("DEPRECATION")
+                        pm.getApplicationInfo(app.packageName, 0).uid
+                    }
+                }.getOrNull() ?: continue
+                appsByUid.getOrPut(uid) { mutableListOf() }.add(app)
+            }
+
+            val entities = mutableListOf<AppTrafficUsageEntity>()
+            val syncedAt = System.currentTimeMillis()
+            for ((uid, group) in appsByUid) {
+                // Pick the package with an active rule first (or first alphabetically) as primary owner of the UID's bytes.
+                val primaryPkg = group.firstOrNull { app ->
+                    val rule = existingRules[app.packageName]
+                    rule != null && (rule.blockWifi || rule.blockMobileData)
+                }?.packageName ?: group.first().packageName
+
+                val wifiBytes = wifiByUid[uid] ?: 0L
+                val mobileBytes = mobileByUid[uid] ?: 0L
+
+                for (app in group) {
+                    val isPrimary = app.packageName == primaryPkg
+                    entities.add(
+                        AppTrafficUsageEntity(
+                            packageName = app.packageName,
+                            wifiBytes = if (isPrimary) wifiBytes else 0L,
+                            mobileBytes = if (isPrimary) mobileBytes else 0L,
+                            periodDays = periodDays,
+                            syncedAt = syncedAt
+                        )
+                    )
+                }
+            }
+
+            trafficUsageDao.replaceSnapshot(entities)
+            Result.success(entities.size)
+        } catch (se: SecurityException) {
+            Result.failure(se)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun queryBytesByUid(
+        nsm: NetworkStatsManager,
+        networkType: Int,
+        startTime: Long,
+        endTime: Long
+    ): Map<Int, Long> {
+        val result = mutableMapOf<Int, Long>()
+        var stats: NetworkStats? = null
+        try {
+            stats = nsm.querySummary(networkType, null, startTime, endTime)
+            val bucket = NetworkStats.Bucket()
+            while (stats.hasNextBucket()) {
+                if (stats.getNextBucket(bucket)) {
+                    val uid = bucket.uid
+                    val bytes = (bucket.rxBytes + bucket.txBytes).coerceAtLeast(0L)
+                    if (bytes > 0L) {
+                        result[uid] = (result[uid] ?: 0L) + bytes
+                    }
+                }
+            }
+        } catch (_: SecurityException) {
+            throw SecurityException("Usage Access permission required")
+        } catch (_: Exception) {
+            // Best effort if one transport is unavailable on this device
+        } finally {
+            runCatching { stats?.close() }
+        }
+        return result
+    }
 }

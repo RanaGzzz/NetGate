@@ -14,11 +14,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -33,6 +37,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
@@ -41,6 +46,7 @@ import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +56,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -69,9 +77,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.model.ActiveNetworkType
+import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
 import com.example.data.model.ThemeMode
 import com.example.ui.components.AppDetailBottomSheet
@@ -81,6 +92,7 @@ import com.example.ui.components.ConnectionInfoSheet
 import com.example.ui.components.DnsProtectionSheet
 import com.example.ui.components.FirewallHeaderCard
 import com.example.ui.components.FirewallSettingsSheet
+import com.example.ui.components.FloatingFrostedNavBar
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.SpeedTestSheet
@@ -107,125 +119,211 @@ fun FirewallScreen(
         viewModel.exitSelectionMode()
     }
 
+    BackHandler(
+        enabled = !uiState.isSelectionMode && uiState.currentDestination == AppDestination.DATA_USAGE
+    ) {
+        viewModel.selectDestination(AppDestination.FIREWALL)
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshConnectionDetails()
+        if (uiState.currentDestination == AppDestination.DATA_USAGE) {
+            viewModel.refreshDataUsage()
+        }
+    }
+
     val isFirewallActive = uiState.preferences.isFirewallEnabled &&
         uiState.vpnRuntimeState.isServiceRunning
+    val isDark = LocalIsDarkTheme.current
 
     FrostedBackdrop(
         isFirewallActive = isFirewallActive,
         modifier = modifier
     ) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Transparent,
-            contentWindowInsets = WindowInsets.safeDrawing,
-            snackbarHost = {
-                SnackbarHost(
-                    hostState = snackbarHostState,
-                    modifier = Modifier.navigationBarsPadding()
-                )
-            },
-            topBar = {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        titleContentColor = MaterialTheme.colorScheme.onBackground
-                    ),
-                    title = {
-                        Column {
-                            Text(
-                                text = stringResource(R.string.app_name),
-                                style = MaterialTheme.typography.headlineSmall
-                            )
-                            Text(
-                                text = "Wi-Fi & Data Controller",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    actions = {
-                        FilledTonalButton(
-                            onClick = {
-                                if (uiState.isSelectionMode) {
-                                    viewModel.exitSelectionMode()
-                                } else {
-                                    viewModel.enterSelectionMode()
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val isWideLayout = maxWidth >= 800.dp
+            val navBarBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+                ),
+                snackbarHost = {
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier
+                            .navigationBarsPadding()
+                            .padding(bottom = if (!isWideLayout && !uiState.isSelectionMode) 84.dp else 0.dp)
+                    )
+                },
+                topBar = {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent,
+                            titleContentColor = MaterialTheme.colorScheme.onBackground
+                        ),
+                        title = {
+                            Column {
+                                Text(
+                                    text = if (uiState.currentDestination == AppDestination.DATA_USAGE) {
+                                        stringResource(R.string.data_usage_title)
+                                    } else {
+                                        stringResource(R.string.app_name)
+                                    },
+                                    style = MaterialTheme.typography.headlineSmall
+                                )
+                                Text(
+                                    text = if (uiState.currentDestination == AppDestination.DATA_USAGE) {
+                                        stringResource(R.string.data_usage_subtitle)
+                                    } else {
+                                        "Wi-Fi & Data Controller"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        actions = {
+                            if (uiState.currentDestination == AppDestination.FIREWALL) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        if (uiState.isSelectionMode) {
+                                            viewModel.exitSelectionMode()
+                                        } else {
+                                            viewModel.enterSelectionMode()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .padding(end = 2.dp)
+                                        .testTag("batch_mode_toggle_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (uiState.isSelectionMode) {
+                                            Icons.Rounded.Close
+                                        } else {
+                                            Icons.Rounded.Checklist
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (uiState.isSelectionMode) "Done" else "Select",
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
                                 }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier
-                                .padding(end = 2.dp)
-                                .testTag("batch_mode_toggle_button")
-                        ) {
-                            Icon(
-                                imageVector = if (uiState.isSelectionMode) {
-                                    Icons.Rounded.Close
-                                } else {
-                                    Icons.Rounded.Checklist
+                            }
+
+                            IconButton(
+                                onClick = { viewModel.cycleThemeMode() },
+                                modifier = Modifier.testTag("theme_cycle_button")
+                            ) {
+                                Icon(
+                                    imageVector = when (uiState.preferences.themeMode) {
+                                        ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
+                                        ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                                        ThemeMode.DARK -> Icons.Rounded.DarkMode
+                                    },
+                                    contentDescription = "Switch Day or Night theme"
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    if (uiState.currentDestination == AppDestination.DATA_USAGE) {
+                                        viewModel.refreshDataUsage()
+                                    } else {
+                                        viewModel.refreshInstalledApps()
+                                    }
                                 },
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (uiState.isSelectionMode) "Done" else "Select",
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
+                                modifier = Modifier.testTag("refresh_apps_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = if (uiState.currentDestination == AppDestination.DATA_USAGE) {
+                                        "Sync data usage"
+                                    } else {
+                                        "Refresh installed apps"
+                                    }
+                                )
+                            }
 
-                        IconButton(
-                            onClick = { viewModel.cycleThemeMode() },
-                            modifier = Modifier.testTag("theme_cycle_button")
+                            IconButton(
+                                onClick = { viewModel.openSettings() },
+                                modifier = Modifier.testTag("open_settings_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Tune,
+                                    contentDescription = stringResource(R.string.action_settings)
+                                )
+                            }
+                        }
+                    )
+                }
+            ) { innerPadding ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                ) {
+                    if (isWideLayout) {
+                        NavigationRail(
+                            containerColor = if (isDark) {
+                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.72f)
+                            } else {
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.76f)
+                            }
                         ) {
-                            Icon(
-                                imageVector = when (uiState.preferences.themeMode) {
-                                    ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-                                    ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                                    ThemeMode.DARK -> Icons.Rounded.DarkMode
+                            Spacer(modifier = Modifier.height(12.dp))
+                            NavigationRailItem(
+                                selected = uiState.currentDestination == AppDestination.FIREWALL,
+                                onClick = { viewModel.selectDestination(AppDestination.FIREWALL) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Shield,
+                                        contentDescription = stringResource(R.string.nav_firewall)
+                                    )
                                 },
-                                contentDescription = "Switch Day or Night theme"
+                                label = { Text(stringResource(R.string.nav_firewall)) },
+                                modifier = Modifier.testTag("nav_rail_firewall")
                             )
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.refreshInstalledApps() },
-                            modifier = Modifier.testTag("refresh_apps_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Refresh installed apps"
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.openSettings() },
-                            modifier = Modifier.testTag("open_settings_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Tune,
-                                contentDescription = stringResource(R.string.action_settings)
+                            NavigationRailItem(
+                                selected = uiState.currentDestination == AppDestination.DATA_USAGE,
+                                onClick = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.BarChart,
+                                        contentDescription = stringResource(R.string.nav_data_usage)
+                                    )
+                                },
+                                label = { Text(stringResource(R.string.nav_data_usage)) },
+                                modifier = Modifier.testTag("nav_rail_data_usage")
                             )
                         }
                     }
-                )
-            }
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val isWideLayout = maxWidth >= 800.dp
 
-                    if (isWideLayout) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 20.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(20.dp)
-                        ) {
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        if (uiState.currentDestination == AppDestination.DATA_USAGE) {
+                            DataUsageContent(
+                                state = uiState.dataUsageState,
+                                loadIcon = viewModel::getAppIconBitmap,
+                                onTimeRangeChange = viewModel::setUsageTimeRange,
+                                onChartModeChange = viewModel::setUsageChartMode,
+                                onFilterCategoryChange = viewModel::setUsageFilterCategory,
+                                onRefreshUsage = viewModel::refreshDataUsage,
+                                onInspectApp = viewModel::openAppDetails
+                            )
+                        } else if (isWideLayout) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            ) {
                             Column(
                                 modifier = Modifier
                                     .width(340.dp)
@@ -263,70 +361,92 @@ fun FirewallScreen(
                             }
                         }
                     } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .widthIn(max = 680.dp)
-                                .align(Alignment.TopCenter)
-                        ) {
-                            AppsCollectionContent(
-                                uiState = uiState,
-                                isGrid = false,
-                                viewModel = viewModel,
-                                bottomPadding = if (uiState.isSelectionMode) 172.dp else 24.dp,
-                                headerContent = {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(bottom = 8.dp)
-                                    ) {
-                                        FirewallHeaderCard(
-                                            isFirewallActive = isFirewallActive,
-                                            connectionDetails = uiState.connectionDetails,
-                                            totalAppsCount = uiState.allManagedApps.size,
-                                            wifiBlockedCount = uiState.wifiBlockedCount,
-                                            dataBlockedCount = uiState.dataBlockedCount,
-                                            activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
-                                            onToggleFirewall = { enable ->
-                                                if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
-                                            },
-                                            onOpenConnectionInfo = viewModel::openConnectionInfo,
-                                            onOpenDnsProtection = viewModel::openDnsProtection,
-                                            onOpenSpeedTest = viewModel::openSpeedTest
-                                        )
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        SearchAndFiltersBlock(
-                                            uiState = uiState,
-                                            onSearchQueryChange = viewModel::onSearchQueryChange,
-                                            onFilterModeChange = viewModel::onFilterModeChange
-                                        )
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .widthIn(max = 680.dp)
+                                    .align(Alignment.TopCenter)
+                            ) {
+                                AppsCollectionContent(
+                                    uiState = uiState,
+                                    isGrid = false,
+                                    viewModel = viewModel,
+                                    bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 96.dp,
+                                    headerContent = {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 8.dp)
+                                        ) {
+                                            FirewallHeaderCard(
+                                                isFirewallActive = isFirewallActive,
+                                                connectionDetails = uiState.connectionDetails,
+                                                totalAppsCount = uiState.allManagedApps.size,
+                                                wifiBlockedCount = uiState.wifiBlockedCount,
+                                                dataBlockedCount = uiState.dataBlockedCount,
+                                                activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
+                                                onToggleFirewall = { enable ->
+                                                    if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
+                                                },
+                                                onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                                onOpenDnsProtection = viewModel::openDnsProtection,
+                                                onOpenSpeedTest = viewModel::openSpeedTest
+                                            )
+                                            Spacer(modifier = Modifier.height(14.dp))
+                                            SearchAndFiltersBlock(
+                                                uiState = uiState,
+                                                onSearchQueryChange = viewModel::onSearchQueryChange,
+                                                onFilterModeChange = viewModel::onFilterModeChange
+                                            )
+                                        }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
-                }
 
-                AnimatedVisibility(
-                    visible = uiState.isSelectionMode,
-                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                ) {
-                    val visiblePackages = uiState.filteredApps.map { it.packageName }.toSet()
-                    val allVisibleSelected = visiblePackages.isNotEmpty() &&
-                        visiblePackages.all { it in uiState.selectedPackages }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !isWideLayout && !uiState.isSelectionMode,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        FloatingFrostedNavBar(
+                            currentDestination = uiState.currentDestination,
+                            isSpeedTestOpen = uiState.isSpeedTestOpen,
+                            isDnsProtectionOpen = uiState.isDnsProtectionOpen,
+                            isConnectionInfoOpen = uiState.isConnectionInfoOpen,
+                            onSelectFirewall = { viewModel.selectDestination(AppDestination.FIREWALL) },
+                            onSelectDataUsage = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                            onOpenSpeedTest = viewModel::openSpeedTest,
+                            onOpenDnsProtection = viewModel::openDnsProtection,
+                            onOpenConnectionInfo = viewModel::openConnectionInfo
+                        )
+                    }
 
-                    BatchSelectionBar(
-                        selectedCount = uiState.selectedPackages.size,
-                        allVisibleSelected = allVisibleSelected,
-                        onSelectAll = viewModel::selectAllVisible,
-                        onClearSelection = viewModel::clearSelection,
-                        onExitSelection = viewModel::exitSelectionMode,
-                        onApplyBatchAction = viewModel::applyBatchAction
-                    )
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = uiState.isSelectionMode && uiState.currentDestination == AppDestination.FIREWALL,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        val visiblePackages = uiState.filteredApps.map { it.packageName }.toSet()
+                        val allVisibleSelected = visiblePackages.isNotEmpty() &&
+                            visiblePackages.all { it in uiState.selectedPackages }
+
+                        BatchSelectionBar(
+                            selectedCount = uiState.selectedPackages.size,
+                            allVisibleSelected = allVisibleSelected,
+                            onSelectAll = viewModel::selectAllVisible,
+                            onClearSelection = viewModel::clearSelection,
+                            onExitSelection = viewModel::exitSelectionMode,
+                            onApplyBatchAction = viewModel::applyBatchAction
+                        )
+                    }
                 }
             }
+        }
         }
     }
 

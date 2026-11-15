@@ -9,6 +9,7 @@ import com.example.data.model.ActiveNetworkType
 import com.example.data.model.BatchAction
 import com.example.data.model.ManagedApp
 import com.example.data.repository.FirewallRepository
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -37,6 +38,7 @@ class ExampleRobolectricTest {
         repository = FirewallRepository(
             context = context,
             ruleDao = database.appNetworkRuleDao(),
+            trafficUsageDao = database.appTrafficUsageDao(),
             preferences = FirewallPreferences(context)
         )
     }
@@ -89,5 +91,57 @@ class ExampleRobolectricTest {
         assertTrue(wifiOnlyBlocked.isBlockedOn(ActiveNetworkType.WIFI))
         assertFalse(wifiOnlyBlocked.isBlockedOn(ActiveNetworkType.MOBILE_DATA))
         assertFalse(wifiOnlyBlocked.isBlockedOn(ActiveNetworkType.NONE))
+    }
+
+    @Test
+    fun `room join aggregates total data consumed by blocked versus allowed apps`() = runTest {
+        val usageDao = database.appTrafficUsageDao()
+        val now = 1_700_000_000_000L
+
+        usageDao.replaceSnapshot(
+            listOf(
+                com.example.data.local.AppTrafficUsageEntity(
+                    packageName = "com.video.app",
+                    wifiBytes = 600_000_000L,
+                    mobileBytes = 150_000_000L,
+                    periodDays = 7,
+                    syncedAt = now
+                ),
+                com.example.data.local.AppTrafficUsageEntity(
+                    packageName = "com.social.app",
+                    wifiBytes = 100_000_000L,
+                    mobileBytes = 50_000_000L,
+                    periodDays = 7,
+                    syncedAt = now
+                ),
+                com.example.data.local.AppTrafficUsageEntity(
+                    packageName = "com.browser.app",
+                    wifiBytes = 400_000_000L,
+                    mobileBytes = 100_000_000L,
+                    periodDays = 7,
+                    syncedAt = now
+                )
+            )
+        )
+
+        // Block com.video.app on Wi-Fi -> 750 MB blocked, 650 MB allowed
+        repository.setAppRule("com.video.app", blockWifi = true, blockMobileData = false)
+
+        val summaryAfterOneBlock = repository.trafficSummaryFlow.first()
+        assertEquals(750_000_000L, summaryAfterOneBlock.blockedTotalBytes)
+        assertEquals(600_000_000L, summaryAfterOneBlock.blockedWifiBytes)
+        assertEquals(150_000_000L, summaryAfterOneBlock.blockedMobileBytes)
+        assertEquals(650_000_000L, summaryAfterOneBlock.allowedTotalBytes)
+        assertEquals(1, summaryAfterOneBlock.blockedAppsCount)
+        assertEquals(2, summaryAfterOneBlock.allowedAppsCount)
+
+        // Also block com.social.app on Data -> 900 MB blocked, 500 MB allowed
+        repository.setAppRule("com.social.app", blockWifi = false, blockMobileData = true)
+
+        val summaryAfterTwoBlocks = repository.trafficSummaryFlow.first()
+        assertEquals(900_000_000L, summaryAfterTwoBlocks.blockedTotalBytes)
+        assertEquals(500_000_000L, summaryAfterTwoBlocks.allowedTotalBytes)
+        assertEquals(2, summaryAfterTwoBlocks.blockedAppsCount)
+        assertEquals(1, summaryAfterTwoBlocks.allowedAppsCount)
     }
 }
