@@ -1,6 +1,15 @@
 # NetGate
 
-A fast, **root-free** and **banking-safe** per-app Wi-Fi & Mobile Data firewall for Android (built with OnePlus / OxygenOS 16 in mind), letting you select multiple apps at once to block or allow Wi-Fi and Mobile Data instead of toggling them manually one by one in System App Info.
+A fast, **root-free** and **banking-safe** per-app Wi-Fi & Mobile Data firewall for Android (Android 7.0+ / Android 16 ready), letting you select multiple apps at once to block or allow Wi-Fi and Mobile Data instead of toggling them manually one by one in System App Info.
+
+---
+
+## What's New
+
+- **Network Speed Test:** Built-in real-time **Ping**, **Jitter**, **Download (Mbps)**, and **Upload (Mbps)** test with an animated speedometer gauge.
+- **Live Radio & Connection Info:** Simultaneous **Wi-Fi** (`ON • Active` / `ON • Idle` / `OFF`) and **Mobile Data** (`ON • Active` / `ON` / `OFF`) status chips, plus a detailed **Connection & Wi-Fi Info** sheet.
+- **Frosted Glass UI + Material You:** Translucent glassmorphism cards over an atmospheric blurred backdrop, **Material You Dynamic Color** (Android 12+), and **Auto / Day / Night** theme switching.
+- **Banking-Safe Guarantee:** Zero Accessibility services, zero screen overlays, and zero root required.
 
 ---
 
@@ -8,10 +17,9 @@ A fast, **root-free** and **banking-safe** per-app Wi-Fi & Mobile Data firewall 
 
 - **Batch Select & Apply:** Tap **Select** (or long-press any app) to pick multiple apps—or **Select All**—and apply **Block Wi-Fi**, **Block Data**, **Block Both**, or **Allow All** in one tap.
 - **Per-App Wi-Fi & Mobile Data Toggles:** Control Wi-Fi and cellular access independently right from each app row.
-- **Live Radio & Connection Info:**
-  - Real-time **Wi-Fi** (`ON • Active` / `ON • Idle` / `OFF`) and **Mobile Data** (`ON • Active` / `ON` / `OFF`) status chips.
-  - Tappable **Connection & Wi-Fi Info** sheet showing Wi-Fi standard (Wi-Fi 4/5/6/7), frequency band (`2.4 / 5 / 6 GHz`), signal strength (`dBm`), Tx/Rx link speed, interface name, IPv4/IPv6 addresses, gateway, DNS servers, bandwidth estimate, and metered status.
-- **Frosted Glass UI + Material You:** Translucent glassmorphism cards over an atmospheric blurred backdrop, **Material You Dynamic Color** support (Android 12+), and **Auto / Day / Night** theme switching.
+- **Connection & Wi-Fi Telemetry:** View Wi-Fi standard (Wi-Fi 4/5/6/7), frequency band (`2.4 / 5 / 6 GHz`), signal strength (`dBm`), Tx/Rx link speed, interface name, IPv4/IPv6 addresses, gateway, DNS servers, bandwidth estimate, and metered status.
+- **Built-In Speed Test:** Measure Ping, Jitter, Download, and Upload speeds directly on your active Wi-Fi or Mobile Data connection.
+- **Frosted Glass + Material You Themes:** Switch between **Auto**, **Day**, and **Night** modes from the top bar or settings, with optional Material You wallpaper dynamic colors.
 - **Banking-Safe (Zero Accessibility Permissions):** Uses **no** Accessibility Service, **no** screen overlays, and **no** root—so banking and payment apps are never flagged or disrupted.
 - **1-Tap System App Info Shortcut:** Open any app's Android App Info page directly from its detail sheet whenever you want to inspect system data usage settings.
 
@@ -36,6 +44,7 @@ NetGate requests the minimum standard permissions required:
 | Permission / Declaration | Purpose |
 |---|---|
 | `BIND_VPN_SERVICE` | Creates the local on-device firewall tunnel (user consent prompt on first enable) |
+| `INTERNET` | Runs the built-in real network speed test (Ping, Download, Upload) |
 | `ACCESS_NETWORK_STATE` | Detects active Wi-Fi vs. Mobile Data transport and IP/DNS link properties |
 | `ACCESS_WIFI_STATE` | Reads Wi-Fi radio state, band, link speed, and RSSI signal strength |
 | `FOREGROUND_SERVICE` & `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps firewall rules enforced reliably in the background |
