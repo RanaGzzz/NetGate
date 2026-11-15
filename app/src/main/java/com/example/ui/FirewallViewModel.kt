@@ -30,10 +30,14 @@ import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
 import com.example.data.model.ThemeMode
+import com.example.data.network.SpeedTestPhase
+import com.example.data.network.SpeedTestRunner
+import com.example.data.network.SpeedTestState
 import com.example.data.repository.FirewallRepository
 import com.example.service.NetGateVpnService
 import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -58,7 +62,9 @@ data class FirewallUiState(
     val selectedPackages: Set<String> = emptySet(),
     val inspectedAppPackage: String? = null,
     val isSettingsOpen: Boolean = false,
-    val isConnectionInfoOpen: Boolean = false
+    val isConnectionInfoOpen: Boolean = false,
+    val isSpeedTestOpen: Boolean = false,
+    val speedTestState: SpeedTestState = SpeedTestState()
 ) {
     val effectiveNetworkType: ActiveNetworkType
         get() = if (vpnRuntimeState.isServiceRunning && vpnRuntimeState.activeNetworkType != ActiveNetworkType.NONE) {
@@ -99,6 +105,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val inspectedPackageFlow = MutableStateFlow<String?>(null)
     private val isSettingsOpenFlow = MutableStateFlow(false)
     private val isConnectionInfoOpenFlow = MutableStateFlow(false)
+    private val isSpeedTestOpenFlow = MutableStateFlow(false)
+    private val speedTestRunner = SpeedTestRunner()
+    private val speedTestStateFlow = MutableStateFlow(SpeedTestState())
+    private var speedTestJob: Job? = null
     private val connectionDetailsFlow = MutableStateFlow(repository.detectConnectionDetails())
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -183,9 +193,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     private val sheetsFlow = combine(
         isSettingsOpenFlow,
-        isConnectionInfoOpenFlow
-    ) { settingsOpen, connInfoOpen ->
-        settingsOpen to connInfoOpen
+        isConnectionInfoOpenFlow,
+        isSpeedTestOpenFlow,
+        speedTestStateFlow
+    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest ->
+        SheetsSnapshot(settingsOpen, connInfoOpen, speedTestOpen, speedTest)
     }
 
     val uiState: StateFlow<FirewallUiState> = combine(
@@ -193,7 +205,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         uiInteractionFlow,
         connectionDetailsFlow,
         sheetsFlow
-    ) { base, interaction, connDetails, (settingsOpen, connInfoOpen) ->
+    ) { base, interaction, connDetails, sheets ->
         val ruleMap = base.rules.associateBy { it.packageName }
 
         val visibleInstalled = base.installed.filter { app ->
@@ -242,8 +254,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             isSelectionMode = interaction.selectionMode,
             selectedPackages = interaction.selected,
             inspectedAppPackage = interaction.inspected,
-            isSettingsOpen = settingsOpen,
-            isConnectionInfoOpen = connInfoOpen
+            isSettingsOpen = sheets.settingsOpen,
+            isConnectionInfoOpen = sheets.connInfoOpen,
+            isSpeedTestOpen = sheets.speedTestOpen,
+            speedTestState = sheets.speedTestState
         )
     }.stateIn(
         scope = viewModelScope,
@@ -410,6 +424,56 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         isConnectionInfoOpenFlow.value = false
     }
 
+    fun openSpeedTest() {
+        refreshConnectionDetails()
+        isSpeedTestOpenFlow.value = true
+    }
+
+    fun closeSpeedTest() {
+        stopSpeedTest()
+        isSpeedTestOpenFlow.value = false
+    }
+
+    fun startSpeedTest() {
+        refreshConnectionDetails()
+        val netType = connectionDetailsFlow.value.activeNetworkType
+        val netLabel = when (netType) {
+            ActiveNetworkType.WIFI -> "Wi-Fi"
+            ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
+            ActiveNetworkType.OTHER -> "Ethernet / Other"
+            ActiveNetworkType.NONE -> "Offline"
+        }
+
+        if (netType == ActiveNetworkType.NONE) {
+            speedTestStateFlow.value = SpeedTestState(
+                phase = SpeedTestPhase.ERROR,
+                testedNetworkLabel = netLabel,
+                errorMessage = "No active internet connection. Turn on Wi-Fi or Mobile Data first."
+            )
+            return
+        }
+
+        speedTestJob?.cancel()
+        speedTestJob = viewModelScope.launch {
+            speedTestRunner.runTest(netLabel).collect { state ->
+                speedTestStateFlow.value = state
+            }
+        }
+    }
+
+    fun stopSpeedTest() {
+        speedTestJob?.cancel()
+        speedTestJob = null
+        val current = speedTestStateFlow.value
+        if (current.isRunning) {
+            speedTestStateFlow.value = current.copy(
+                phase = SpeedTestPhase.IDLE,
+                progress = 0f,
+                liveSpeedMbps = 0.0
+            )
+        }
+    }
+
     fun setShowOfflineApps(show: Boolean) {
         viewModelScope.launch { preferences.setShowOfflineApps(show) }
     }
@@ -458,6 +522,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val selectionMode: Boolean,
         val selected: Set<String>,
         val inspected: String?
+    )
+
+    private data class SheetsSnapshot(
+        val settingsOpen: Boolean,
+        val connInfoOpen: Boolean,
+        val speedTestOpen: Boolean,
+        val speedTestState: SpeedTestState
     )
 }
 

@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AppFilterMode
 import com.example.data.model.ThemeMode
 import com.example.ui.components.AppDetailBottomSheet
@@ -81,6 +82,7 @@ import com.example.ui.components.FirewallHeaderCard
 import com.example.ui.components.FirewallSettingsSheet
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
+import com.example.ui.components.SpeedTestSheet
 import com.example.ui.theme.LocalIsDarkTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -238,7 +240,8 @@ fun FirewallScreen(
                                     onToggleFirewall = { enable ->
                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                     },
-                                    onOpenConnectionInfo = viewModel::openConnectionInfo
+                                    onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                    onOpenSpeedTest = viewModel::openSpeedTest
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
                                 SearchAndFiltersBlock(
@@ -285,7 +288,8 @@ fun FirewallScreen(
                                             onToggleFirewall = { enable ->
                                                 if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                             },
-                                            onOpenConnectionInfo = viewModel::openConnectionInfo
+                                            onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                            onOpenSpeedTest = viewModel::openSpeedTest
                                         )
                                         Spacer(modifier = Modifier.height(14.dp))
                                         SearchAndFiltersBlock(
@@ -341,6 +345,22 @@ fun FirewallScreen(
             details = uiState.connectionDetails,
             onRefresh = viewModel::refreshConnectionDetails,
             onDismiss = viewModel::closeConnectionInfo
+        )
+    }
+
+    if (uiState.isSpeedTestOpen) {
+        val activeNetLabel = when (uiState.effectiveNetworkType) {
+            ActiveNetworkType.WIFI -> "Wi-Fi"
+            ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
+            ActiveNetworkType.OTHER -> "Ethernet / Other"
+            ActiveNetworkType.NONE -> "Offline"
+        }
+        SpeedTestSheet(
+            state = uiState.speedTestState,
+            activeNetworkLabel = activeNetLabel,
+            onStartTest = viewModel::startSpeedTest,
+            onStopTest = viewModel::stopSpeedTest,
+            onDismiss = viewModel::closeSpeedTest
         )
     }
 

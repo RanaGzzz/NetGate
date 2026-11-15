@@ -144,7 +144,7 @@ fun FirewallSettingsSheet(
                 Spacer(modifier = Modifier.height(10.dp))
                 SettingsSwitchRow(
                     title = "Material You Dynamic Color",
-                    subtitle = "Match your OxygenOS wallpaper palette",
+                    subtitle = "Match your device wallpaper palette",
                     checked = preferences.useDynamicColor,
                     icon = Icons.Rounded.Palette,
                     onCheckedChange = onToggleDynamicColor,
@@ -156,7 +156,7 @@ fun FirewallSettingsSheet(
 
             SettingsSwitchRow(
                 title = "Show System Apps",
-                subtitle = "Include pre-installed OxygenOS & Android apps",
+                subtitle = "Include pre-installed Android system apps",
                 checked = preferences.showSystemApps,
                 onCheckedChange = onToggleShowSystemApps,
                 testTag = "settings_show_system_apps_switch"

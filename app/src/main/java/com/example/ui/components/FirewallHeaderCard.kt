@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SignalCellularOff
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
@@ -61,6 +62,7 @@ fun FirewallHeaderCard(
     activeBlockedNowCount: Int,
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
+    onOpenSpeedTest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -263,51 +265,93 @@ fun FirewallHeaderCard(
                 }
             }
 
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.65f),
-                border = BorderStroke(
-                    1.dp,
-                    if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable(onClick = onOpenConnectionInfo)
-                    .testTag("connection_info_button")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.65f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
+                    ),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .weight(1.45f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenConnectionInfo)
+                        .testTag("connection_info_button")
                 ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 11.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = quickConnectionSummary,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Icon(
-                            imageVector = Icons.Rounded.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = quickConnectionSummary,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = "Open Wi-Fi and connection info",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(17.dp)
                         )
                     }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = "Open Wi-Fi and connection info",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDark) 0.52f else 0.78f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
+                    ),
+                    modifier = Modifier
+                        .weight(0.95f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenSpeedTest)
+                        .testTag("speed_test_button")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Speed,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Speed Test",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
