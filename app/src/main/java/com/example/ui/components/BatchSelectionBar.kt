@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BatchAction
+import com.example.ui.theme.LocalIsDarkTheme
 
 @Composable
 fun BatchSelectionBar(
@@ -46,11 +47,11 @@ fun BatchSelectionBar(
     onApplyBatchAction: (BatchAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val dockTint = if (isDark) {
-        Color(0xFF141F33).copy(alpha = 0.86f)
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f)
     } else {
-        Color.White.copy(alpha = 0.88f)
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)
     }
 
     FrostedSurface(

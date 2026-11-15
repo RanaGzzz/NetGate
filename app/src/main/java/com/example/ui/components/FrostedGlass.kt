@@ -3,7 +3,6 @@ package com.example.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,9 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.ui.theme.DataAccent
-import com.example.ui.theme.EmeraldPrimary
-import com.example.ui.theme.WifiAccent
+import com.example.ui.theme.LocalIsDarkTheme
 
 @Composable
 fun FrostedBackdrop(
@@ -29,25 +26,28 @@ fun FrostedBackdrop(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val baseColor = MaterialTheme.colorScheme.background
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val tertiary = MaterialTheme.colorScheme.tertiary
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(baseColor)
     ) {
-        // Soft blurred atmospheric color orbs so translucent frosted panels have real depth
+        // Blurred dynamic Material You / semantic orbs behind frosted panels
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
                 .blur(64.dp)
         ) {
-            val primaryGlow = if (isFirewallActive) EmeraldPrimary else WifiAccent
+            val primaryGlow = if (isFirewallActive) primary else secondary
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        primaryGlow.copy(alpha = if (isDark) 0.28f else 0.22f),
+                        primaryGlow.copy(alpha = if (isDark) 0.28f else 0.24f),
                         Color.Transparent
                     ),
                     center = Offset(size.width * 0.15f, size.height * 0.14f),
@@ -60,7 +60,7 @@ fun FrostedBackdrop(
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        WifiAccent.copy(alpha = if (isDark) 0.20f else 0.18f),
+                        secondary.copy(alpha = if (isDark) 0.22f else 0.18f),
                         Color.Transparent
                     ),
                     center = Offset(size.width * 0.88f, size.height * 0.34f),
@@ -73,7 +73,7 @@ fun FrostedBackdrop(
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        DataAccent.copy(alpha = if (isDark) 0.20f else 0.16f),
+                        tertiary.copy(alpha = if (isDark) 0.22f else 0.18f),
                         Color.Transparent
                     ),
                     center = Offset(size.width * 0.30f, size.height * 0.84f),
@@ -97,18 +97,18 @@ fun FrostedSurface(
     elevation: Dp = 0.dp,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val glassFill = tintColor ?: if (isDark) {
-        Color(0xFF152033).copy(alpha = 0.62f)
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f)
     } else {
-        Color.White.copy(alpha = 0.68f)
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
     }
 
     val borderBrush = if (borderAccent != null) {
         Brush.linearGradient(
             colors = listOf(
-                borderAccent.copy(alpha = 0.65f),
-                borderAccent.copy(alpha = 0.22f)
+                borderAccent.copy(alpha = 0.68f),
+                borderAccent.copy(alpha = 0.24f)
             )
         )
     } else if (isDark) {
@@ -121,8 +121,8 @@ fun FrostedSurface(
     } else {
         Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.92f),
-                Color(0xFFCBD5E1).copy(alpha = 0.55f)
+                Color.White.copy(alpha = 0.94f),
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
             )
         )
     }
@@ -136,8 +136,8 @@ fun FrostedSurface(
             )
         } else {
             listOf(
-                Color.White.copy(alpha = 0.45f),
-                Color.White.copy(alpha = 0.12f),
+                Color.White.copy(alpha = 0.50f),
+                Color.White.copy(alpha = 0.14f),
                 Color.Transparent
             )
         }

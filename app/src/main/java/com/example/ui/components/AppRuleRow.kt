@@ -47,6 +47,7 @@ import com.example.data.model.ActiveNetworkType
 import com.example.data.model.ManagedApp
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
+import com.example.ui.theme.LocalIsDarkTheme
 import com.example.ui.theme.WifiAccent
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -64,7 +65,7 @@ fun AppRuleRow(
     onRowLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val iconBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = app.packageName) {
         value = loadIcon(app.packageName)
     }
@@ -78,8 +79,8 @@ fun AppRuleRow(
     val glassTint by animateColorAsState(
         targetValue = when {
             isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-            isDark -> Color(0xFF162236).copy(alpha = 0.56f)
-            else -> Color.White.copy(alpha = 0.66f)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.58f)
+            else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
         },
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "rowGlassTint"

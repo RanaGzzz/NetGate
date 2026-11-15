@@ -27,10 +27,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            NetGateTheme {
-                val viewModel: FirewallViewModel = viewModel()
-                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val viewModel: FirewallViewModel = viewModel()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+            NetGateTheme(
+                themeMode = uiState.preferences.themeMode,
+                dynamicColor = uiState.preferences.useDynamicColor
+            ) {
                 val vpnConsentLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
                 ) { result ->
@@ -53,7 +56,6 @@ class MainActivity : ComponentActivity() {
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { _ ->
-                    // Notification permission is optional; proceed to VPN activation either way.
                     launchVpnConsentOrStart()
                 }
 
@@ -73,7 +75,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Auto-resume firewall service if user previously left it enabled and VPN consent persists
                 LaunchedEffect(uiState.preferences.isFirewallEnabled) {
                     if (uiState.preferences.isFirewallEnabled &&
                         !NetGateVpnService.runtimeState.value.isServiceRunning &&

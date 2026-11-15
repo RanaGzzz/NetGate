@@ -22,6 +22,12 @@ enum class BatchAction {
     ALLOW_ALL
 }
 
+enum class ThemeMode(val label: String) {
+    SYSTEM("Auto"),
+    LIGHT("Day"),
+    DARK("Night")
+}
+
 data class InstalledAppInfo(
     val packageName: String,
     val appName: String,
@@ -48,10 +54,37 @@ data class ManagedApp(
     }
 }
 
+data class ConnectionDetails(
+    val activeNetworkType: ActiveNetworkType = ActiveNetworkType.NONE,
+    val isWifiRadioEnabled: Boolean = false,
+    val isWifiConnected: Boolean = false,
+    val isMobileDataEnabled: Boolean = false,
+    val isMobileDataConnected: Boolean = false,
+    val interfaceName: String? = null,
+    val ipv4Address: String? = null,
+    val ipv6Address: String? = null,
+    val gatewayAddress: String? = null,
+    val dnsServers: List<String> = emptyList(),
+    val isMetered: Boolean = false,
+    val isValidated: Boolean = false,
+    val downstreamKbps: Int = 0,
+    val upstreamKbps: Int = 0,
+    // Wi-Fi specific telemetry
+    val wifiRssiDbm: Int? = null,
+    val wifiSignalLabel: String? = null,
+    val wifiLinkSpeedMbps: Int? = null,
+    val wifiRxLinkSpeedMbps: Int? = null,
+    val wifiFrequencyMhz: Int? = null,
+    val wifiBandLabel: String? = null,
+    val wifiStandardLabel: String? = null
+)
+
 data class FirewallPreferencesState(
     val isFirewallEnabled: Boolean = false,
     val showOfflineApps: Boolean = false,
     val showSystemApps: Boolean = true,
     val defaultBlockWifiForNewRules: Boolean = false,
-    val defaultBlockDataForNewRules: Boolean = false
+    val defaultBlockDataForNewRules: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val useDynamicColor: Boolean = true
 )

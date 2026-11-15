@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,13 +12,20 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BrightnessAuto
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -31,12 +39,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.ThemeMode
 import com.example.ui.theme.EmeraldPrimary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FirewallSettingsSheet(
     preferences: FirewallPreferencesState,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onToggleDynamicColor: (Boolean) -> Unit,
     onToggleShowSystemApps: (Boolean) -> Unit,
     onToggleShowOfflineApps: (Boolean) -> Unit,
     onClearAllRules: () -> Unit,
@@ -52,18 +63,96 @@ fun FirewallSettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp)
                 .testTag("firewall_settings_sheet")
         ) {
             Text(
-                text = "Firewall Settings",
+                text = "Appearance & Firewall",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
             Spacer(modifier = Modifier.height(14.dp))
+
+            // Theme Mode: Auto / Day / Night
+            FrostedSurface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Text(
+                        text = "Theme Mode (Day & Night)",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            val selected = preferences.themeMode == mode
+                            val icon = when (mode) {
+                                ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
+                                ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                                ThemeMode.DARK -> Icons.Rounded.DarkMode
+                            }
+                            FilledTonalButton(
+                                onClick = { onThemeModeChange(mode) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = if (selected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
+                                    },
+                                    contentColor = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("theme_mode_${mode.name.lowercase()}")
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = mode.label,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Spacer(modifier = Modifier.height(10.dp))
+                SettingsSwitchRow(
+                    title = "Material You Dynamic Color",
+                    subtitle = "Match your OxygenOS wallpaper palette",
+                    checked = preferences.useDynamicColor,
+                    icon = Icons.Rounded.Palette,
+                    onCheckedChange = onToggleDynamicColor,
+                    testTag = "settings_material_you_switch"
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             SettingsSwitchRow(
                 title = "Show System Apps",
@@ -180,7 +269,8 @@ private fun SettingsSwitchRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    testTag: String
+    testTag: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null
 ) {
     FrostedSurface(
         shape = RoundedCornerShape(16.dp),
@@ -193,17 +283,31 @@ private fun SettingsSwitchRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
+                Column {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Switch(

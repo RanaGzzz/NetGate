@@ -4,7 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.GppGood
-import androidx.compose.material.icons.rounded.PublicOff
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
-import androidx.compose.material.icons.rounded.SignalWifiOff
+import androidx.compose.material.icons.rounded.SignalCellularOff
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,40 +36,46 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ActiveNetworkType
+import com.example.data.model.ConnectionDetails
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.LocalIsDarkTheme
 import com.example.ui.theme.WifiAccent
 
 @Composable
 fun FirewallHeaderCard(
     isFirewallActive: Boolean,
-    activeNetworkType: ActiveNetworkType,
+    connectionDetails: ConnectionDetails,
     totalAppsCount: Int,
     wifiBlockedCount: Int,
     dataBlockedCount: Int,
     activeBlockedNowCount: Int,
     onToggleFirewall: (Boolean) -> Unit,
+    onOpenConnectionInfo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
+    val primaryColor = MaterialTheme.colorScheme.primary
     val accentColor by animateColorAsState(
-        targetValue = if (isFirewallActive) EmeraldPrimary else MaterialTheme.colorScheme.outline,
+        targetValue = if (isFirewallActive) primaryColor else MaterialTheme.colorScheme.outline,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "firewallAccent"
     )
     val glassTint by animateColorAsState(
         targetValue = when {
-            isFirewallActive && isDark -> EmeraldPrimary.copy(alpha = 0.16f)
-            isFirewallActive -> EmeraldPrimary.copy(alpha = 0.12f)
-            isDark -> Color(0xFF162236).copy(alpha = 0.60f)
-            else -> Color.White.copy(alpha = 0.72f)
+            isFirewallActive && isDark -> primaryColor.copy(alpha = 0.16f)
+            isFirewallActive -> primaryColor.copy(alpha = 0.12f)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f)
+            else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
         },
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "firewallGlassTint"
@@ -79,7 +87,7 @@ fun FirewallHeaderCard(
             .testTag("firewall_header_card"),
         shape = RoundedCornerShape(26.dp),
         tintColor = glassTint,
-        borderAccent = if (isFirewallActive) EmeraldPrimary else null
+        borderAccent = if (isFirewallActive) primaryColor else null
     ) {
         Column(
             modifier = Modifier
@@ -98,7 +106,7 @@ fun FirewallHeaderCard(
                     Surface(
                         shape = CircleShape,
                         color = accentColor.copy(alpha = 0.20f),
-                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.40f)),
+                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.42f)),
                         modifier = Modifier.size(48.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -160,15 +168,63 @@ fun FirewallHeaderCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
+            // Live Wi-Fi ON/OFF & Mobile Data ON/OFF radio pills
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NetworkStatusPill(
-                    networkType = activeNetworkType,
-                    modifier = Modifier.weight(1.25f)
+                RadioStatusChip(
+                    label = "Wi-Fi",
+                    stateText = when {
+                        connectionDetails.isWifiConnected -> "ON • Active"
+                        connectionDetails.isWifiRadioEnabled -> "ON • Idle"
+                        else -> "OFF"
+                    },
+                    isOn = connectionDetails.isWifiRadioEnabled,
+                    isActive = connectionDetails.isWifiConnected,
+                    icon = if (connectionDetails.isWifiRadioEnabled) {
+                        Icons.Rounded.Wifi
+                    } else {
+                        Icons.Rounded.WifiOff
+                    },
+                    accent = WifiAccent,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("wifi_radio_status_chip")
                 )
+
+                RadioStatusChip(
+                    label = "Data",
+                    stateText = when {
+                        connectionDetails.isMobileDataConnected &&
+                            connectionDetails.activeNetworkType == ActiveNetworkType.MOBILE_DATA -> "ON • Active"
+                        connectionDetails.isMobileDataConnected || connectionDetails.isMobileDataEnabled -> "ON"
+                        else -> "OFF"
+                    },
+                    isOn = connectionDetails.isMobileDataEnabled || connectionDetails.isMobileDataConnected,
+                    isActive = connectionDetails.isMobileDataConnected &&
+                        connectionDetails.activeNetworkType == ActiveNetworkType.MOBILE_DATA,
+                    icon = if (connectionDetails.isMobileDataEnabled || connectionDetails.isMobileDataConnected) {
+                        Icons.Rounded.SignalCellularAlt
+                    } else {
+                        Icons.Rounded.SignalCellularOff
+                    },
+                    accent = DataAccent,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("data_radio_status_chip")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Blocked App Counters + Tappable Wi-Fi / Connection Info Strip
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 StatMetricPill(
                     label = "Wi-Fi Off",
                     count = wifiBlockedCount,
@@ -181,6 +237,78 @@ fun FirewallHeaderCard(
                     accent = if (dataBlockedCount > 0) BlockedRed else DataAccent,
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val quickConnectionSummary = buildString {
+                when (connectionDetails.activeNetworkType) {
+                    ActiveNetworkType.WIFI -> {
+                        val parts = mutableListOf<String>()
+                        connectionDetails.wifiBandLabel?.let { parts.add(it) }
+                        connectionDetails.wifiLinkSpeedMbps?.let { parts.add("$it Mbps") }
+                        connectionDetails.wifiRssiDbm?.let { parts.add("$it dBm") }
+                        connectionDetails.ipv4Address?.let { parts.add(it) }
+                        if (parts.isEmpty()) append("Wi-Fi connected • Tap for details")
+                        else append(parts.joinToString(" • "))
+                    }
+                    ActiveNetworkType.MOBILE_DATA -> {
+                        val parts = mutableListOf("Mobile Data")
+                        connectionDetails.ipv4Address?.let { parts.add(it) }
+                        if (connectionDetails.isMetered) parts.add("Metered")
+                        append(parts.joinToString(" • "))
+                    }
+                    ActiveNetworkType.OTHER -> append("Active network • Tap for IP & DNS info")
+                    ActiveNetworkType.NONE -> append("Offline • Tap for connection status")
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.65f),
+                border = BorderStroke(
+                    1.dp,
+                    if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenConnectionInfo)
+                    .testTag("connection_info_button")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = quickConnectionSummary,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = "Open Wi-Fi and connection info",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
             if (!isFirewallActive && (wifiBlockedCount > 0 || dataBlockedCount > 0)) {
@@ -196,44 +324,36 @@ fun FirewallHeaderCard(
 }
 
 @Composable
-private fun NetworkStatusPill(
-    networkType: ActiveNetworkType,
+private fun RadioStatusChip(
+    label: String,
+    stateText: String,
+    isOn: Boolean,
+    isActive: Boolean,
+    icon: ImageVector,
+    accent: Color,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
-    val icon: ImageVector
-    val label: String
-    val tint: Color
-    when (networkType) {
-        ActiveNetworkType.WIFI -> {
-            icon = Icons.Rounded.Wifi
-            label = "On Wi-Fi"
-            tint = WifiAccent
-        }
-        ActiveNetworkType.MOBILE_DATA -> {
-            icon = Icons.Rounded.SignalCellularAlt
-            label = "Mobile Data"
-            tint = DataAccent
-        }
-        ActiveNetworkType.OTHER -> {
-            icon = Icons.Rounded.PublicOff
-            label = "Other Net"
-            tint = MaterialTheme.colorScheme.primary
-        }
-        ActiveNetworkType.NONE -> {
-            icon = Icons.Rounded.SignalWifiOff
-            label = "Offline"
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        }
-    }
-
+    val isDark = LocalIsDarkTheme.current
+    val highlight = if (isActive) EmeraldPrimary else accent
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
-        color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.65f),
+        color = if (isOn) {
+            highlight.copy(alpha = if (isDark) 0.16f else 0.14f)
+        } else if (isDark) {
+            Color.White.copy(alpha = 0.06f)
+        } else {
+            Color.White.copy(alpha = 0.55f)
+        },
         border = BorderStroke(
             1.dp,
-            if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
+            if (isOn) {
+                highlight.copy(alpha = 0.45f)
+            } else if (isDark) {
+                Color.White.copy(alpha = 0.12f)
+            } else {
+                Color.White.copy(alpha = 0.80f)
+            }
         )
     ) {
         Row(
@@ -243,16 +363,17 @@ private fun NetworkStatusPill(
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = label,
-                tint = tint,
+                contentDescription = "$label $stateText",
+                tint = if (isOn) highlight else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = label,
+                text = "$label: $stateText",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
+                color = if (isOn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -265,7 +386,7 @@ private fun StatMetricPill(
     accent: Color,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
@@ -276,7 +397,7 @@ private fun StatMetricPill(
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {

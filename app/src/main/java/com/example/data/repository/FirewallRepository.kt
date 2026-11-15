@@ -7,19 +7,28 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.wifi.ScanResult
+import android.net.wifi.WifiInfo
+import android.net.wifi.WifiManager
 import android.os.Build
+import android.provider.Settings
 import com.example.data.local.AppNetworkRuleDao
 import com.example.data.local.AppNetworkRuleEntity
 import com.example.data.local.FirewallPreferences
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.BatchAction
+import com.example.data.model.ConnectionDetails
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.net.Inet4Address
+import java.net.Inet6Address
 
 class FirewallRepository(
     private val context: Context,
@@ -165,17 +174,176 @@ class FirewallRepository(
     }
 
     fun detectCurrentNetworkType(): ActiveNetworkType {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return ActiveNetworkType.NONE
-        val activeNetwork = cm.activeNetwork ?: return ActiveNetworkType.NONE
-        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return ActiveNetworkType.NONE
+        return detectConnectionDetails().activeNetworkType
+    }
 
-        return when {
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> ActiveNetworkType.WIFI
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> ActiveNetworkType.MOBILE_DATA
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> ActiveNetworkType.OTHER
+    fun detectConnectionDetails(): ConnectionDetails {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+
+        val isWifiRadioOn = runCatching { wifiManager?.isWifiEnabled == true }.getOrDefault(false)
+        val isMobileDataSettingOn = runCatching {
+            Settings.Global.getInt(context.contentResolver, "mobile_data", 1) == 1
+        }.getOrDefault(false)
+
+        if (cm == null) {
+            return ConnectionDetails(
+                isWifiRadioEnabled = isWifiRadioOn,
+                isMobileDataEnabled = isMobileDataSettingOn
+            )
+        }
+
+        var wifiNetwork: Network? = null
+        var wifiCaps: NetworkCapabilities? = null
+        var cellNetwork: Network? = null
+        var cellCaps: NetworkCapabilities? = null
+        var otherNetwork: Network? = null
+        var otherCaps: NetworkCapabilities? = null
+
+        @Suppress("DEPRECATION")
+        val allNetworks = runCatching { cm.allNetworks }.getOrDefault(emptyArray())
+        for (net in allNetworks) {
+            val caps = cm.getNetworkCapabilities(net) ?: continue
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> {
+                    wifiNetwork = net
+                    wifiCaps = caps
+                }
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
+                    cellNetwork = net
+                    cellCaps = caps
+                }
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> {
+                    otherNetwork = net
+                    otherCaps = caps
+                }
+            }
+        }
+
+        // Fallback to activeNetwork if it is not our VPN
+        if (wifiNetwork == null && cellNetwork == null && otherNetwork == null) {
+            val active = cm.activeNetwork
+            val caps = active?.let { cm.getNetworkCapabilities(it) }
+            if (active != null && caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
+                when {
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> {
+                        wifiNetwork = active
+                        wifiCaps = caps
+                    }
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
+                        cellNetwork = active
+                        cellCaps = caps
+                    }
+                    else -> {
+                        otherNetwork = active
+                        otherCaps = caps
+                    }
+                }
+            }
+        }
+
+        val activeType = when {
+            wifiNetwork != null -> ActiveNetworkType.WIFI
+            cellNetwork != null -> ActiveNetworkType.MOBILE_DATA
+            otherNetwork != null -> ActiveNetworkType.OTHER
             else -> ActiveNetworkType.NONE
         }
+
+        val primaryNet = wifiNetwork ?: cellNetwork ?: otherNetwork
+        val primaryCaps = wifiCaps ?: cellCaps ?: otherCaps
+        val linkProps: LinkProperties? = primaryNet?.let { runCatching { cm.getLinkProperties(it) }.getOrNull() }
+
+        val ipv4 = linkProps?.linkAddresses
+            ?.firstOrNull { it.address is Inet4Address }
+            ?.address?.hostAddress
+        val ipv6 = linkProps?.linkAddresses
+            ?.firstOrNull { it.address is Inet6Address && !it.address.isLinkLocalAddress }
+            ?.address?.hostAddress
+            ?: linkProps?.linkAddresses?.firstOrNull { it.address is Inet6Address }?.address?.hostAddress
+
+        val gateway = linkProps?.routes
+            ?.firstOrNull { it.isDefaultRoute && it.gateway != null }
+            ?.gateway?.hostAddress
+
+        val dnsServers = linkProps?.dnsServers
+            ?.mapNotNull { it.hostAddress }
+            ?.distinct()
+            .orEmpty()
+
+        val wifiInfo: WifiInfo? = if (wifiNetwork != null) {
+            val transportWifi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                wifiCaps?.transportInfo as? WifiInfo
+            } else {
+                null
+            }
+            @Suppress("DEPRECATION")
+            transportWifi ?: runCatching { wifiManager?.connectionInfo }.getOrNull()
+        } else {
+            null
+        }
+
+        val rssi = wifiInfo?.rssi?.takeIf { it in -120..-1 }
+        val signalLabel = rssi?.let {
+            when {
+                it >= -55 -> "Excellent"
+                it >= -67 -> "Good"
+                it >= -75 -> "Fair"
+                else -> "Weak"
+            }
+        }
+        val freq = wifiInfo?.frequency?.takeIf { it > 0 }
+        val bandLabel = freq?.let {
+            when {
+                it >= 5925 -> "6 GHz"
+                it >= 4900 -> "5 GHz"
+                it >= 2400 -> "2.4 GHz"
+                else -> "$it MHz"
+            }
+        }
+        val linkSpeed = wifiInfo?.linkSpeed?.takeIf { it > 0 }
+        val rxLinkSpeed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            wifiInfo?.rxLinkSpeedMbps?.takeIf { it > 0 }
+        } else {
+            null
+        }
+        val wifiStandardLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wifiInfo != null) {
+            when (wifiInfo.wifiStandard) {
+                ScanResult.WIFI_STANDARD_11BE -> "Wi-Fi 7 (802.11be)"
+                ScanResult.WIFI_STANDARD_11AX -> "Wi-Fi 6 (802.11ax)"
+                ScanResult.WIFI_STANDARD_11AC -> "Wi-Fi 5 (802.11ac)"
+                ScanResult.WIFI_STANDARD_11N -> "Wi-Fi 4 (802.11n)"
+                ScanResult.WIFI_STANDARD_LEGACY -> "Legacy (802.11a/b/g)"
+                else -> null
+            }
+        } else {
+            null
+        }
+
+        return ConnectionDetails(
+            activeNetworkType = activeType,
+            isWifiRadioEnabled = isWifiRadioOn || wifiNetwork != null,
+            isWifiConnected = wifiNetwork != null,
+            isMobileDataEnabled = isMobileDataSettingOn || cellNetwork != null,
+            isMobileDataConnected = cellNetwork != null,
+            interfaceName = linkProps?.interfaceName,
+            ipv4Address = ipv4,
+            ipv6Address = ipv6,
+            gatewayAddress = gateway,
+            dnsServers = dnsServers,
+            isMetered = primaryCaps?.let { !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } ?: false,
+            isValidated = primaryCaps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ?: false,
+            downstreamKbps = primaryCaps?.linkDownstreamBandwidthKbps ?: 0,
+            upstreamKbps = primaryCaps?.linkUpstreamBandwidthKbps ?: 0,
+            wifiRssiDbm = rssi,
+            wifiSignalLabel = signalLabel,
+            wifiLinkSpeedMbps = linkSpeed,
+            wifiRxLinkSpeedMbps = rxLinkSpeed,
+            wifiFrequencyMhz = freq,
+            wifiBandLabel = bandLabel,
+            wifiStandardLabel = wifiStandardLabel
+        )
     }
 
     suspend fun isFirewallEnabledOnce(): Boolean = preferencesFlow.first().isFirewallEnabled

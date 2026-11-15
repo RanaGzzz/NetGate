@@ -50,6 +50,7 @@ import com.example.R
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.ManagedApp
 import com.example.ui.theme.DataAccent
+import com.example.ui.theme.LocalIsDarkTheme
 import com.example.ui.theme.WifiAccent
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,7 +64,7 @@ fun AppDetailBottomSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val iconBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = app.packageName) {
         value = loadIcon(app.packageName)

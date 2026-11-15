@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,9 +33,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.FilterListOff
+import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
@@ -70,13 +72,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.model.AppFilterMode
+import com.example.data.model.ThemeMode
 import com.example.ui.components.AppDetailBottomSheet
 import com.example.ui.components.AppRuleRow
 import com.example.ui.components.BatchSelectionBar
+import com.example.ui.components.ConnectionInfoSheet
 import com.example.ui.components.FirewallHeaderCard
 import com.example.ui.components.FirewallSettingsSheet
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
+import com.example.ui.theme.LocalIsDarkTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,7 +152,7 @@ fun FirewallScreen(
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier
-                                .padding(end = 4.dp)
+                                .padding(end = 2.dp)
                                 .testTag("batch_mode_toggle_button")
                         ) {
                             Icon(
@@ -163,6 +168,20 @@ fun FirewallScreen(
                             Text(
                                 text = if (uiState.isSelectionMode) "Done" else "Select",
                                 style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.cycleThemeMode() },
+                            modifier = Modifier.testTag("theme_cycle_button")
+                        ) {
+                            Icon(
+                                imageVector = when (uiState.preferences.themeMode) {
+                                    ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
+                                    ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                                    ThemeMode.DARK -> Icons.Rounded.DarkMode
+                                },
+                                contentDescription = "Switch Day or Night theme"
                             )
                         }
 
@@ -211,14 +230,15 @@ fun FirewallScreen(
                             ) {
                                 FirewallHeaderCard(
                                     isFirewallActive = isFirewallActive,
-                                    activeNetworkType = uiState.effectiveNetworkType,
+                                    connectionDetails = uiState.connectionDetails,
                                     totalAppsCount = uiState.allManagedApps.size,
                                     wifiBlockedCount = uiState.wifiBlockedCount,
                                     dataBlockedCount = uiState.dataBlockedCount,
                                     activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
                                     onToggleFirewall = { enable ->
                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
-                                    }
+                                    },
+                                    onOpenConnectionInfo = viewModel::openConnectionInfo
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
                                 SearchAndFiltersBlock(
@@ -257,14 +277,15 @@ fun FirewallScreen(
                                     ) {
                                         FirewallHeaderCard(
                                             isFirewallActive = isFirewallActive,
-                                            activeNetworkType = uiState.effectiveNetworkType,
+                                            connectionDetails = uiState.connectionDetails,
                                             totalAppsCount = uiState.allManagedApps.size,
                                             wifiBlockedCount = uiState.wifiBlockedCount,
                                             dataBlockedCount = uiState.dataBlockedCount,
                                             activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
                                             onToggleFirewall = { enable ->
                                                 if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
-                                            }
+                                            },
+                                            onOpenConnectionInfo = viewModel::openConnectionInfo
                                         )
                                         Spacer(modifier = Modifier.height(14.dp))
                                         SearchAndFiltersBlock(
@@ -315,9 +336,19 @@ fun FirewallScreen(
         )
     }
 
+    if (uiState.isConnectionInfoOpen) {
+        ConnectionInfoSheet(
+            details = uiState.connectionDetails,
+            onRefresh = viewModel::refreshConnectionDetails,
+            onDismiss = viewModel::closeConnectionInfo
+        )
+    }
+
     if (uiState.isSettingsOpen) {
         FirewallSettingsSheet(
             preferences = uiState.preferences,
+            onThemeModeChange = viewModel::setThemeMode,
+            onToggleDynamicColor = viewModel::setUseDynamicColor,
             onToggleShowSystemApps = viewModel::setShowSystemApps,
             onToggleShowOfflineApps = viewModel::setShowOfflineApps,
             onClearAllRules = viewModel::clearAllRules,
@@ -332,9 +363,8 @@ private fun SearchAndFiltersBlock(
     onSearchQueryChange: (String) -> Unit,
     onFilterModeChange: (AppFilterMode) -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Frosted glass search field
         FrostedSurface(
             shape = RoundedCornerShape(18.dp),
             modifier = Modifier.fillMaxWidth()
@@ -417,11 +447,11 @@ private fun SearchAndFiltersBlock(
                     shape = RoundedCornerShape(14.dp),
                     colors = FilterChipDefaults.filterChipColors(
                         containerColor = if (isDark) {
-                            Color(0xFF152033).copy(alpha = 0.58f)
+                            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
                         } else {
-                            Color.White.copy(alpha = 0.65f)
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
                         },
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                     ),
                     border = FilterChipDefaults.filterChipBorder(

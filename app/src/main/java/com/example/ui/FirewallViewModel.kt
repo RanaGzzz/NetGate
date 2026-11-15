@@ -1,15 +1,20 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiManager
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -20,9 +25,11 @@ import com.example.data.local.NetGateDatabase
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AppFilterMode
 import com.example.data.model.BatchAction
+import com.example.data.model.ConnectionDetails
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
+import com.example.data.model.ThemeMode
 import com.example.data.repository.FirewallRepository
 import com.example.service.NetGateVpnService
 import com.example.service.VpnRuntimeState
@@ -46,17 +53,18 @@ data class FirewallUiState(
     val filterMode: AppFilterMode = AppFilterMode.ALL,
     val preferences: FirewallPreferencesState = FirewallPreferencesState(),
     val vpnRuntimeState: VpnRuntimeState = VpnRuntimeState(),
-    val deviceNetworkType: ActiveNetworkType = ActiveNetworkType.NONE,
+    val connectionDetails: ConnectionDetails = ConnectionDetails(),
     val isSelectionMode: Boolean = false,
     val selectedPackages: Set<String> = emptySet(),
     val inspectedAppPackage: String? = null,
-    val isSettingsOpen: Boolean = false
+    val isSettingsOpen: Boolean = false,
+    val isConnectionInfoOpen: Boolean = false
 ) {
     val effectiveNetworkType: ActiveNetworkType
-        get() = if (vpnRuntimeState.isServiceRunning) {
+        get() = if (vpnRuntimeState.isServiceRunning && vpnRuntimeState.activeNetworkType != ActiveNetworkType.NONE) {
             vpnRuntimeState.activeNetworkType
         } else {
-            deviceNetworkType
+            connectionDetails.activeNetworkType
         }
 
     val wifiBlockedCount: Int
@@ -90,7 +98,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val selectedPackagesFlow = MutableStateFlow<Set<String>>(emptySet())
     private val inspectedPackageFlow = MutableStateFlow<String?>(null)
     private val isSettingsOpenFlow = MutableStateFlow(false)
-    private val deviceNetworkFlow = MutableStateFlow(repository.detectCurrentNetworkType())
+    private val isConnectionInfoOpenFlow = MutableStateFlow(false)
+    private val connectionDetailsFlow = MutableStateFlow(repository.detectConnectionDetails())
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
@@ -101,18 +110,20 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            deviceNetworkFlow.value = repository.detectCurrentNetworkType()
-        }
+        override fun onAvailable(network: Network) = refreshConnectionDetails()
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) =
+            refreshConnectionDetails()
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) =
+            refreshConnectionDetails()
+        override fun onLost(network: Network) = refreshConnectionDetails()
+    }
 
-        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            deviceNetworkFlow.value = repository.detectCurrentNetworkType()
-        }
-
-        override fun onLost(network: Network) {
-            deviceNetworkFlow.value = repository.detectCurrentNetworkType()
+    private val wifiStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            refreshConnectionDetails()
         }
     }
+    private var wifiReceiverRegistered = false
 
     init {
         refreshInstalledApps()
@@ -120,19 +131,32 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun registerNetworkMonitor() {
-        val cm = connectivityManager ?: return
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-            .build()
+        val cm = connectivityManager
+        if (cm != null) {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build()
+            runCatching {
+                cm.registerNetworkCallback(request, networkCallback)
+            }
+        }
         runCatching {
-            cm.registerNetworkCallback(request, networkCallback)
+            val filter = IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION)
+            getApplication<Application>().registerReceiver(wifiStateReceiver, filter)
+            wifiReceiverRegistered = true
         }
     }
 
     override fun onCleared() {
         runCatching {
             connectivityManager?.unregisterNetworkCallback(networkCallback)
+        }
+        if (wifiReceiverRegistered) {
+            runCatching {
+                getApplication<Application>().unregisterReceiver(wifiStateReceiver)
+            }
+            wifiReceiverRegistered = false
         }
         super.onCleared()
     }
@@ -157,12 +181,19 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         InteractionSnapshot(query, filter, selectionMode, selected, inspected)
     }
 
+    private val sheetsFlow = combine(
+        isSettingsOpenFlow,
+        isConnectionInfoOpenFlow
+    ) { settingsOpen, connInfoOpen ->
+        settingsOpen to connInfoOpen
+    }
+
     val uiState: StateFlow<FirewallUiState> = combine(
         baseDataFlow,
         uiInteractionFlow,
-        deviceNetworkFlow,
-        isSettingsOpenFlow
-    ) { base, interaction, deviceNet, settingsOpen ->
+        connectionDetailsFlow,
+        sheetsFlow
+    ) { base, interaction, connDetails, (settingsOpen, connInfoOpen) ->
         val ruleMap = base.rules.associateBy { it.packageName }
 
         val visibleInstalled = base.installed.filter { app ->
@@ -207,11 +238,12 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             filterMode = interaction.filter,
             preferences = base.prefs,
             vpnRuntimeState = base.vpnState,
-            deviceNetworkType = deviceNet,
+            connectionDetails = connDetails,
             isSelectionMode = interaction.selectionMode,
             selectedPackages = interaction.selected,
             inspectedAppPackage = interaction.inspected,
-            isSettingsOpen = settingsOpen
+            isSettingsOpen = settingsOpen,
+            isConnectionInfoOpen = connInfoOpen
         )
     }.stateIn(
         scope = viewModelScope,
@@ -219,11 +251,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         initialValue = FirewallUiState()
     )
 
+    fun refreshConnectionDetails() {
+        connectionDetailsFlow.value = repository.detectConnectionDetails()
+    }
+
     fun refreshInstalledApps() {
         viewModelScope.launch {
             isLoadingAppsFlow.value = true
             installedAppsFlow.value = repository.getInstalledApps()
             isLoadingAppsFlow.value = false
+            refreshConnectionDetails()
         }
     }
 
@@ -364,12 +401,40 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         isSettingsOpenFlow.value = false
     }
 
+    fun openConnectionInfo() {
+        refreshConnectionDetails()
+        isConnectionInfoOpenFlow.value = true
+    }
+
+    fun closeConnectionInfo() {
+        isConnectionInfoOpenFlow.value = false
+    }
+
     fun setShowOfflineApps(show: Boolean) {
         viewModelScope.launch { preferences.setShowOfflineApps(show) }
     }
 
     fun setShowSystemApps(show: Boolean) {
         viewModelScope.launch { preferences.setShowSystemApps(show) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { preferences.setThemeMode(mode) }
+    }
+
+    fun cycleThemeMode() {
+        val current = uiState.value.preferences.themeMode
+        val next = when (current) {
+            ThemeMode.SYSTEM -> ThemeMode.LIGHT
+            ThemeMode.LIGHT -> ThemeMode.DARK
+            ThemeMode.DARK -> ThemeMode.SYSTEM
+        }
+        setThemeMode(next)
+        _snackbarMessages.tryEmit("Theme: ${next.label}")
+    }
+
+    fun setUseDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { preferences.setUseDynamicColor(enabled) }
     }
 
     fun clearAllRules() {
