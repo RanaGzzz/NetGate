@@ -67,6 +67,8 @@ import com.example.data.model.UsageTimeRange
 import com.example.data.model.formatDataBytes
 import com.example.ui.components.BlockedVsAllowedBarChart
 import com.example.ui.components.FrostedSurface
+import com.example.ui.components.HistoricalTrafficChartCard
+import com.example.ui.components.SentReceivedSummaryCard
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
@@ -81,6 +83,7 @@ fun DataUsageContent(
     onChartModeChange: (UsageChartMode) -> Unit,
     onFilterCategoryChange: (UsageFilterCategory) -> Unit,
     onRefreshUsage: () -> Unit,
+    onClearHistory: () -> Unit,
     onInspectApp: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -123,6 +126,19 @@ fun DataUsageContent(
                                 onGrantClick = { openUsageAccessSettings(context) }
                             )
                         }
+                    }
+                    item(key = "sent_received_card") {
+                        SentReceivedSummaryCard(
+                            summary = state.summary,
+                            periodLabel = state.timeRange.label
+                        )
+                    }
+                    item(key = "historical_chart") {
+                        HistoricalTrafficChartCard(
+                            dailyHistory = state.dailyHistory,
+                            historicalTotals = state.historicalTotals,
+                            onClearHistory = onClearHistory
+                        )
                     }
                     item(key = "bar_chart") {
                         BlockedVsAllowedBarChart(
@@ -224,6 +240,21 @@ fun DataUsageContent(
                                 )
                             }
                         }
+                    }
+
+                    item(key = "sent_received_card") {
+                        SentReceivedSummaryCard(
+                            summary = state.summary,
+                            periodLabel = state.timeRange.label
+                        )
+                    }
+
+                    item(key = "historical_chart") {
+                        HistoricalTrafficChartCard(
+                            dailyHistory = state.dailyHistory,
+                            historicalTotals = state.historicalTotals,
+                            onClearHistory = onClearHistory
+                        )
                     }
 
                     item(key = "bar_chart") {
@@ -669,7 +700,15 @@ private fun AppUsageBreakdownRow(
                         text = "Wi-Fi ${formatDataBytes(item.wifiBytes)} • Data ${formatDataBytes(item.mobileBytes)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "↓ ${formatDataBytes(item.totalRxBytes)} received • ↑ ${formatDataBytes(item.totalTxBytes)} sent",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 

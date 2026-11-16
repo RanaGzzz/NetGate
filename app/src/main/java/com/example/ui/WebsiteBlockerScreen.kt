@@ -579,6 +579,36 @@ private fun WebsiteModeControlCard(
                 }
             }
 
+            if (state.filterMode != WebsiteFilterMode.OFF) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = WifiAccent.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, WifiAccent.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("website_doh_guard_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.GppGood,
+                            contentDescription = null,
+                            tint = WifiAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Chrome & Firefox Anti-DoH + IPv6 Guard active. Close & reopen any already-open browser tabs to clear cached IPs.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -588,6 +618,12 @@ private fun WebsiteModeControlCard(
                         WebsiteFilterMode.OFF -> MaterialTheme.colorScheme.primary
                         WebsiteFilterMode.BLOCKLIST -> BlockedRed
                         WebsiteFilterMode.WHITELIST_ONLY -> EmeraldPrimary
+                    }
+                    val onSelectThisMode = {
+                        onSelectFilterMode(mode)
+                        if (mode != WebsiteFilterMode.OFF && !isFirewallActive) {
+                            onRequestEnableFirewall()
+                        }
                     }
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -607,7 +643,7 @@ private fun WebsiteModeControlCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .clickable { onSelectFilterMode(mode) }
+                            .clickable(onClick = onSelectThisMode)
                             .testTag("website_mode_${mode.name.lowercase()}")
                     ) {
                         Row(
@@ -618,7 +654,7 @@ private fun WebsiteModeControlCard(
                         ) {
                             RadioButton(
                                 selected = selected,
-                                onClick = { onSelectFilterMode(mode) }
+                                onClick = onSelectThisMode
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Column(modifier = Modifier.weight(1f)) {

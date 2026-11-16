@@ -202,11 +202,48 @@ data class DataUsageSummary(
     val allowedTotalBytes: Long = 0L,
     val allowedWifiBytes: Long = 0L,
     val allowedMobileBytes: Long = 0L,
+    val totalWifiRxBytes: Long = 0L,
+    val totalWifiTxBytes: Long = 0L,
+    val totalMobileRxBytes: Long = 0L,
+    val totalMobileTxBytes: Long = 0L,
     val blockedAppsCount: Int = 0,
     val allowedAppsCount: Int = 0,
     val lastSyncedAt: Long = 0L
 ) {
     val grandTotalBytes: Long get() = blockedTotalBytes + allowedTotalBytes
+    val totalRxBytes: Long get() = totalWifiRxBytes + totalMobileRxBytes
+    val totalTxBytes: Long get() = totalWifiTxBytes + totalMobileTxBytes
+    val totalWifiBytes: Long get() = totalWifiRxBytes + totalWifiTxBytes
+    val totalMobileBytes: Long get() = totalMobileRxBytes + totalMobileTxBytes
+}
+
+data class DailyTrafficHistoryPoint(
+    val dateEpochDay: Long,
+    val wifiRxBytes: Long,
+    val wifiTxBytes: Long,
+    val mobileRxBytes: Long,
+    val mobileTxBytes: Long,
+    val appsCount: Int
+) {
+    val wifiBytes: Long get() = wifiRxBytes + wifiTxBytes
+    val mobileBytes: Long get() = mobileRxBytes + mobileTxBytes
+    val rxBytes: Long get() = wifiRxBytes + mobileRxBytes
+    val txBytes: Long get() = wifiTxBytes + mobileTxBytes
+    val totalBytes: Long get() = wifiBytes + mobileBytes
+}
+
+data class HistoricalUsageTotals(
+    val totalWifiRxBytes: Long = 0L,
+    val totalWifiTxBytes: Long = 0L,
+    val totalMobileRxBytes: Long = 0L,
+    val totalMobileTxBytes: Long = 0L,
+    val daysTrackedCount: Int = 0
+) {
+    val totalRxBytes: Long get() = totalWifiRxBytes + totalMobileRxBytes
+    val totalTxBytes: Long get() = totalWifiTxBytes + totalMobileTxBytes
+    val totalWifiBytes: Long get() = totalWifiRxBytes + totalWifiTxBytes
+    val totalMobileBytes: Long get() = totalMobileRxBytes + totalMobileTxBytes
+    val grandTotalBytes: Long get() = totalWifiBytes + totalMobileBytes
 }
 
 data class AppUsageBreakdownItem(
@@ -215,10 +252,16 @@ data class AppUsageBreakdownItem(
     val isSystemApp: Boolean,
     val wifiBytes: Long,
     val mobileBytes: Long,
+    val wifiRxBytes: Long = 0L,
+    val wifiTxBytes: Long = 0L,
+    val mobileRxBytes: Long = 0L,
+    val mobileTxBytes: Long = 0L,
     val blockWifi: Boolean,
     val blockMobileData: Boolean
 ) {
     val totalBytes: Long get() = wifiBytes + mobileBytes
+    val totalRxBytes: Long get() = wifiRxBytes + mobileRxBytes
+    val totalTxBytes: Long get() = wifiTxBytes + mobileTxBytes
     val isBlocked: Boolean get() = blockWifi || blockMobileData
 }
 

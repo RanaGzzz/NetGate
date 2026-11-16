@@ -28,9 +28,11 @@ import com.example.data.model.AppFilterMode
 import com.example.data.model.AppUsageBreakdownItem
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSummary
 import com.example.data.model.DnsProbeState
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
 import com.example.data.model.ThemeMode
@@ -66,6 +68,8 @@ data class DataUsageUiState(
     val filterCategory: UsageFilterCategory = UsageFilterCategory.ALL,
     val summary: DataUsageSummary = DataUsageSummary(),
     val appItems: List<AppUsageBreakdownItem> = emptyList(),
+    val dailyHistory: List<DailyTrafficHistoryPoint> = emptyList(),
+    val historicalTotals: HistoricalUsageTotals = HistoricalUsageTotals(),
     val errorMessage: String? = null
 )
 
@@ -265,15 +269,23 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         UsageControlsSnapshot(hasAccess, syncing, range, chartMode, filterCat)
     }
 
-    private val usageStateFlow = combine(
-        usageControlsFlow,
+    private val usageStatsRepoFlow = combine(
         repository.trafficSummaryFlow,
         repository.trafficUsageWithRulesFlow,
+        repository.dailyTrafficHistoryFlow,
+        repository.historicalTotalsFlow
+    ) { summary, rawRows, dailyHistory, historicalTotals ->
+        UsageRepoSnapshot(summary, rawRows, dailyHistory, historicalTotals)
+    }
+
+    private val usageStateFlow = combine(
+        usageControlsFlow,
+        usageStatsRepoFlow,
         installedAppsFlow,
         usageErrorFlow
-    ) { controls, summary, rawRows, installedApps, errMsg ->
+    ) { controls, repoStats, installedApps, errMsg ->
         val appMetaMap = installedApps.associateBy { it.packageName }
-        val allItems = rawRows.map { row ->
+        val allItems = repoStats.rawRows.map { row ->
             val meta = appMetaMap[row.packageName]
             AppUsageBreakdownItem(
                 packageName = row.packageName,
@@ -281,6 +293,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 isSystemApp = meta?.isSystemApp ?: false,
                 wifiBytes = row.wifiBytes,
                 mobileBytes = row.mobileBytes,
+                wifiRxBytes = row.wifiRxBytes,
+                wifiTxBytes = row.wifiTxBytes,
+                mobileRxBytes = row.mobileRxBytes,
+                mobileTxBytes = row.mobileTxBytes,
                 blockWifi = row.blockWifi,
                 blockMobileData = row.blockMobileData
             )
@@ -296,8 +312,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             timeRange = controls.timeRange,
             chartMode = controls.chartMode,
             filterCategory = controls.filterCategory,
-            summary = summary,
+            summary = repoStats.summary,
             appItems = filteredItems,
+            dailyHistory = repoStats.dailyHistory,
+            historicalTotals = repoStats.historicalTotals,
             errorMessage = errMsg
         )
     }
@@ -446,6 +464,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun setUsageFilterCategory(category: UsageFilterCategory) {
         usageFilterFlow.value = category
+    }
+
+    fun clearTrafficHistory() {
+        viewModelScope.launch {
+            repository.clearTrafficHistory()
+            _snackbarMessages.tryEmit("Cleared Room historical traffic records")
+        }
     }
 
     private suspend fun syncDataUsageInternal(apps: List<InstalledAppInfo>) {
@@ -816,6 +841,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val timeRange: UsageTimeRange,
         val chartMode: UsageChartMode,
         val filterCategory: UsageFilterCategory
+    )
+
+    private data class UsageRepoSnapshot(
+        val summary: DataUsageSummary,
+        val rawRows: List<com.example.data.local.AppTrafficWithRuleTuple>,
+        val dailyHistory: List<DailyTrafficHistoryPoint>,
+        val historicalTotals: HistoricalUsageTotals
     )
 }
 

@@ -419,13 +419,20 @@ class NetGateVpnService : VpnService() {
             updateNotification(addedCount, netType, websiteMode)
         } else {
             // Website Blocklist / Whitelist Lockdown mode:
-            // Intercept DNS traffic via 10.1.10.2:53 while bypassing Selected Allowed Apps.
+            // Dual-stack IPv4 + IPv6 DNS interception plus DoH/DoT resolver routes so Chrome/Firefox cannot bypass.
             val builder = Builder()
                 .setSession(getString(R.string.app_name))
                 .setMtu(1500)
                 .addAddress("10.1.10.1", 32)
                 .addDnsServer(VIRTUAL_DNS_SERVER)
                 .addRoute(VIRTUAL_DNS_SERVER, 32)
+                .addAddress(VIRTUAL_IPV6_ADDR, 128)
+                .addDnsServer(VIRTUAL_IPV6_DNS_SERVER)
+                .addRoute(VIRTUAL_IPV6_DNS_SERVER, 128)
+
+            for ((cidrIp, prefixLen) in DOH_SINKHOLE_ROUTES) {
+                runCatching { builder.addRoute(cidrIp, prefixLen) }
+            }
 
             runCatching { builder.addDisallowedApplication(packageName) }
             for (bypassPkg in effectiveBypass) {
@@ -486,10 +493,20 @@ class NetGateVpnService : VpnService() {
                     if (bytesRead == 0) continue
 
                     val packetCopy = buffer.copyOf(bytesRead)
-                    val query = DnsPacketFilter.parseIpv4UdpDnsQuery(packetCopy, bytesRead) ?: continue
-
-                    serviceScope.launch(Dispatchers.IO) {
-                        handleDnsQuery(query, output)
+                    val query = DnsPacketFilter.parseUdpDnsQuery(packetCopy, bytesRead)
+                    if (query != null) {
+                        serviceScope.launch(Dispatchers.IO) {
+                            handleDnsQuery(query, output)
+                        }
+                    } else {
+                        // Send immediate TCP RST to DoH (443) / DoT (853) connections on routed resolver IPs
+                        // so Chrome & Firefox instantly fall back to NetGate's filtered DNS.
+                        val tcpReset = DnsPacketFilter.buildTcpResetPacket(packetCopy, bytesRead)
+                        if (tcpReset != null) {
+                            synchronized(tunWriteLock) {
+                                runCatching { output.write(tcpReset) }
+                            }
+                        }
                     }
                 }
             }
@@ -513,9 +530,11 @@ class NetGateVpnService : VpnService() {
             synchronized(tunWriteLock) {
                 runCatching { output.write(blockedPacket) }
             }
-            blockedDnsCount.incrementAndGet()
-            recordBlockedDomain(query.domain)
-            publishDnsStatsOnly()
+            if (!DnsPacketFilter.isInternalBypassCanary(query.domain)) {
+                blockedDnsCount.incrementAndGet()
+                recordBlockedDomain(query.domain)
+                publishDnsStatsOnly()
+            }
             return
         }
 
@@ -733,7 +752,55 @@ class NetGateVpnService : VpnService() {
         const val ACTION_RELOAD_RULES = "com.example.service.ACTION_RELOAD_RULES"
 
         private const val VIRTUAL_DNS_SERVER = "10.1.10.2"
-        private val UPSTREAM_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8")
+        private const val VIRTUAL_IPV6_ADDR = "fd00:1:fd00:1:fd00:1:fd00:1"
+        private const val VIRTUAL_IPV6_DNS_SERVER = "fd00:1:fd00:1:fd00:1:fd00:2"
+        private val UPSTREAM_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")
+
+        // Route major public DNS / DoH / DoT resolver IPs through local TUN in Website Filter mode.
+        // TCP 443/853 packets hitting these IPs receive an immediate TCP RST so Chrome/Firefox fall back to UDP/53.
+        private val DOH_SINKHOLE_ROUTES: List<Pair<String, Int>> = listOf(
+            // Cloudflare & Mozilla DoH
+            "1.1.1.1" to 32,
+            "1.0.0.1" to 32,
+            "1.1.1.2" to 32,
+            "1.0.0.2" to 32,
+            "1.1.1.3" to 32,
+            "1.0.0.3" to 32,
+            "104.16.248.249" to 32,
+            "104.16.249.249" to 32,
+            "104.16.132.229" to 32,
+            "104.16.133.229" to 32,
+            // Google Public DNS / DoH
+            "8.8.8.8" to 32,
+            "8.8.4.4" to 32,
+            // Quad9
+            "9.9.9.9" to 32,
+            "9.9.9.10" to 32,
+            "9.9.9.11" to 32,
+            "149.112.112.112" to 32,
+            // OpenDNS
+            "208.67.222.222" to 32,
+            "208.67.220.220" to 32,
+            // AdGuard DNS
+            "94.140.14.14" to 32,
+            "94.140.15.15" to 32,
+            // NextDNS
+            "45.90.28.0" to 24,
+            "45.90.30.0" to 24,
+            // CleanBrowsing
+            "185.228.168.0" to 24,
+            "185.228.169.0" to 24,
+            // IPv6 equivalents
+            "2606:4700:4700::1111" to 128,
+            "2606:4700:4700::1001" to 128,
+            "2606:4700:4700::64" to 128,
+            "2001:4860:4860::8888" to 128,
+            "2001:4860:4860::8844" to 128,
+            "2620:fe::fe" to 128,
+            "2620:fe::9" to 128,
+            "2a10:50c0::ad1:ff" to 128,
+            "2a10:50c0::ad2:ff" to 128
+        )
         private const val MAX_RECENT_BLOCKED_DOMAINS = 8
 
         private const val CHANNEL_ID = "netgate_firewall_channel"

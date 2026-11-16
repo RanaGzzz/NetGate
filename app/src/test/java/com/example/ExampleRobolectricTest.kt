@@ -248,4 +248,128 @@ class ExampleRobolectricTest {
         list = repository.websiteRulesFlow.first()
         assertTrue(list.isEmpty())
     }
+
+    @Test
+    fun `browser doh canary domains are automatically blocked when filter active`() {
+        val rules = emptyList<WebsiteRuleEntity>()
+        assertTrue(DnsPacketFilter.shouldBlockDomain("use-application-dns.net", WebsiteFilterMode.BLOCKLIST, rules))
+        assertTrue(DnsPacketFilter.shouldBlockDomain("_dns.resolver.arpa", WebsiteFilterMode.BLOCKLIST, rules))
+        assertTrue(DnsPacketFilter.shouldBlockDomain("dns.google", WebsiteFilterMode.BLOCKLIST, rules))
+        assertTrue(DnsPacketFilter.shouldBlockDomain("mozilla.cloudflare-dns.com", WebsiteFilterMode.BLOCKLIST, rules))
+        assertFalse(DnsPacketFilter.shouldBlockDomain("use-application-dns.net", WebsiteFilterMode.OFF, rules))
+    }
+
+    @Test
+    fun `dns packet filter parses ipv6 udp query and builds ipv6 nxdomain response`() {
+        val dnsQuery = byteArrayOf(
+            0x56, 0x78, // Tx ID
+            0x01, 0x00, // RD=1
+            0x00, 0x01, // QDCOUNT=1
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x06, 'g'.code.toByte(), 'o'.code.toByte(), 'o'.code.toByte(), 'g'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+            0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+            0x00,
+            0x00, 0x1C, // Type AAAA
+            0x00, 0x01  // Class IN
+        )
+        val udpLen = 8 + dnsQuery.size
+        val packet = ByteArray(40 + udpLen)
+        packet[0] = 0x60.toByte() // IPv6
+        packet[4] = ((udpLen ushr 8) and 0xFF).toByte()
+        packet[5] = (udpLen and 0xFF).toByte()
+        packet[6] = 17 // Next Header UDP
+        packet[7] = 64
+        // Src IPv6 ::1, Dst IPv6 ::2
+        packet[23] = 1
+        packet[39] = 2
+        // Src port 45000, Dst port 53
+        packet[40] = (45000 ushr 8).toByte(); packet[41] = (45000 and 0xFF).toByte()
+        packet[42] = 0; packet[43] = 53
+        packet[44] = (udpLen ushr 8).toByte(); packet[45] = (udpLen and 0xFF).toByte()
+        System.arraycopy(dnsQuery, 0, packet, 48, dnsQuery.size)
+
+        val parsed = DnsPacketFilter.parseUdpDnsQuery(packet, packet.size)
+        assertNotNull(parsed)
+        assertTrue(parsed!!.isIpv6)
+        assertEquals("google.com", parsed.domain)
+
+        val blockedResp = DnsPacketFilter.buildBlockedDnsResponsePacket(parsed)
+        assertEquals(packet.size, blockedResp.size)
+        assertEquals(6, (blockedResp[0].toInt() ushr 4) and 0x0F)
+        assertEquals(53, ((blockedResp[40].toInt() and 0xFF) shl 8) or (blockedResp[41].toInt() and 0xFF))
+        assertEquals(45000, ((blockedResp[42].toInt() and 0xFF) shl 8) or (blockedResp[43].toInt() and 0xFF))
+        assertEquals(0x83.toByte(), blockedResp[48 + 3])
+    }
+
+    @Test
+    fun `tcp reset generator builds immediate rst ack for doh syn attempts`() {
+        val totalLen = 40
+        val synPacket = ByteArray(totalLen)
+        synPacket[0] = 0x45.toByte()
+        synPacket[2] = 0
+        synPacket[3] = totalLen.toByte()
+        synPacket[8] = 64
+        synPacket[9] = 6 // TCP
+        // Src 10.1.10.1 -> Dst 1.1.1.1
+        synPacket[12] = 10; synPacket[13] = 1; synPacket[14] = 10; synPacket[15] = 1
+        synPacket[16] = 1; synPacket[17] = 1; synPacket[18] = 1; synPacket[19] = 1
+        // Src port 51234, Dst port 443
+        synPacket[20] = (51234 ushr 8).toByte(); synPacket[21] = (51234 and 0xFF).toByte()
+        synPacket[22] = (443 ushr 8).toByte(); synPacket[23] = (443 and 0xFF).toByte()
+        // Seq = 100
+        synPacket[27] = 100
+        synPacket[32] = 0x50.toByte() // data offset 20 bytes
+        synPacket[33] = 0x02 // SYN
+
+        val rstPacket = DnsPacketFilter.buildTcpResetPacket(synPacket, totalLen)
+        assertNotNull(rstPacket)
+        assertEquals(40, rstPacket!!.size)
+        assertEquals(443, ((rstPacket[20].toInt() and 0xFF) shl 8) or (rstPacket[21].toInt() and 0xFF))
+        assertEquals(51234, ((rstPacket[22].toInt() and 0xFF) shl 8) or (rstPacket[23].toInt() and 0xFF))
+        // RST + ACK flags = 0x14
+        assertEquals(0x14.toByte(), rstPacket[33])
+        // ACK number = 101 (seq + 1 for SYN)
+        assertEquals(101, rstPacket[31].toInt() and 0xFF)
+    }
+
+    @Test
+    fun `room historical traffic usage persists rx and tx bytes across days`() = runTest {
+        val usageDao = database.appTrafficUsageDao()
+        usageDao.upsertHistoryEntries(
+            listOf(
+                com.example.data.local.AppTrafficHistoryEntity(
+                    dateEpochDay = 20_000L,
+                    packageName = "com.android.chrome",
+                    wifiRxBytes = 50_000_000L,
+                    wifiTxBytes = 10_000_000L,
+                    mobileRxBytes = 15_000_000L,
+                    mobileTxBytes = 5_000_000L,
+                    recordedAt = 1_700_000_000_000L
+                ),
+                com.example.data.local.AppTrafficHistoryEntity(
+                    dateEpochDay = 20_001L,
+                    packageName = "com.android.chrome",
+                    wifiRxBytes = 30_000_000L,
+                    wifiTxBytes = 5_000_000L,
+                    mobileRxBytes = 0L,
+                    mobileTxBytes = 0L,
+                    recordedAt = 1_700_086_400_000L
+                )
+            )
+        )
+
+        val history = repository.dailyTrafficHistoryFlow.first()
+        assertEquals(2, history.size)
+        assertEquals(80_000_000L, history[0].totalBytes)
+        assertEquals(65_000_000L, history[0].rxBytes)
+        assertEquals(15_000_000L, history[0].txBytes)
+
+        val totals = repository.historicalTotalsFlow.first()
+        assertEquals(2, totals.daysTrackedCount)
+        assertEquals(80_000_000L, totals.totalWifiRxBytes)
+        assertEquals(15_000_000L, totals.totalWifiTxBytes)
+        assertEquals(15_000_000L, totals.totalMobileRxBytes)
+        assertEquals(5_000_000L, totals.totalMobileTxBytes)
+        assertEquals(115_000_000L, totals.grandTotalBytes)
+    }
 }

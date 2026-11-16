@@ -8,8 +8,13 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [AppNetworkRuleEntity::class, AppTrafficUsageEntity::class, WebsiteRuleEntity::class],
-    version = 3,
+    entities = [
+        AppNetworkRuleEntity::class,
+        AppTrafficUsageEntity::class,
+        WebsiteRuleEntity::class,
+        AppTrafficHistoryEntity::class
+    ],
+    version = 4,
     exportSchema = false
 )
 abstract class NetGateDatabase : RoomDatabase() {
@@ -54,6 +59,29 @@ abstract class NetGateDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `app_traffic_usage` ADD COLUMN `wifiRxBytes` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `app_traffic_usage` ADD COLUMN `wifiTxBytes` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `app_traffic_usage` ADD COLUMN `mobileRxBytes` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `app_traffic_usage` ADD COLUMN `mobileTxBytes` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_traffic_history` (
+                        `dateEpochDay` INTEGER NOT NULL,
+                        `packageName` TEXT NOT NULL,
+                        `wifiRxBytes` INTEGER NOT NULL,
+                        `wifiTxBytes` INTEGER NOT NULL,
+                        `mobileRxBytes` INTEGER NOT NULL,
+                        `mobileTxBytes` INTEGER NOT NULL,
+                        `recordedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`dateEpochDay`, `packageName`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): NetGateDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -61,7 +89,7 @@ abstract class NetGateDatabase : RoomDatabase() {
                     NetGateDatabase::class.java,
                     "netgate_rules.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { INSTANCE = it }
             }

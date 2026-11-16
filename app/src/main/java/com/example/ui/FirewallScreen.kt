@@ -360,6 +360,7 @@ fun FirewallScreen(
                                 onChartModeChange = viewModel::setUsageChartMode,
                                 onFilterCategoryChange = viewModel::setUsageFilterCategory,
                                 onRefreshUsage = viewModel::refreshDataUsage,
+                                onClearHistory = viewModel::clearTrafficHistory,
                                 onInspectApp = viewModel::openAppDetails
                             )
                         } else if (uiState.currentDestination == AppDestination.WEBSITES) {

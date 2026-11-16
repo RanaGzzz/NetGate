@@ -21,6 +21,7 @@ import android.os.Process
 import android.provider.Settings
 import com.example.data.local.AppNetworkRuleDao
 import com.example.data.local.AppNetworkRuleEntity
+import com.example.data.local.AppTrafficHistoryEntity
 import com.example.data.local.AppTrafficUsageDao
 import com.example.data.local.AppTrafficUsageEntity
 import com.example.data.local.AppTrafficWithRuleTuple
@@ -31,8 +32,10 @@ import com.example.data.local.WebsiteRuleType
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSummary
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.WebsiteRuleItem
 import com.example.service.DnsPacketFilter
@@ -44,6 +47,7 @@ import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.URL
+import java.util.Calendar
 import javax.net.ssl.HttpsURLConnection
 
 class FirewallRepository(
@@ -75,6 +79,10 @@ class FirewallRepository(
                 allowedTotalBytes = tuple.allowedTotalBytes,
                 allowedWifiBytes = tuple.allowedWifiBytes,
                 allowedMobileBytes = tuple.allowedMobileBytes,
+                totalWifiRxBytes = tuple.totalWifiRxBytes,
+                totalWifiTxBytes = tuple.totalWifiTxBytes,
+                totalMobileRxBytes = tuple.totalMobileRxBytes,
+                totalMobileTxBytes = tuple.totalMobileTxBytes,
                 blockedAppsCount = tuple.blockedAppsCount,
                 allowedAppsCount = tuple.allowedAppsCount,
                 lastSyncedAt = tuple.lastSyncedAt
@@ -82,6 +90,31 @@ class FirewallRepository(
         }
     val trafficUsageWithRulesFlow: Flow<List<AppTrafficWithRuleTuple>> =
         trafficUsageDao.observeUsageJoinedWithRules()
+    val dailyTrafficHistoryFlow: Flow<List<DailyTrafficHistoryPoint>> =
+        trafficUsageDao.observeDailyTrafficHistory(limit = 14)
+            .map { rows ->
+                rows.map { row ->
+                    DailyTrafficHistoryPoint(
+                        dateEpochDay = row.dateEpochDay,
+                        wifiRxBytes = row.wifiRxBytes,
+                        wifiTxBytes = row.wifiTxBytes,
+                        mobileRxBytes = row.mobileRxBytes,
+                        mobileTxBytes = row.mobileTxBytes,
+                        appsCount = row.appsCount
+                    )
+                }.sortedBy { it.dateEpochDay }
+            }
+    val historicalTotalsFlow: Flow<HistoricalUsageTotals> =
+        trafficUsageDao.observeHistoricalTotals()
+            .map { tuple ->
+                HistoricalUsageTotals(
+                    totalWifiRxBytes = tuple.totalWifiRxBytes,
+                    totalWifiTxBytes = tuple.totalWifiTxBytes,
+                    totalMobileRxBytes = tuple.totalMobileRxBytes,
+                    totalMobileTxBytes = tuple.totalMobileTxBytes,
+                    daysTrackedCount = tuple.daysTrackedCount
+                )
+            }
 
     suspend fun getAllRulesOnce(): List<AppNetworkRuleEntity> = withContext(Dispatchers.IO) {
         ruleDao.getAllRulesOnce()
@@ -496,6 +529,10 @@ class FirewallRepository(
         }
     }
 
+    suspend fun clearTrafficHistory() {
+        trafficUsageDao.clearHistory()
+    }
+
     suspend fun syncNetworkTrafficUsageToRoom(
         installedApps: List<InstalledAppInfo>,
         periodDays: Int
@@ -511,9 +548,9 @@ class FirewallRepository(
             val startTime = endTime - periodDays.toLong() * 86_400_000L
 
             @Suppress("DEPRECATION")
-            val wifiByUid = queryBytesByUid(nsm, ConnectivityManager.TYPE_WIFI, startTime, endTime)
+            val wifiByUid = queryRxTxByUid(nsm, ConnectivityManager.TYPE_WIFI, startTime, endTime)
             @Suppress("DEPRECATION")
-            val mobileByUid = queryBytesByUid(nsm, ConnectivityManager.TYPE_MOBILE, startTime, endTime)
+            val mobileByUid = queryRxTxByUid(nsm, ConnectivityManager.TYPE_MOBILE, startTime, endTime)
 
             val pm = context.packageManager
             val existingRules = ruleDao.getAllRulesOnce().associateBy { it.packageName }
@@ -536,24 +573,34 @@ class FirewallRepository(
             }
 
             val entities = mutableListOf<AppTrafficUsageEntity>()
+            val primaryPkgByUid = mutableMapOf<Int, String>()
             val syncedAt = System.currentTimeMillis()
             for ((uid, group) in appsByUid) {
-                // Pick the package with an active rule first (or first alphabetically) as primary owner of the UID's bytes.
                 val primaryPkg = group.firstOrNull { app ->
                     val rule = existingRules[app.packageName]
                     rule != null && (rule.blockWifi || rule.blockMobileData)
                 }?.packageName ?: group.first().packageName
+                primaryPkgByUid[uid] = primaryPkg
 
-                val wifiBytes = wifiByUid[uid] ?: 0L
-                val mobileBytes = mobileByUid[uid] ?: 0L
+                val wifiStats = wifiByUid[uid] ?: RxTxBytes()
+                val mobileStats = mobileByUid[uid] ?: RxTxBytes()
 
                 for (app in group) {
                     val isPrimary = app.packageName == primaryPkg
+                    val wRx = if (isPrimary) wifiStats.rxBytes else 0L
+                    val wTx = if (isPrimary) wifiStats.txBytes else 0L
+                    val mRx = if (isPrimary) mobileStats.rxBytes else 0L
+                    val mTx = if (isPrimary) mobileStats.txBytes else 0L
+
                     entities.add(
                         AppTrafficUsageEntity(
                             packageName = app.packageName,
-                            wifiBytes = if (isPrimary) wifiBytes else 0L,
-                            mobileBytes = if (isPrimary) mobileBytes else 0L,
+                            wifiBytes = wRx + wTx,
+                            mobileBytes = mRx + mTx,
+                            wifiRxBytes = wRx,
+                            wifiTxBytes = wTx,
+                            mobileRxBytes = mRx,
+                            mobileTxBytes = mTx,
                             periodDays = periodDays,
                             syncedAt = syncedAt
                         )
@@ -562,6 +609,54 @@ class FirewallRepository(
             }
 
             trafficUsageDao.replaceSnapshot(entities)
+
+            // Also persist per-day historical Rx/Tx records in Room (preserved across syncs).
+            val historyEntries = mutableListOf<AppTrafficHistoryEntity>()
+            val daysToSyncHistory = minOf(periodDays, 7).coerceAtLeast(1)
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val todayMidnightMs = cal.timeInMillis
+            val tzOffsetMs = cal.timeZone.getOffset(syncedAt).toLong()
+
+            for (offset in 0 until daysToSyncHistory) {
+                val dayStart = todayMidnightMs - offset.toLong() * 86_400_000L
+                val dayEnd = if (offset == 0) syncedAt else (dayStart + 86_400_000L - 1L)
+                val epochDay = (dayStart + tzOffsetMs) / 86_400_000L
+
+                @Suppress("DEPRECATION")
+                val dayWifi = queryRxTxByUid(nsm, ConnectivityManager.TYPE_WIFI, dayStart, dayEnd)
+                @Suppress("DEPRECATION")
+                val dayMobile = queryRxTxByUid(nsm, ConnectivityManager.TYPE_MOBILE, dayStart, dayEnd)
+
+                val activeUids = dayWifi.keys + dayMobile.keys
+                for (uid in activeUids) {
+                    val pkg = primaryPkgByUid[uid] ?: continue
+                    val w = dayWifi[uid] ?: RxTxBytes()
+                    val m = dayMobile[uid] ?: RxTxBytes()
+                    if (w.total + m.total > 0L) {
+                        historyEntries.add(
+                            AppTrafficHistoryEntity(
+                                dateEpochDay = epochDay,
+                                packageName = pkg,
+                                wifiRxBytes = w.rxBytes,
+                                wifiTxBytes = w.txBytes,
+                                mobileRxBytes = m.rxBytes,
+                                mobileTxBytes = m.txBytes,
+                                recordedAt = syncedAt
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (historyEntries.isNotEmpty()) {
+                trafficUsageDao.upsertHistoryEntries(historyEntries)
+            }
+
             Result.success(entities.size)
         } catch (se: SecurityException) {
             Result.failure(se)
@@ -570,13 +665,20 @@ class FirewallRepository(
         }
     }
 
-    private fun queryBytesByUid(
+    private data class RxTxBytes(
+        val rxBytes: Long = 0L,
+        val txBytes: Long = 0L
+    ) {
+        val total: Long get() = rxBytes + txBytes
+    }
+
+    private fun queryRxTxByUid(
         nsm: NetworkStatsManager,
         networkType: Int,
         startTime: Long,
         endTime: Long
-    ): Map<Int, Long> {
-        val result = mutableMapOf<Int, Long>()
+    ): Map<Int, RxTxBytes> {
+        val result = mutableMapOf<Int, RxTxBytes>()
         var stats: NetworkStats? = null
         try {
             stats = nsm.querySummary(networkType, null, startTime, endTime)
@@ -584,9 +686,14 @@ class FirewallRepository(
             while (stats.hasNextBucket()) {
                 if (stats.getNextBucket(bucket)) {
                     val uid = bucket.uid
-                    val bytes = (bucket.rxBytes + bucket.txBytes).coerceAtLeast(0L)
-                    if (bytes > 0L) {
-                        result[uid] = (result[uid] ?: 0L) + bytes
+                    val rx = bucket.rxBytes.coerceAtLeast(0L)
+                    val tx = bucket.txBytes.coerceAtLeast(0L)
+                    if (rx > 0L || tx > 0L) {
+                        val prev = result[uid] ?: RxTxBytes()
+                        result[uid] = RxTxBytes(
+                            rxBytes = prev.rxBytes + rx,
+                            txBytes = prev.txBytes + tx
+                        )
                     }
                 }
             }

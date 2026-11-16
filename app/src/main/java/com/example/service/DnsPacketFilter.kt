@@ -7,6 +7,7 @@ import java.net.InetAddress
 
 data class ParsedDnsQuery(
     val domain: String,
+    val isIpv6: Boolean,
     val srcIp: ByteArray,
     val dstIp: ByteArray,
     val srcPort: Int,
@@ -18,6 +19,26 @@ data class ParsedDnsQuery(
 object DnsPacketFilter {
 
     private val LABEL_REGEX = Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+    // Canary & DoH bootstrap domains that browsers (Chrome, Firefox, Safari/WebKit) query
+    // to enable or auto-upgrade DNS-over-HTTPS bypassing local VPN DNS filtering.
+    private val DOH_BYPASS_DOMAINS = setOf(
+        "use-application-dns.net", // Firefox official DoH disable canary (requires NXDOMAIN)
+        "_dns.resolver.arpa",      // RFC 9462 DDR auto-DoH upgrade discovery
+        "dns.google",
+        "dns.google.com",
+        "8888.google",
+        "cloudflare-dns.com",
+        "mozilla.cloudflare-dns.com",
+        "chrome.cloudflare-dns.com",
+        "one.one.one.one",
+        "dns.quad9.net",
+        "doh.opendns.com",
+        "dns.nextdns.io",
+        "dns.adguard-dns.com",
+        "mask.icloud.com",
+        "mask-h2.icloud.com"
+    )
 
     fun normalizeDomainInput(raw: String): String? {
         var cleaned = raw.trim().lowercase()
@@ -47,61 +68,94 @@ object DnsPacketFilter {
         return q == r || q.endsWith(".$r")
     }
 
+    fun isInternalBypassCanary(domain: String): Boolean {
+        return DOH_BYPASS_DOMAINS.any { matchesDomainRule(domain, it) }
+    }
+
     fun shouldBlockDomain(
         domain: String,
         mode: WebsiteFilterMode,
         rules: List<WebsiteRuleEntity>
     ): Boolean {
+        if (mode == WebsiteFilterMode.OFF) return false
+
+        // Always force Firefox / Chrome out of DoH auto-upgrade so they respect NetGate's DNS filter.
+        val normalized = domain.trim().trimEnd('.').lowercase()
+        if (normalized == "use-application-dns.net" || normalized == "_dns.resolver.arpa") {
+            return true
+        }
+
+        val isWhitelisted = rules.any {
+            it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
+                matchesDomainRule(domain, it.domain)
+        }
+        if (isWhitelisted) return false
+
+        if (DOH_BYPASS_DOMAINS.any { matchesDomainRule(domain, it) }) {
+            return true
+        }
+
         return when (mode) {
             WebsiteFilterMode.OFF -> false
             WebsiteFilterMode.BLOCKLIST -> {
-                val isWhitelisted = rules.any {
-                    it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
+                rules.any {
+                    it.isEnabled && it.ruleType == WebsiteRuleType.BLOCK &&
                         matchesDomainRule(domain, it.domain)
                 }
-                if (isWhitelisted) {
-                    false
-                } else {
-                    rules.any {
-                        it.isEnabled && it.ruleType == WebsiteRuleType.BLOCK &&
-                            matchesDomainRule(domain, it.domain)
-                    }
-                }
             }
-            WebsiteFilterMode.WHITELIST_ONLY -> {
-                val isWhitelisted = rules.any {
-                    it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
-                        matchesDomainRule(domain, it.domain)
-                }
-                !isWhitelisted
-            }
+            WebsiteFilterMode.WHITELIST_ONLY -> true
         }
     }
 
     fun parseIpv4UdpDnsQuery(packet: ByteArray, length: Int): ParsedDnsQuery? {
+        return parseUdpDnsQuery(packet, length)
+    }
+
+    fun parseUdpDnsQuery(packet: ByteArray, length: Int): ParsedDnsQuery? {
         if (length < 28) return null
         val version = (packet[0].toInt() ushr 4) and 0x0F
-        if (version != 4) return null
 
-        val ihl = (packet[0].toInt() and 0x0F) * 4
-        if (ihl < 20 || ihl + 8 > length) return null
+        val isIpv6: Boolean
+        val ipHeaderLen: Int
+        val totalLen: Int
+        val srcIp: ByteArray
+        val dstIp: ByteArray
 
-        val totalLen = ((packet[2].toInt() and 0xFF) shl 8) or (packet[3].toInt() and 0xFF)
-        if (totalLen < ihl + 8 || totalLen > length) return null
+        when (version) {
+            4 -> {
+                isIpv6 = false
+                val ihl = (packet[0].toInt() and 0x0F) * 4
+                if (ihl < 20 || ihl + 8 > length) return null
+                totalLen = ((packet[2].toInt() and 0xFF) shl 8) or (packet[3].toInt() and 0xFF)
+                if (totalLen < ihl + 8 || totalLen > length) return null
+                val protocol = packet[9].toInt() and 0xFF
+                if (protocol != 17) return null // UDP
+                ipHeaderLen = ihl
+                srcIp = packet.copyOfRange(12, 16)
+                dstIp = packet.copyOfRange(16, 20)
+            }
+            6 -> {
+                if (length < 48) return null
+                isIpv6 = true
+                ipHeaderLen = 40
+                val payloadLen = ((packet[4].toInt() and 0xFF) shl 8) or (packet[5].toInt() and 0xFF)
+                totalLen = ipHeaderLen + payloadLen
+                if (payloadLen < 8 || totalLen > length) return null
+                val nextHeader = packet[6].toInt() and 0xFF
+                if (nextHeader != 17) return null // UDP directly following IPv6 fixed header
+                srcIp = packet.copyOfRange(8, 24)
+                dstIp = packet.copyOfRange(24, 40)
+            }
+            else -> return null
+        }
 
-        val protocol = packet[9].toInt() and 0xFF
-        if (protocol != 17) return null // UDP only
-
-        val srcIp = packet.copyOfRange(12, 16)
-        val dstIp = packet.copyOfRange(16, 20)
-
-        val srcPort = ((packet[ihl].toInt() and 0xFF) shl 8) or (packet[ihl + 1].toInt() and 0xFF)
-        val dstPort = ((packet[ihl + 2].toInt() and 0xFF) shl 8) or (packet[ihl + 3].toInt() and 0xFF)
+        val srcPort = ((packet[ipHeaderLen].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 1].toInt() and 0xFF)
+        val dstPort = ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 3].toInt() and 0xFF)
         if (dstPort != 53) return null
 
-        val udpLen = ((packet[ihl + 4].toInt() and 0xFF) shl 8) or (packet[ihl + 5].toInt() and 0xFF)
-        val dnsStart = ihl + 8
-        val dnsEnd = (ihl + udpLen).coerceAtMost(totalLen)
+        val udpLen = ((packet[ipHeaderLen + 4].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 5].toInt() and 0xFF)
+        val dnsStart = ipHeaderLen + 8
+        val dnsEnd = (ipHeaderLen + udpLen).coerceAtMost(totalLen)
         if (dnsEnd - dnsStart < 12) return null
 
         val dnsPayload = packet.copyOfRange(dnsStart, dnsEnd)
@@ -117,7 +171,6 @@ object DnsPacketFilter {
             val labelLen = dnsPayload[offset].toInt() and 0xFF
             offset++
             if (labelLen == 0) break
-            // Reject compressed pointer in QNAME header start safely
             if ((labelLen and 0xC0) != 0) return null
             if (offset + labelLen > dnsPayload.size) return null
             labels.add(String(dnsPayload, offset, labelLen, Charsets.US_ASCII))
@@ -130,6 +183,7 @@ object DnsPacketFilter {
 
         return ParsedDnsQuery(
             domain = domain,
+            isIpv6 = isIpv6,
             srcIp = srcIp,
             dstIp = dstIp,
             srcPort = srcPort,
@@ -144,12 +198,9 @@ object DnsPacketFilter {
         val dnsResp = ByteArray(respSize)
         System.arraycopy(query.dnsPayload, 0, dnsResp, 0, respSize)
 
-        // QR = 1 (response), preserve RD bit
         val rdBit = query.dnsPayload[2].toInt() and 0x01
         dnsResp[2] = (0x80 or rdBit).toByte()
-        // RA = 1, RCODE = 3 (NXDOMAIN)
-        dnsResp[3] = 0x83.toByte()
-        // QDCOUNT = 1, ANCOUNT = 0, NSCOUNT = 0, ARCOUNT = 0
+        dnsResp[3] = 0x83.toByte() // RA=1, RCODE=3 (NXDOMAIN)
         dnsResp[4] = 0
         dnsResp[5] = 1
         dnsResp[6] = 0
@@ -163,26 +214,31 @@ object DnsPacketFilter {
     }
 
     fun buildDnsResponsePacket(query: ParsedDnsQuery, dnsResponsePayload: ByteArray): ByteArray {
+        return if (query.isIpv6) {
+            buildIpv6UdpResponsePacket(query, dnsResponsePayload)
+        } else {
+            buildIpv4UdpResponsePacket(query, dnsResponsePayload)
+        }
+    }
+
+    private fun buildIpv4UdpResponsePacket(query: ParsedDnsQuery, dnsResponsePayload: ByteArray): ByteArray {
         val ipHeaderLen = 20
         val udpLen = 8 + dnsResponsePayload.size
         val totalLen = ipHeaderLen + udpLen
         val packet = ByteArray(totalLen)
 
-        // IPv4 Header
-        packet[0] = 0x45.toByte() // Version 4, IHL 5
+        packet[0] = 0x45.toByte()
         packet[1] = 0x00
         packet[2] = ((totalLen ushr 8) and 0xFF).toByte()
         packet[3] = (totalLen and 0xFF).toByte()
         packet[4] = 0x00
         packet[5] = 0x00
-        packet[6] = 0x40.toByte() // Don't Fragment
+        packet[6] = 0x40.toByte()
         packet[7] = 0x00
-        packet[8] = 64.toByte() // TTL
-        packet[9] = 17.toByte() // UDP
-        // Checksum initially 0
+        packet[8] = 64.toByte()
+        packet[9] = 17.toByte()
         packet[10] = 0
         packet[11] = 0
-        // Swap Source <-> Destination IP
         System.arraycopy(query.dstIp, 0, packet, 12, 4)
         System.arraycopy(query.srcIp, 0, packet, 16, 4)
 
@@ -190,7 +246,6 @@ object DnsPacketFilter {
         packet[10] = ((ipChecksum ushr 8) and 0xFF).toByte()
         packet[11] = (ipChecksum and 0xFF).toByte()
 
-        // UDP Header (swap Source <-> Destination port)
         packet[20] = ((query.dstPort ushr 8) and 0xFF).toByte()
         packet[21] = (query.dstPort and 0xFF).toByte()
         packet[22] = ((query.srcPort ushr 8) and 0xFF).toByte()
@@ -202,16 +257,186 @@ object DnsPacketFilter {
 
         System.arraycopy(dnsResponsePayload, 0, packet, 28, dnsResponsePayload.size)
 
-        val udpChecksum = computeUdpChecksum(packet, query.dstIp, query.srcIp, udpLen)
+        val udpChecksum = computeTransportChecksum(
+            packet = packet,
+            transportOffset = ipHeaderLen,
+            transportLen = udpLen,
+            srcIp = query.dstIp,
+            dstIp = query.srcIp,
+            protocol = 17,
+            isUdp = true
+        )
         packet[26] = ((udpChecksum ushr 8) and 0xFF).toByte()
         packet[27] = (udpChecksum and 0xFF).toByte()
 
         return packet
     }
 
+    private fun buildIpv6UdpResponsePacket(query: ParsedDnsQuery, dnsResponsePayload: ByteArray): ByteArray {
+        val ipHeaderLen = 40
+        val udpLen = 8 + dnsResponsePayload.size
+        val totalLen = ipHeaderLen + udpLen
+        val packet = ByteArray(totalLen)
+
+        packet[0] = 0x60.toByte() // Version 6
+        packet[4] = ((udpLen ushr 8) and 0xFF).toByte()
+        packet[5] = (udpLen and 0xFF).toByte()
+        packet[6] = 17.toByte() // Next Header: UDP
+        packet[7] = 64.toByte() // Hop Limit
+        System.arraycopy(query.dstIp, 0, packet, 8, 16)
+        System.arraycopy(query.srcIp, 0, packet, 24, 16)
+
+        packet[40] = ((query.dstPort ushr 8) and 0xFF).toByte()
+        packet[41] = (query.dstPort and 0xFF).toByte()
+        packet[42] = ((query.srcPort ushr 8) and 0xFF).toByte()
+        packet[43] = (query.srcPort and 0xFF).toByte()
+        packet[44] = ((udpLen ushr 8) and 0xFF).toByte()
+        packet[45] = (udpLen and 0xFF).toByte()
+        packet[46] = 0
+        packet[47] = 0
+
+        System.arraycopy(dnsResponsePayload, 0, packet, 48, dnsResponsePayload.size)
+
+        val udpChecksum = computeTransportChecksum(
+            packet = packet,
+            transportOffset = ipHeaderLen,
+            transportLen = udpLen,
+            srcIp = query.dstIp,
+            dstIp = query.srcIp,
+            protocol = 17,
+            isUdp = true
+        )
+        packet[46] = ((udpChecksum ushr 8) and 0xFF).toByte()
+        packet[47] = (udpChecksum and 0xFF).toByte()
+
+        return packet
+    }
+
+    /**
+     * Builds an immediate TCP RST/RST-ACK packet when a browser attempts DoH (port 443) or
+     * DoT (port 853) to a routed DNS resolver IP, forcing instant fallback to NetGate's OS DNS.
+     */
+    fun buildTcpResetPacket(packet: ByteArray, length: Int): ByteArray? {
+        if (length < 40) return null
+        val version = (packet[0].toInt() ushr 4) and 0x0F
+
+        val isIpv6: Boolean
+        val ipHeaderLen: Int
+        val totalLen: Int
+        val srcIp: ByteArray
+        val dstIp: ByteArray
+
+        when (version) {
+            4 -> {
+                isIpv6 = false
+                val ihl = (packet[0].toInt() and 0x0F) * 4
+                if (ihl < 20 || ihl + 20 > length) return null
+                totalLen = ((packet[2].toInt() and 0xFF) shl 8) or (packet[3].toInt() and 0xFF)
+                if (totalLen < ihl + 20 || totalLen > length) return null
+                if ((packet[9].toInt() and 0xFF) != 6) return null // TCP
+                ipHeaderLen = ihl
+                srcIp = packet.copyOfRange(12, 16)
+                dstIp = packet.copyOfRange(16, 20)
+            }
+            6 -> {
+                if (length < 60) return null
+                isIpv6 = true
+                ipHeaderLen = 40
+                val payloadLen = ((packet[4].toInt() and 0xFF) shl 8) or (packet[5].toInt() and 0xFF)
+                totalLen = ipHeaderLen + payloadLen
+                if (payloadLen < 20 || totalLen > length) return null
+                if ((packet[6].toInt() and 0xFF) != 6) return null // TCP
+                srcIp = packet.copyOfRange(8, 24)
+                dstIp = packet.copyOfRange(24, 40)
+            }
+            else -> return null
+        }
+
+        val tcpFlags = packet[ipHeaderLen + 13].toInt() and 0xFF
+        if ((tcpFlags and 0x04) != 0) return null // Never send RST in response to RST
+
+        val srcPort = ((packet[ipHeaderLen].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 1].toInt() and 0xFF)
+        val dstPort = ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 3].toInt() and 0xFF)
+        val seqNum = readUInt32(packet, ipHeaderLen + 4)
+        val ackNum = readUInt32(packet, ipHeaderLen + 8)
+        val dataOffsetBytes = ((packet[ipHeaderLen + 12].toInt() ushr 4) and 0x0F) * 4
+        if (dataOffsetBytes < 20 || ipHeaderLen + dataOffsetBytes > totalLen) return null
+        val tcpPayloadLen = (totalLen - ipHeaderLen - dataOffsetBytes).coerceAtLeast(0)
+
+        val isSyn = (tcpFlags and 0x02) != 0
+        val isAck = (tcpFlags and 0x10) != 0
+        val respFlags = if (isAck && !isSyn) 0x04 else 0x14 // RST or RST+ACK
+        val respSeq = if (isAck && !isSyn) ackNum else 0L
+        val respAck = if (isAck && !isSyn) 0L else (seqNum + tcpPayloadLen + if (isSyn) 1L else 0L) and 0xFFFFFFFFL
+
+        val outIpLen = if (isIpv6) 40 else 20
+        val tcpLen = 20
+        val outPacket = ByteArray(outIpLen + tcpLen)
+
+        if (isIpv6) {
+            outPacket[0] = 0x60.toByte()
+            outPacket[4] = 0
+            outPacket[5] = tcpLen.toByte()
+            outPacket[6] = 6.toByte()
+            outPacket[7] = 64.toByte()
+            System.arraycopy(dstIp, 0, outPacket, 8, 16)
+            System.arraycopy(srcIp, 0, outPacket, 24, 16)
+        } else {
+            val outTotal = outIpLen + tcpLen
+            outPacket[0] = 0x45.toByte()
+            outPacket[2] = ((outTotal ushr 8) and 0xFF).toByte()
+            outPacket[3] = (outTotal and 0xFF).toByte()
+            outPacket[6] = 0x40.toByte()
+            outPacket[8] = 64.toByte()
+            outPacket[9] = 6.toByte()
+            System.arraycopy(dstIp, 0, outPacket, 12, 4)
+            System.arraycopy(srcIp, 0, outPacket, 16, 4)
+            val ipCs = computeChecksum(outPacket, 0, 20)
+            outPacket[10] = ((ipCs ushr 8) and 0xFF).toByte()
+            outPacket[11] = (ipCs and 0xFF).toByte()
+        }
+
+        outPacket[outIpLen] = ((dstPort ushr 8) and 0xFF).toByte()
+        outPacket[outIpLen + 1] = (dstPort and 0xFF).toByte()
+        outPacket[outIpLen + 2] = ((srcPort ushr 8) and 0xFF).toByte()
+        outPacket[outIpLen + 3] = (srcPort and 0xFF).toByte()
+        writeUInt32(outPacket, outIpLen + 4, respSeq)
+        writeUInt32(outPacket, outIpLen + 8, respAck)
+        outPacket[outIpLen + 12] = 0x50.toByte() // 20-byte TCP header
+        outPacket[outIpLen + 13] = respFlags.toByte()
+
+        val tcpChecksum = computeTransportChecksum(
+            packet = outPacket,
+            transportOffset = outIpLen,
+            transportLen = tcpLen,
+            srcIp = dstIp,
+            dstIp = srcIp,
+            protocol = 6,
+            isUdp = false
+        )
+        outPacket[outIpLen + 16] = ((tcpChecksum ushr 8) and 0xFF).toByte()
+        outPacket[outIpLen + 17] = (tcpChecksum and 0xFF).toByte()
+
+        return outPacket
+    }
+
     fun ipBytesToInetAddress(ip: ByteArray): InetAddress? = runCatching {
         InetAddress.getByAddress(ip)
     }.getOrNull()
+
+    private fun readUInt32(buf: ByteArray, offset: Int): Long {
+        return ((buf[offset].toLong() and 0xFF) shl 24) or
+            ((buf[offset + 1].toLong() and 0xFF) shl 16) or
+            ((buf[offset + 2].toLong() and 0xFF) shl 8) or
+            (buf[offset + 3].toLong() and 0xFF)
+    }
+
+    private fun writeUInt32(buf: ByteArray, offset: Int, value: Long) {
+        buf[offset] = ((value ushr 24) and 0xFF).toByte()
+        buf[offset + 1] = ((value ushr 16) and 0xFF).toByte()
+        buf[offset + 2] = ((value ushr 8) and 0xFF).toByte()
+        buf[offset + 3] = (value and 0xFF).toByte()
+    }
 
     private fun computeChecksum(buf: ByteArray, offset: Int, len: Int): Int {
         var sum = 0L
@@ -231,24 +456,25 @@ object DnsPacketFilter {
         return (sum.inv() and 0xFFFFL).toInt()
     }
 
-    private fun computeUdpChecksum(
+    private fun computeTransportChecksum(
         packet: ByteArray,
+        transportOffset: Int,
+        transportLen: Int,
         srcIp: ByteArray,
         dstIp: ByteArray,
-        udpLen: Int
+        protocol: Int,
+        isUdp: Boolean
     ): Int {
         var sum = 0L
-        // Pseudo-header: srcIp (4), dstIp (4), zero+proto (2), udpLen (2)
-        for (i in 0 until 4 step 2) {
+        for (i in srcIp.indices step 2) {
             sum += ((srcIp[i].toInt() and 0xFF) shl 8) or (srcIp[i + 1].toInt() and 0xFF)
             sum += ((dstIp[i].toInt() and 0xFF) shl 8) or (dstIp[i + 1].toInt() and 0xFF)
         }
-        sum += 17L // Protocol UDP
-        sum += udpLen.toLong()
+        sum += protocol.toLong()
+        sum += transportLen.toLong()
 
-        // UDP header + payload
-        var i = 20
-        val end = 20 + udpLen
+        var i = transportOffset
+        val end = transportOffset + transportLen
         while (i + 1 < end) {
             val word = ((packet[i].toInt() and 0xFF) shl 8) or (packet[i + 1].toInt() and 0xFF)
             sum += word
@@ -261,6 +487,6 @@ object DnsPacketFilter {
             sum = (sum and 0xFFFFL) + (sum ushr 16)
         }
         val result = (sum.inv() and 0xFFFFL).toInt()
-        return if (result == 0) 0xFFFF else result
+        return if (isUdp && result == 0) 0xFFFF else result
     }
 }
