@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Android
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SignalCellularOff
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Checkbox
@@ -45,9 +46,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.ManagedApp
+import com.example.data.model.formatCountdownTimer
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.LocalIsDarkTheme
+import com.example.ui.theme.WarningAmber
 import com.example.ui.theme.WifiAccent
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -58,6 +61,7 @@ fun AppRuleRow(
     isFirewallActive: Boolean,
     isSelectionMode: Boolean,
     isSelected: Boolean,
+    nowMillis: Long = System.currentTimeMillis(),
     loadIcon: suspend (String) -> ImageBitmap?,
     onToggleWifi: () -> Unit,
     onToggleData: () -> Unit,
@@ -71,9 +75,11 @@ fun AppRuleRow(
     }
 
     val isBlockedRightNow = isFirewallActive && app.isBlockedOn(activeNetworkType)
+    val activeTimer = app.activeTimer
     val borderAccent = when {
         isSelected -> MaterialTheme.colorScheme.primary
         isBlockedRightNow -> BlockedRed
+        activeTimer != null -> WarningAmber
         else -> null
     }
     val glassTint by animateColorAsState(
@@ -179,6 +185,38 @@ fun AppRuleRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
+                if (activeTimer != null) {
+                    val remaining = activeTimer.remainingMillis(nowMillis)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = WarningAmber.copy(alpha = 0.16f),
+                        border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .testTag("app_timer_badge_${app.packageName}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Timer,
+                                contentDescription = null,
+                                tint = WarningAmber,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "${formatCountdownTimer(remaining)} → ${activeTimer.targetLabel()} Off",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = WarningAmber,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))

@@ -21,6 +21,8 @@ import android.os.Process
 import android.provider.Settings
 import com.example.data.local.AppNetworkRuleDao
 import com.example.data.local.AppNetworkRuleEntity
+import com.example.data.local.AppTimerDao
+import com.example.data.local.AppTimerEntity
 import com.example.data.local.AppTrafficHistoryEntity
 import com.example.data.local.AppTrafficUsageDao
 import com.example.data.local.AppTrafficUsageEntity
@@ -30,6 +32,7 @@ import com.example.data.local.WebsiteRuleDao
 import com.example.data.local.WebsiteRuleEntity
 import com.example.data.local.WebsiteRuleType
 import com.example.data.model.ActiveNetworkType
+import com.example.data.model.AppCountdownTimer
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DailyTrafficHistoryPoint
@@ -38,6 +41,7 @@ import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.WebsiteRuleItem
+import com.example.service.AppTimerScheduler
 import com.example.service.DnsPacketFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -55,9 +59,23 @@ class FirewallRepository(
     private val ruleDao: AppNetworkRuleDao,
     private val trafficUsageDao: AppTrafficUsageDao,
     private val websiteRuleDao: WebsiteRuleDao,
+    private val appTimerDao: AppTimerDao,
     val preferences: FirewallPreferences
 ) {
     val rulesFlow: Flow<List<AppNetworkRuleEntity>> = ruleDao.observeAllRules()
+    val appTimersFlow: Flow<List<AppCountdownTimer>> = appTimerDao.observeAllTimers()
+        .map { entities ->
+            entities.map { entity ->
+                AppCountdownTimer(
+                    packageName = entity.packageName,
+                    blockWifiOnExpire = entity.blockWifiOnExpire,
+                    blockMobileDataOnExpire = entity.blockMobileDataOnExpire,
+                    durationMillis = entity.durationMillis,
+                    expiresAtMillis = entity.expiresAtMillis,
+                    createdAtMillis = entity.createdAtMillis
+                )
+            }
+        }
     val preferencesFlow: Flow<FirewallPreferencesState> = preferences.preferencesFlow
     val websiteRulesFlow: Flow<List<WebsiteRuleItem>> = websiteRuleDao.observeAllRules()
         .map { entities ->
@@ -249,6 +267,45 @@ class FirewallRepository(
 
     suspend fun clearAllRules() {
         ruleDao.clearAllRules()
+    }
+
+    suspend fun scheduleAppTimer(
+        packageName: String,
+        durationMinutes: Int,
+        blockWifiOnExpire: Boolean,
+        blockMobileDataOnExpire: Boolean,
+        nowMillis: Long = System.currentTimeMillis()
+    ) {
+        if ((!blockWifiOnExpire && !blockMobileDataOnExpire) || durationMinutes <= 0) return
+        val durationMs = durationMinutes.toLong() * 60_000L
+        appTimerDao.upsertTimer(
+            AppTimerEntity(
+                packageName = packageName,
+                blockWifiOnExpire = blockWifiOnExpire,
+                blockMobileDataOnExpire = blockMobileDataOnExpire,
+                durationMillis = durationMs,
+                expiresAtMillis = nowMillis + durationMs,
+                createdAtMillis = nowMillis
+            )
+        )
+        runCatching { AppTimerScheduler.scheduleNextAlarm(context) }
+    }
+
+    suspend fun cancelAppTimer(packageName: String) {
+        appTimerDao.deleteTimer(packageName)
+        runCatching { AppTimerScheduler.scheduleNextAlarm(context) }
+    }
+
+    suspend fun processDueTimers(nowMillis: Long = System.currentTimeMillis()): List<String> {
+        val expired = AppTimerScheduler.processDueTimersWithDaos(
+            ruleDao = ruleDao,
+            timerDao = appTimerDao,
+            nowMillis = nowMillis
+        )
+        if (expired.isNotEmpty()) {
+            runCatching { AppTimerScheduler.scheduleNextAlarm(context) }
+        }
+        return expired
     }
 
     suspend fun addWebsiteRule(rawDomain: String, isWhitelist: Boolean): Result<String> {

@@ -536,9 +536,19 @@ fun FirewallScreen(
             app = inspected,
             activeNetworkType = uiState.effectiveNetworkType,
             isFirewallActive = isFirewallActive,
+            nowMillis = uiState.nowMillis,
             loadIcon = viewModel::getAppIconBitmap,
             onUpdateRule = { blockWifi, blockData ->
                 viewModel.setAppRules(inspected.packageName, blockWifi, blockData)
+            },
+            onScheduleTimer = { durationMinutes, target ->
+                viewModel.scheduleAppTimer(inspected.packageName, durationMinutes, target)
+                if (!isFirewallActive) {
+                    onRequestEnableFirewall()
+                }
+            },
+            onCancelTimer = {
+                viewModel.cancelAppTimer(inspected.packageName)
             },
             onDismiss = viewModel::closeAppDetails
         )
@@ -641,6 +651,7 @@ private fun SearchAndFiltersBlock(
                     AppFilterMode.WIFI_BLOCKED -> uiState.wifiBlockedCount
                     AppFilterMode.DATA_BLOCKED -> uiState.dataBlockedCount
                     AppFilterMode.ALLOWED -> uiState.allManagedApps.size - uiState.anyRestrictedCount
+                    AppFilterMode.TIMERS -> uiState.activeTimersCount
                 }
                 val selected = uiState.filterMode == mode
                 FilterChip(
@@ -683,7 +694,7 @@ private fun SearchAndFiltersBlock(
             text = if (uiState.isSelectionMode) {
                 "Tap apps to select, then apply Wi-Fi or Data rules below."
             } else {
-                "Tap Wi-Fi / Data to toggle, or long-press an app for batch select."
+                "Tap an app for Countdown Timer, or tap Wi-Fi / Data to toggle."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -757,6 +768,7 @@ private fun AppsCollectionContent(
                         isFirewallActive = isFirewallActive,
                         isSelectionMode = uiState.isSelectionMode,
                         isSelected = app.packageName in uiState.selectedPackages,
+                        nowMillis = uiState.nowMillis,
                         loadIcon = viewModel::getAppIconBitmap,
                         onToggleWifi = { viewModel.toggleWifiBlock(app) },
                         onToggleData = { viewModel.toggleDataBlock(app) },
@@ -821,6 +833,7 @@ private fun AppsCollectionContent(
                         isFirewallActive = isFirewallActive,
                         isSelectionMode = uiState.isSelectionMode,
                         isSelected = app.packageName in uiState.selectedPackages,
+                        nowMillis = uiState.nowMillis,
                         loadIcon = viewModel::getAppIconBitmap,
                         onToggleWifi = { viewModel.toggleWifiBlock(app) },
                         onToggleData = { viewModel.toggleDataBlock(app) },

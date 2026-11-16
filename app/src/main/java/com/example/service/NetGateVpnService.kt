@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +68,7 @@ class NetGateVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var drainJob: Job? = null
     private var rulesJob: Job? = null
+    private var timerJob: Job? = null
 
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallbackRegistered = false
@@ -125,6 +127,7 @@ class NetGateVpnService : VpnService() {
         createNotificationChannel()
         registerPhysicalNetworkCallback()
         observeRules()
+        observeTimers()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -167,11 +170,26 @@ class NetGateVpnService : VpnService() {
     override fun onDestroy() {
         unregisterPhysicalNetworkCallback()
         rulesJob?.cancel()
+        timerJob?.cancel()
         drainJob?.cancel()
         closeVpnInterface()
         _runtimeState.value = VpnRuntimeState()
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun observeTimers() {
+        val db = NetGateDatabase.getInstance(applicationContext)
+        timerJob = serviceScope.launch {
+            AppTimerScheduler.processDueTimers(applicationContext)
+            db.appTimerDao().observeAllTimers().collectLatest { timers ->
+                if (timers.isEmpty()) return@collectLatest
+                val nextExpiry = timers.minOf { it.expiresAtMillis }
+                val waitMs = (nextExpiry - System.currentTimeMillis()).coerceAtLeast(25L)
+                delay(waitMs)
+                AppTimerScheduler.processDueTimers(applicationContext)
+            }
+        }
     }
 
     private fun observeRules() {

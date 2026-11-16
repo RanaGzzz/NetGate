@@ -33,9 +33,11 @@ import com.example.data.model.DataUsageSummary
 import com.example.data.model.DnsProbeState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
+import com.example.data.model.AppCountdownTimer
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
 import com.example.data.model.ThemeMode
+import com.example.data.model.TimerTargetNetwork
 import com.example.data.model.UsageChartMode
 import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
@@ -49,14 +51,17 @@ import com.example.service.NetGateVpnService
 import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -103,7 +108,8 @@ data class FirewallUiState(
     val isSpeedTestOpen: Boolean = false,
     val speedTestState: SpeedTestState = SpeedTestState(),
     val dataUsageState: DataUsageUiState = DataUsageUiState(),
-    val websiteBlockerState: WebsiteBlockerUiState = WebsiteBlockerUiState()
+    val websiteBlockerState: WebsiteBlockerUiState = WebsiteBlockerUiState(),
+    val nowMillis: Long = System.currentTimeMillis()
 ) {
     val effectiveNetworkType: ActiveNetworkType
         get() = if (vpnRuntimeState.isServiceRunning && vpnRuntimeState.activeNetworkType != ActiveNetworkType.NONE) {
@@ -121,6 +127,9 @@ data class FirewallUiState(
     val anyRestrictedCount: Int
         get() = allManagedApps.count { it.isAnyBlocked }
 
+    val activeTimersCount: Int
+        get() = allManagedApps.count { it.activeTimer != null }
+
     val inspectedApp: ManagedApp?
         get() = inspectedAppPackage?.let { pkg -> allManagedApps.find { it.packageName == pkg } }
 }
@@ -134,8 +143,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         ruleDao = database.appNetworkRuleDao(),
         trafficUsageDao = database.appTrafficUsageDao(),
         websiteRuleDao = database.websiteRuleDao(),
+        appTimerDao = database.appTimerDao(),
         preferences = preferences
     )
+
+    private val nowMillisFlow = MutableStateFlow(System.currentTimeMillis())
 
     private val currentDestinationFlow = MutableStateFlow(AppDestination.FIREWALL)
     private val installedAppsFlow = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
@@ -189,6 +201,31 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     init {
         refreshInstalledApps()
         registerNetworkMonitor()
+        observeActiveTimerTicker()
+    }
+
+    private fun observeActiveTimerTicker() {
+        viewModelScope.launch {
+            repository.processDueTimers()
+            repository.appTimersFlow.collectLatest { timers ->
+                if (timers.isEmpty()) return@collectLatest
+                while (isActive) {
+                    val now = System.currentTimeMillis()
+                    nowMillisFlow.value = now
+                    if (timers.any { it.expiresAtMillis <= now }) {
+                        val expired = repository.processDueTimers(now)
+                        if (expired.isNotEmpty()) {
+                            val count = expired.size
+                            _snackbarMessages.tryEmit(
+                                "Timer ended — auto-disabled network for $count app${if (count == 1) "" else "s"}"
+                            )
+                            break
+                        }
+                    }
+                    delay(1000L)
+                }
+            }
+        }
     }
 
     private fun registerNetworkMonitor() {
@@ -222,14 +259,22 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
     }
 
+    private val rulesAndTimersFlow = combine(
+        repository.rulesFlow,
+        repository.appTimersFlow,
+        nowMillisFlow
+    ) { rules, timers, nowMs ->
+        Triple(rules, timers, nowMs)
+    }
+
     private val baseDataFlow = combine(
         installedAppsFlow,
         isLoadingAppsFlow,
-        repository.rulesFlow,
+        rulesAndTimersFlow,
         repository.preferencesFlow,
         NetGateVpnService.runtimeState
-    ) { installed, loading, rules, prefs, vpnState ->
-        BaseSnapshot(installed, loading, rules, prefs, vpnState)
+    ) { installed, loading, (rules, timers, nowMs), prefs, vpnState ->
+        BaseSnapshot(installed, loading, rules, timers, nowMs, prefs, vpnState)
     }
 
     private val uiInteractionFlow = combine(
@@ -334,6 +379,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     ) { base, interaction, connDetails, sheets, (destination, dataUsage, websiteRules) ->
         val ruleMap = base.rules.associateBy { it.packageName }
+        val timerMap = base.timers.associateBy { it.packageName }
 
         val visibleInstalled = base.installed.filter { app ->
             val passInternet = base.prefs.showOfflineApps || app.hasInternetPermission
@@ -349,7 +395,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 isSystemApp = app.isSystemApp,
                 hasInternetPermission = app.hasInternetPermission,
                 blockWifi = rule?.blockWifi ?: false,
-                blockMobileData = rule?.blockMobileData ?: false
+                blockMobileData = rule?.blockMobileData ?: false,
+                activeTimer = timerMap[app.packageName]
             )
         }
 
@@ -365,6 +412,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 AppFilterMode.WIFI_BLOCKED -> app.blockWifi
                 AppFilterMode.DATA_BLOCKED -> app.blockMobileData
                 AppFilterMode.ALLOWED -> !app.isAnyBlocked
+                AppFilterMode.TIMERS -> app.activeTimer != null
             }
             matchesQuery && matchesFilter
         }
@@ -399,7 +447,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             isSpeedTestOpen = sheets.speedTestOpen,
             speedTestState = sheets.speedTestState,
             dataUsageState = dataUsage,
-            websiteBlockerState = websiteState
+            websiteBlockerState = websiteState,
+            nowMillis = base.nowMillis
         )
     }.stateIn(
         scope = viewModelScope,
@@ -532,6 +581,34 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 blockWifi = blockWifi,
                 blockMobileData = blockMobileData
             )
+        }
+    }
+
+    fun scheduleAppTimer(
+        packageName: String,
+        durationMinutes: Int,
+        target: TimerTargetNetwork
+    ) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            nowMillisFlow.value = now
+            repository.scheduleAppTimer(
+                packageName = packageName,
+                durationMinutes = durationMinutes,
+                blockWifiOnExpire = target.blockWifi,
+                blockMobileDataOnExpire = target.blockMobileData,
+                nowMillis = now
+            )
+            _snackbarMessages.tryEmit(
+                "Timer set (${durationMinutes}m) — ${target.label} will disable automatically"
+            )
+        }
+    }
+
+    fun cancelAppTimer(packageName: String) {
+        viewModelScope.launch {
+            repository.cancelAppTimer(packageName)
+            _snackbarMessages.tryEmit("Countdown timer cancelled")
         }
     }
 
@@ -814,6 +891,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val installed: List<InstalledAppInfo>,
         val loading: Boolean,
         val rules: List<com.example.data.local.AppNetworkRuleEntity>,
+        val timers: List<AppCountdownTimer>,
+        val nowMillis: Long,
         val prefs: FirewallPreferencesState,
         val vpnState: VpnRuntimeState
     )

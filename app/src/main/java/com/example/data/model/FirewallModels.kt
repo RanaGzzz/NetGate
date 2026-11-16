@@ -12,7 +12,8 @@ enum class AppFilterMode(val label: String) {
     BLOCKED("Restricted"),
     WIFI_BLOCKED("Wi-Fi Off"),
     DATA_BLOCKED("Data Off"),
-    ALLOWED("Allowed")
+    ALLOWED("Allowed"),
+    TIMERS("Timers")
 }
 
 enum class BatchAction {
@@ -73,13 +74,41 @@ data class InstalledAppInfo(
     val hasInternetPermission: Boolean
 )
 
+enum class TimerTargetNetwork(
+    val label: String,
+    val blockWifi: Boolean,
+    val blockMobileData: Boolean
+) {
+    BOTH("Wi-Fi & Data", true, true),
+    WIFI_ONLY("Wi-Fi Only", true, false),
+    DATA_ONLY("Data Only", false, true)
+}
+
+data class AppCountdownTimer(
+    val packageName: String,
+    val blockWifiOnExpire: Boolean,
+    val blockMobileDataOnExpire: Boolean,
+    val durationMillis: Long,
+    val expiresAtMillis: Long,
+    val createdAtMillis: Long
+) {
+    fun remainingMillis(nowMillis: Long): Long = (expiresAtMillis - nowMillis).coerceAtLeast(0L)
+
+    fun targetLabel(): String = when {
+        blockWifiOnExpire && blockMobileDataOnExpire -> "Wi-Fi & Data"
+        blockWifiOnExpire -> "Wi-Fi"
+        else -> "Data"
+    }
+}
+
 data class ManagedApp(
     val packageName: String,
     val appName: String,
     val isSystemApp: Boolean,
     val hasInternetPermission: Boolean,
     val blockWifi: Boolean,
-    val blockMobileData: Boolean
+    val blockMobileData: Boolean,
+    val activeTimer: AppCountdownTimer? = null
 ) {
     val isAnyBlocked: Boolean get() = blockWifi || blockMobileData
     val isFullyBlocked: Boolean get() = blockWifi && blockMobileData
@@ -277,5 +306,17 @@ fun formatDataBytes(bytes: Long): String {
         bytes >= mb -> String.format(java.util.Locale.US, "%.1f MB", bytes / mb)
         bytes >= kb -> String.format(java.util.Locale.US, "%.0f KB", bytes / kb)
         else -> "$bytes B"
+    }
+}
+
+fun formatCountdownTimer(remainingMillis: Long): String {
+    val totalSeconds = ((remainingMillis + 999L) / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
     }
 }

@@ -52,6 +52,10 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local per-app Wi-Fi and mobile data firewall using Android VpnService" />
         </service>
+
+        <receiver
+            android:name=".service.AppTimerReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

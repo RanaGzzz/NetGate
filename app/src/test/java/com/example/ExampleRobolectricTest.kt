@@ -46,6 +46,7 @@ class ExampleRobolectricTest {
             ruleDao = database.appNetworkRuleDao(),
             trafficUsageDao = database.appTrafficUsageDao(),
             websiteRuleDao = database.websiteRuleDao(),
+            appTimerDao = database.appTimerDao(),
             preferences = FirewallPreferences(context)
         )
     }
@@ -371,5 +372,60 @@ class ExampleRobolectricTest {
         assertEquals(15_000_000L, totals.totalMobileRxBytes)
         assertEquals(5_000_000L, totals.totalMobileTxBytes)
         assertEquals(115_000_000L, totals.grandTotalBytes)
+    }
+
+    @Test
+    fun `app countdown timer persists and automatically disables wifi and data on expiration`() = runTest {
+        val baseTime = 1_700_000_000_000L
+
+        // Existing rule: Wi-Fi already blocked for com.video.app; timer will disable Mobile Data after 10 mins
+        repository.setAppRule("com.video.app", blockWifi = true, blockMobileData = false)
+        repository.scheduleAppTimer(
+            packageName = "com.video.app",
+            durationMinutes = 10,
+            blockWifiOnExpire = false,
+            blockMobileDataOnExpire = true,
+            nowMillis = baseTime
+        )
+        // Second app: 30m timer to disable both Wi-Fi & Data
+        repository.scheduleAppTimer(
+            packageName = "com.social.app",
+            durationMinutes = 30,
+            blockWifiOnExpire = true,
+            blockMobileDataOnExpire = true,
+            nowMillis = baseTime
+        )
+
+        var activeTimers = repository.appTimersFlow.first()
+        assertEquals(2, activeTimers.size)
+
+        // Before 10 minutes: nothing fires
+        val expiredEarly = repository.processDueTimers(nowMillis = baseTime + 5 * 60_000L)
+        assertTrue(expiredEarly.isEmpty())
+
+        // At 10 minutes: com.video.app expires and merges Mobile Data block with existing Wi-Fi block
+        val expiredAt10m = repository.processDueTimers(nowMillis = baseTime + 10 * 60_000L)
+        assertEquals(listOf("com.video.app"), expiredAt10m)
+
+        val rulesAfter10m = repository.getAllRulesOnce().associateBy { it.packageName }
+        assertTrue(rulesAfter10m["com.video.app"]!!.blockWifi)
+        assertTrue(rulesAfter10m["com.video.app"]!!.blockMobileData)
+        assertFalse(rulesAfter10m.containsKey("com.social.app"))
+
+        // Remaining timer is com.social.app; test cancelling it before expiry
+        activeTimers = repository.appTimersFlow.first()
+        assertEquals(1, activeTimers.size)
+        assertEquals("com.social.app", activeTimers.first().packageName)
+
+        repository.cancelAppTimer("com.social.app")
+        assertTrue(repository.appTimersFlow.first().isEmpty())
+    }
+
+    @Test
+    fun `countdown formatter displays mm ss and h mm ss cleanly`() {
+        assertEquals("00:00", com.example.data.model.formatCountdownTimer(0L))
+        assertEquals("05:00", com.example.data.model.formatCountdownTimer(300_000L))
+        assertEquals("14:59", com.example.data.model.formatCountdownTimer(899_000L))
+        assertEquals("1:05:00", com.example.data.model.formatCountdownTimer(3_900_000L))
     }
 }
