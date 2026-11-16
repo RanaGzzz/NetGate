@@ -1,54 +1,57 @@
 # NetGate
 
-A fast, **root-free** and **banking-safe** per-app firewall & website blocker for Android (**Android 7.0+ / API 24 – Android 16 / API 36**). Block or allow Wi-Fi and Mobile Data per app, filter or lock down specific websites with **Blocklist**, **Whitelist**, and **Strict Whitelist Lockdown** modes, visualize **Blocked vs. Allowed** data consumption with a Room-backed bar chart, run a built-in speed test, and configure **Cloudflare `1.1.1.1` Private DNS**—all anchored by a **constant floating frosted-glass bottom dock**.
+A root-free Android per-app firewall, website blocker, and network traffic monitor powered by Android's local `VpnService`, `NetworkStatsManager`, and Room persistence. Control Wi-Fi and Mobile Data access per application, schedule automatic countdown timers to cut off app connectivity, filter or lock down websites across browsers, monitor Sent/Received (`Tx`/`Rx`) historical usage, run a built-in speed test, and configure encrypted Private DNS from a single unified workspace.
 
 ---
 
-## What's New
+## Key Features
 
-- **Website Blocker & Strict Lockdown Tab (`Websites`):**
-  - **Three Filter Modes:**
-    - **Off:** Website filtering disabled; only per-app Wi-Fi / Mobile Data rules run.
-    - **Blocklist:** Blocks domains in your Blocklist (including subdomains like `*.domain.com`) while letting other websites through, with Whitelist entries acting as explicit exceptions.
-    - **Whitelist Only (Lockdown):** Blocks **all** internet domains by default (`NXDOMAIN`)—allowing internet access **only** to your **Whitelisted domains** and **Selected Allowed Apps**.
-  - **Manual Entry, Quick Chips & Live Feed:** Paste a URL or type any domain (`https://www.example.com/path` auto-normalizes to `example.com`), use 1-tap quick-add domain chips, toggle or delete rules anytime, and whitelist recently blocked domains in one tap.
-  - **Selected Allowed Apps Bypass:** Search and pick trusted apps that bypass Website Blocker & Lockdown via `VpnService.Builder.addDisallowedApplication(...)` while respecting per-app firewall blocks.
-- **New Futuristic Adaptive App Icon:**
-  - Glowing emerald (`#10B981`) and electric-cyan (`#38BDF8`) holographic hexagonal cyber-gate emblem on a deep `#0A1626` obsidian backdrop, packaged across adaptive XML layers and `mdpi`–`xxxhdpi` square & round PNG densities.
-- **Constant Floating Frosted-Glass Bottom Dock Across All Options:**
-  - Converted **Speed Test** and **1.1.1.1 DNS** from overlay sheets into full in-app screens so the translucent frosted capsule dock remains **constantly visible and active** across all five tabs (**Firewall**, **Websites**, **Data Usage**, **Speed Test**, **1.1.1.1 DNS**) on phones (and adapts to a persistent `NavigationRail` on tablets & foldables).
-- **Room-Backed Data Usage Bar Chart (`Blocked vs. Allowed`):**
-  - Upgrades Room to `version 3` (`MIGRATION_1_2` + `MIGRATION_2_3` preserving all existing rules), joining `app_traffic_usage` (`NetworkStatsManager`) with `app_network_rules` via SQLite `LEFT JOIN` to animate **Blocked vs. Allowed** totals (`Total` & `Wi-Fi vs Data` split modes).
+### 1. Per-App Wi-Fi & Mobile Data Firewall
+- **Granular Network Toggles:** Independently enable or block **Wi-Fi** and **Mobile Data** for every installed app without requiring root access.
+- **Batch Management:** Enter multi-select mode (via **Select** or long-press) to apply **Block Wi-Fi**, **Block Data**, **Block Both**, or **Allow All** across multiple apps at once.
+- **Instant Transport Detection:** Automatically monitors active Wi-Fi and cellular networks via `ConnectivityManager.NetworkCallback` and enforces the matching rule set immediately when switching networks.
+- **Search & Smart Filters:** Filter apps by **All Apps**, **Restricted**, **Wi-Fi Off**, **Data Off**, **Allowed**, or **Timers**.
+
+### 2. Per-App Auto-Disable Countdown Timers
+- **Scheduled Cutoffs:** Set a countdown timer on any app to automatically disable **Wi-Fi & Data**, **Wi-Fi Only**, or **Data Only** when the timer reaches `00:00`.
+- **Presets & Custom Durations:** Pick quick presets (`1m`, `5m`, `15m`, `30m`, `1h`, `2h`) or adjust any custom duration in minutes.
+- **Live Indicators & Background Persistence:** Active timers display a live countdown badge directly in the app list, persist in Room across restarts, and execute reliably via `NetGateVpnService` and `AlarmManager`.
+
+### 3. Website Blocker & Lockdown Mode
+- **Three Filtering Modes:**
+  - **Off:** Website filtering disabled; only per-app firewall rules apply.
+  - **Blocklist:** Blocks domains in your Blocklist (including all subdomains such as `*.domain.com`) while allowing Whitelist exceptions.
+  - **Whitelist Only (Lockdown):** Blocks all internet domains by default (`NXDOMAIN`), permitting access only to explicitly **Whitelisted websites** and **Selected Allowed Apps**.
+- **Anti-DoH & Dual-Stack IPv4/IPv6 Protection:** Intercepts both IPv4 and IPv6 UDP/53 DNS queries, blocks browser DoH canary/discovery domains (`use-application-dns.net`, `_dns.resolver.arpa`), and returns immediate TCP `RST` responses on major public DoH/DoT resolver IPs so modern browsers (including Chrome and Firefox) respect your domain rules.
+- **Manual Entry & Live Query Feed:** Paste full URLs or root domains with automatic normalization, add popular domains in one tap, inspect recently blocked domains, and allow trusted apps to bypass website filtering.
+
+### 4. Sent/Received & Historical Data Usage Monitor
+- **Sent vs. Received Breakdown:** Calculates and displays total **Received (`↓ Rx`)** and **Sent (`↑ Tx`)** traffic across both Wi-Fi and Mobile Data using Android's `NetworkStatsManager`.
+- **Room Historical Daily Bar Chart:** Archives per-day Wi-Fi and Mobile `Rx`/`Tx` totals into Room (`app_traffic_history`) for multi-day trend visualization with tap-to-inspect daily details.
+- **Blocked vs. Allowed Comparison:** Compares total Wi-Fi and cellular data consumed by restricted versus allowed apps across `24h`, `7 Days`, and `30 Days` windows, alongside per-app `Rx`/`Tx` breakdowns.
+
+### 5. Network Speed Test & Private DNS Tools
+- **Built-In Speed Test:** Measures Ping, Jitter, Download (`Mbps`), and Upload (`Mbps`) on the active Wi-Fi or Mobile Data connection.
+- **Encrypted DNS (`1.1.1.1`) Assistant:** Inspects live Android Private DNS status, provides quick-copy hostnames for Cloudflare (`one.one.one.one`, Malware, and Family), Google DNS, and Quad9, tests Cloudflare DoH latency, and opens system Private DNS settings directly.
+- **Connection Telemetry:** Displays active transport type, interface name, IPv4/IPv6 addresses, gateway, DNS servers, metered status, and Wi-Fi link telemetry (band, standard, RSSI signal strength, and Tx/Rx link speeds).
 
 ---
 
-## Features
+## Architecture & How It Works
 
-- **Batch Select & Per-App Firewall:** Tap **Select** (or long-press any app) to apply **Block Wi-Fi**, **Block Data**, **Block Both**, or **Allow All**, or toggle Wi-Fi & cellular independently on each app row.
-- **Specific Website Blocker & Whitelist Lockdown:** Enforce Blocklist rules, maintain Whitelist exceptions, or lock down the entire internet except selected websites and selected apps.
-- **Blocked vs. Allowed Data Bar Chart:** Compare Wi-Fi and Mobile Data consumed by blocked vs. allowed apps (`24h`, `7 Days`, `30 Days`) with tap-to-filter per-app breakdowns.
-- **Cloudflare `1.1.1.1` Encrypted DNS Protection:** Check live Android **Private DNS** status, copy Cloudflare/Google/Quad9 hostnames, jump straight to system Private DNS settings, and test Cloudflare DoH latency.
-- **Built-In Network Speed Test:** Measure Ping, Jitter, Download (`Mbps`), and Upload (`Mbps`) on your active Wi-Fi or Mobile Data connection with multi-CDN fallback.
-- **Connection & Wi-Fi Telemetry:** View Wi-Fi standard (`Wi-Fi 4/5/6/7`), band (`2.4 / 5 / 6 GHz`), signal strength (`dBm`), Tx/Rx link speeds, interface name, IPv4/IPv6 addresses, gateway, DNS servers, Private DNS mode, and metered status.
-- **Banking-Safe (Zero Accessibility Permissions):** Uses **no** Accessibility Service, **no** screen overlays, and **no** root—so banking and payment apps are never flagged or disrupted.
+### Local `VpnService` Data Plane
+- **App Firewall Mode (`Website Mode = Off`):** Routes only apps blocked on the active transport into a local sinkhole TUN interface (`addAllowedApplication`), leaving allowed apps untouched on the physical network.
+- **Website Filtering Mode (`Blocklist` / `Whitelist Only`):** Runs a dual-stack IPv4/IPv6 UDP/53 DNS proxy and DoH/DoT TCP `RST` guard inside `NetGateVpnService`. Blocked domains receive immediate `NXDOMAIN` replies, permitted queries forward via protected sockets (`protect()`), and selected bypass apps route outside the filter (`addDisallowedApplication`).
 
----
+### Room Database Persistence
+- `app_network_rules`: Per-app Wi-Fi and Mobile Data firewall rules.
+- `app_network_timers`: Scheduled per-app countdown timers with expiration timestamps and target transport flags.
+- `website_rules`: Enabled/disabled Blocklist (`BLOCK`) and Whitelist (`ALLOW`) domain rules.
+- `app_traffic_usage`: Synced per-app Wi-Fi and Mobile `Rx`/`Tx` usage snapshots for the active time window.
+- `app_traffic_history`: Daily archived Wi-Fi and Mobile `Rx`/`Tx` records keyed by calendar day and package name.
 
-## How It Works
-
-### 1. Per-App Firewall & Website DNS Guard (`VpnService`)
-NetGate pairs Android's local `VpnService` with a `ConnectivityManager.NetworkCallback` transport monitor:
-
-- **Per-App Only (`Website Mode = Off`):** Routes only apps blocked on the active network (Wi-Fi or Mobile Data) via `addAllowedApplication(...)` into a local sinkhole tunnel while allowed apps run untouched at native speed.
-- **Website Filtering (`Blocklist` / `Whitelist Only`):** Runs an on-device IPv4/UDP port-53 DNS proxy (`10.1.10.2`) inside `NetGateVpnService`. Blocked or non-whitelisted domains receive immediate `NXDOMAIN` responses, allowed domains forward through `protect()`ed UDP sockets (`1.1.1.1` / `8.8.8.8`), and **Selected Allowed Apps** bypass the DNS filter cleanly via `addDisallowedApplication(...)`.
-
-### 2. Room-Backed Persistence (`v3`)
-- `app_network_rules`: Per-app Wi-Fi and Mobile Data block rules.
-- `website_rules`: Manual & quick-added Blocklist (`BLOCK`) and Whitelist (`ALLOW`) domain rules with enable/disable state.
-- `app_traffic_usage`: Synced `NetworkStatsManager` bytes joined with `app_network_rules` for the **Blocked vs. Allowed** bar chart.
-
-### 3. Cloudflare `1.1.1.1` Private DNS Note
-Android permits one active `VpnService` at a time. When using **Website Blocker**, set Android **Private DNS** to **Automatic** or **Off** so DNS queries pass through NetGate's local filter (an inline banner alerts you automatically if strict `hostname` Private DNS mode is active). When you only need per-app blocking plus encrypted DNS, enabling `one.one.one.one` runs seamlessly alongside NetGate's per-app firewall.
+### Private DNS Note
+Android permits one active `VpnService` at a time. When using the **Website Blocker**, keep Android **Private DNS** set to **Automatic** or **Off** so DNS lookups pass through NetGate's local DNS filter. When using only the per-app firewall, Private DNS (`one.one.one.one`) can remain enabled alongside NetGate.
 
 ---
 
@@ -56,49 +59,20 @@ Android permits one active `VpnService` at a time. When using **Website Blocker*
 
 | Permission / Declaration | Purpose |
 |---|---|
-| `BIND_VPN_SERVICE` | Creates the local on-device firewall and DNS filter tunnel |
-| `INTERNET` | Runs the speed test, Cloudflare DoH reachability check, and upstream DNS forwarding for allowed domains |
-| `ACCESS_NETWORK_STATE` | Detects active Wi-Fi vs. Mobile Data transport, IP/DNS link properties, and Private DNS status |
-| `ACCESS_WIFI_STATE` | Reads Wi-Fi radio state, band, link speed, and RSSI signal strength |
-| `PACKAGE_USAGE_STATS` *(optional, granted in Settings)* | Reads per-app Wi-Fi & Mobile Data bytes from `NetworkStatsManager` for the Data Usage bar chart |
-| `FOREGROUND_SERVICE` & `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps firewall and website rules enforced reliably in the background |
-| `POST_NOTIFICATIONS` *(Android 13+, optional)* | Displays the ongoing firewall status notification with a quick **Turn Off** action |
-| `<queries>` (`ACTION_MAIN` + `CATEGORY_LAUNCHER`) | Lists installed launchable apps without requesting `QUERY_ALL_PACKAGES` |
+| `BIND_VPN_SERVICE` | Establishes the local on-device firewall and DNS filtering tunnel |
+| `INTERNET` | Powers the built-in speed test, Cloudflare DoH latency probe, and upstream DNS forwarding |
+| `ACCESS_NETWORK_STATE` | Detects active Wi-Fi vs. Mobile Data networks, link properties, and Private DNS status |
+| `ACCESS_WIFI_STATE` | Reads Wi-Fi radio state, band, link speed, and signal strength |
+| `PACKAGE_USAGE_STATS` *(optional)* | Reads per-app `Rx`/`Tx` Wi-Fi and Mobile Data bytes from `NetworkStatsManager` |
+| `FOREGROUND_SERVICE` & `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps firewall rules, website filtering, and countdown timers enforced reliably in the background |
+| `POST_NOTIFICATIONS` *(optional)* | Displays the persistent firewall status notification with a quick **Turn Off** action |
+| `<queries>` (`ACTION_MAIN` + `CATEGORY_LAUNCHER`) | Enumerates launchable user and system apps cleanly |
 
 ---
 
-## Download or Build the APK
+## Technology Stack
 
-### Option 1: Pre-built Debug APK
-1. Open the [`apk/`](apk/) folder in this repository.
-2. Tap **`NetGate-debug.apk`** → **Download raw** and install it on your Android device.
-
-### Option 2: GitHub Actions Build
-Every push to `main` / `master` (or manual **workflow_dispatch**) triggers [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml):
-1. Go to the **Actions** tab in GitHub.
-2. Open the latest **Build NetGate APK** run.
-3. Download the **`NetGate-debug-apk`** artifact and extract `app-debug.apk`.
-
-### Option 3: Build Locally
-Requires **JDK 21** and **Gradle 9.3.1** (or Android Studio):
-
-```bash
-base64 -d debug.keystore.base64 > debug.keystore
-touch .env
-gradle assembleDebug
-```
-
-Run unit & Robolectric tests:
-
-```bash
-gradle :app:testDebugUnitTest
-```
-
----
-
-## Tech Stack
-
-- **Language & UI:** Kotlin, Jetpack Compose, Custom Canvas Bar Chart & Persistent Floating Frosted-Glass Dock, Material Design 3 (Material You Dynamic Color)
-- **Persistence:** Room v3 (`AppNetworkRuleEntity`, `AppTrafficUsageEntity`, `WebsiteRuleEntity`, `MIGRATION_1_2`, `MIGRATION_2_3`) & Jetpack DataStore Preferences
-- **Networking & Telemetry:** Android `VpnService`, Custom RFC 1035 IPv4/UDP DNS Packet Filter (`DnsPacketFilter`), `NetworkStatsManager`, `ConnectivityManager`, `WifiManager`, Kotlin Coroutines & `StateFlow`
-- **Testing:** JUnit 4, Kotlin Coroutines Test, Robolectric
+- **Language & UI:** Kotlin, Jetpack Compose, Material 3, Custom Canvas Charts
+- **Architecture & Concurrency:** MVVM, Repository Pattern, Kotlin Coroutines & `StateFlow`
+- **Storage:** Room Database, Jetpack DataStore Preferences
+- **System Networking:** Android `VpnService`, `ConnectivityManager`, `NetworkStatsManager`, `WifiManager`, `AlarmManager`
