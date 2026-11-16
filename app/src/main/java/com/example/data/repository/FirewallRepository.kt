@@ -25,12 +25,17 @@ import com.example.data.local.AppTrafficUsageDao
 import com.example.data.local.AppTrafficUsageEntity
 import com.example.data.local.AppTrafficWithRuleTuple
 import com.example.data.local.FirewallPreferences
+import com.example.data.local.WebsiteRuleDao
+import com.example.data.local.WebsiteRuleEntity
+import com.example.data.local.WebsiteRuleType
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DataUsageSummary
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.InstalledAppInfo
+import com.example.data.model.WebsiteRuleItem
+import com.example.service.DnsPacketFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -45,10 +50,22 @@ class FirewallRepository(
     private val context: Context,
     private val ruleDao: AppNetworkRuleDao,
     private val trafficUsageDao: AppTrafficUsageDao,
+    private val websiteRuleDao: WebsiteRuleDao,
     val preferences: FirewallPreferences
 ) {
     val rulesFlow: Flow<List<AppNetworkRuleEntity>> = ruleDao.observeAllRules()
     val preferencesFlow: Flow<FirewallPreferencesState> = preferences.preferencesFlow
+    val websiteRulesFlow: Flow<List<WebsiteRuleItem>> = websiteRuleDao.observeAllRules()
+        .map { entities ->
+            entities.map { entity ->
+                WebsiteRuleItem(
+                    domain = entity.domain,
+                    isWhitelist = entity.ruleType == WebsiteRuleType.ALLOW,
+                    isEnabled = entity.isEnabled,
+                    createdAt = entity.createdAt
+                )
+            }
+        }
     val trafficSummaryFlow: Flow<DataUsageSummary> = trafficUsageDao.observeBlockedVsAllowedSummary()
         .map { tuple ->
             DataUsageSummary(
@@ -199,6 +216,34 @@ class FirewallRepository(
 
     suspend fun clearAllRules() {
         ruleDao.clearAllRules()
+    }
+
+    suspend fun addWebsiteRule(rawDomain: String, isWhitelist: Boolean): Result<String> {
+        val normalized = DnsPacketFilter.normalizeDomainInput(rawDomain)
+            ?: return Result.failure(IllegalArgumentException("Enter a valid domain like example.com"))
+        websiteRuleDao.upsertRule(
+            WebsiteRuleEntity(
+                domain = normalized,
+                ruleType = if (isWhitelist) WebsiteRuleType.ALLOW else WebsiteRuleType.BLOCK,
+                isEnabled = true,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+        return Result.success(normalized)
+    }
+
+    suspend fun setWebsiteRuleEnabled(domain: String, enabled: Boolean) {
+        websiteRuleDao.setRuleEnabled(domain, enabled)
+    }
+
+    suspend fun deleteWebsiteRule(domain: String) {
+        websiteRuleDao.deleteRule(domain)
+    }
+
+    suspend fun clearWebsiteRules(isWhitelist: Boolean) {
+        websiteRuleDao.clearRulesByType(
+            if (isWhitelist) WebsiteRuleType.ALLOW else WebsiteRuleType.BLOCK
+        )
     }
 
     fun detectCurrentNetworkType(): ActiveNetworkType {

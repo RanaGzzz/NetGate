@@ -6,9 +6,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.ThemeMode
+import com.example.data.model.WebsiteFilterMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -26,11 +28,16 @@ class FirewallPreferences(private val context: Context) {
         val DEFAULT_BLOCK_DATA = booleanPreferencesKey("default_block_data")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
+        val WEBSITE_FILTER_MODE = stringPreferencesKey("website_filter_mode")
+        val WEBSITE_BYPASS_PACKAGES = stringSetPreferencesKey("website_bypass_packages")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
         val themeModeName = prefs[Keys.THEME_MODE] ?: ThemeMode.SYSTEM.name
         val themeMode = ThemeMode.entries.firstOrNull { it.name == themeModeName } ?: ThemeMode.SYSTEM
+        val websiteModeName = prefs[Keys.WEBSITE_FILTER_MODE] ?: WebsiteFilterMode.OFF.name
+        val websiteMode = WebsiteFilterMode.entries.firstOrNull { it.name == websiteModeName }
+            ?: WebsiteFilterMode.OFF
 
         FirewallPreferencesState(
             isFirewallEnabled = prefs[Keys.IS_FIREWALL_ENABLED] ?: false,
@@ -39,7 +46,9 @@ class FirewallPreferences(private val context: Context) {
             defaultBlockWifiForNewRules = prefs[Keys.DEFAULT_BLOCK_WIFI] ?: false,
             defaultBlockDataForNewRules = prefs[Keys.DEFAULT_BLOCK_DATA] ?: false,
             themeMode = themeMode,
-            useDynamicColor = prefs[Keys.USE_DYNAMIC_COLOR] ?: true
+            useDynamicColor = prefs[Keys.USE_DYNAMIC_COLOR] ?: true,
+            websiteFilterMode = websiteMode,
+            websiteBypassPackages = prefs[Keys.WEBSITE_BYPASS_PACKAGES] ?: emptySet()
         )
     }
 
@@ -69,5 +78,24 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setUseDynamicColor(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.USE_DYNAMIC_COLOR] = enabled }
+    }
+
+    suspend fun setWebsiteFilterMode(mode: WebsiteFilterMode) {
+        context.firewallDataStore.edit { it[Keys.WEBSITE_FILTER_MODE] = mode.name }
+    }
+
+    suspend fun toggleWebsiteBypassPackage(packageName: String) {
+        context.firewallDataStore.edit { prefs ->
+            val current = prefs[Keys.WEBSITE_BYPASS_PACKAGES] ?: emptySet()
+            prefs[Keys.WEBSITE_BYPASS_PACKAGES] = if (packageName in current) {
+                current - packageName
+            } else {
+                current + packageName
+            }
+        }
+    }
+
+    suspend fun clearWebsiteBypassPackages() {
+        context.firewallDataStore.edit { it[Keys.WEBSITE_BYPASS_PACKAGES] = emptySet() }
     }
 }

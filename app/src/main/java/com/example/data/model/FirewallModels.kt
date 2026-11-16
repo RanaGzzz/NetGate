@@ -137,13 +137,46 @@ data class FirewallPreferencesState(
     val defaultBlockWifiForNewRules: Boolean = false,
     val defaultBlockDataForNewRules: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val useDynamicColor: Boolean = true
+    val useDynamicColor: Boolean = true,
+    val websiteFilterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
+    val websiteBypassPackages: Set<String> = emptySet()
 )
 
 enum class AppDestination(val label: String) {
     FIREWALL("Firewall"),
-    DATA_USAGE("Data Usage")
+    WEBSITES("Websites"),
+    DATA_USAGE("Data Usage"),
+    SPEED_TEST("Speed Test"),
+    DNS("1.1.1.1 DNS")
 }
+
+enum class WebsiteFilterMode(val title: String, val subtitle: String) {
+    OFF(
+        title = "Off",
+        subtitle = "Website filter disabled — only per-app rules run"
+    ),
+    BLOCKLIST(
+        title = "Blocklist",
+        subtitle = "Block websites in your Blocklist • Allow all other sites"
+    ),
+    WHITELIST_ONLY(
+        title = "Whitelist Only",
+        subtitle = "Block ALL internet websites • Only whitelisted sites & selected apps allowed"
+    )
+}
+
+enum class WebsiteTabSection(val label: String) {
+    BLOCKLIST("Blocklist"),
+    WHITELIST("Whitelist"),
+    ALLOWED_APPS("Allowed Apps")
+}
+
+data class WebsiteRuleItem(
+    val domain: String,
+    val isWhitelist: Boolean,
+    val isEnabled: Boolean,
+    val createdAt: Long
+)
 
 enum class UsageTimeRange(val label: String, val days: Int) {
     LAST_24H("24h", 1),

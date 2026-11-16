@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Icon
@@ -44,14 +44,12 @@ import com.example.ui.theme.LocalIsDarkTheme
 @Composable
 fun FloatingFrostedNavBar(
     currentDestination: AppDestination,
-    isSpeedTestOpen: Boolean,
-    isDnsProtectionOpen: Boolean,
     isConnectionInfoOpen: Boolean,
     onSelectFirewall: () -> Unit,
+    onSelectWebsites: () -> Unit,
     onSelectDataUsage: () -> Unit,
-    onOpenSpeedTest: () -> Unit,
-    onOpenDnsProtection: () -> Unit,
-    onOpenConnectionInfo: () -> Unit,
+    onSelectSpeedTest: () -> Unit,
+    onSelectDnsProtection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -95,8 +93,6 @@ fun FloatingFrostedNavBar(
         }
     )
 
-    val anySheetOpen = isSpeedTestOpen || isDnsProtectionOpen || isConnectionInfoOpen
-
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -125,7 +121,7 @@ fun FloatingFrostedNavBar(
                 FloatingNavItem(
                     icon = Icons.Rounded.Shield,
                     contentDescription = "Firewall",
-                    selected = !anySheetOpen && currentDestination == AppDestination.FIREWALL,
+                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.FIREWALL,
                     onClick = onSelectFirewall,
                     modifier = Modifier
                         .weight(1f)
@@ -133,9 +129,19 @@ fun FloatingFrostedNavBar(
                 )
 
                 FloatingNavItem(
+                    icon = Icons.Rounded.Public,
+                    contentDescription = "Website Blocker",
+                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.WEBSITES,
+                    onClick = onSelectWebsites,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("nav_tab_websites")
+                )
+
+                FloatingNavItem(
                     icon = Icons.Rounded.BarChart,
                     contentDescription = "Data Usage",
-                    selected = !anySheetOpen && currentDestination == AppDestination.DATA_USAGE,
+                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.DATA_USAGE,
                     onClick = onSelectDataUsage,
                     modifier = Modifier
                         .weight(1f)
@@ -145,8 +151,8 @@ fun FloatingFrostedNavBar(
                 FloatingNavItem(
                     icon = Icons.Rounded.Speed,
                     contentDescription = "Speed Test",
-                    selected = isSpeedTestOpen,
-                    onClick = onOpenSpeedTest,
+                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.SPEED_TEST,
+                    onClick = onSelectSpeedTest,
                     modifier = Modifier
                         .weight(1f)
                         .testTag("floating_nav_speed")
@@ -155,21 +161,11 @@ fun FloatingFrostedNavBar(
                 FloatingNavItem(
                     icon = Icons.Rounded.Dns,
                     contentDescription = "1.1.1.1 DNS Protection",
-                    selected = isDnsProtectionOpen,
-                    onClick = onOpenDnsProtection,
+                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.DNS,
+                    onClick = onSelectDnsProtection,
                     modifier = Modifier
                         .weight(1f)
                         .testTag("floating_nav_dns")
-                )
-
-                FloatingNavItem(
-                    icon = Icons.Rounded.Info,
-                    contentDescription = "Connection & Wi-Fi Info",
-                    selected = isConnectionInfoOpen,
-                    onClick = onOpenConnectionInfo,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("floating_nav_info")
                 )
             }
         }

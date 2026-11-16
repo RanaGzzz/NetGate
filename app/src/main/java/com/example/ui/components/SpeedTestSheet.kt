@@ -6,15 +6,21 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -27,12 +33,9 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -53,16 +56,14 @@ import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.WifiAccent
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SpeedTestSheet(
+fun SpeedTestContent(
     state: SpeedTestState,
     activeNetworkLabel: String,
     onStartTest: () -> Unit,
     onStopTest: () -> Unit,
-    onDismiss: () -> Unit
+    modifier: Modifier = Modifier
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val animatedProgress by animateFloatAsState(
         targetValue = state.progress.coerceIn(0f, 1f),
         animationSpec = spring(stiffness = Spring.StiffnessLow),
@@ -75,22 +76,95 @@ fun SpeedTestSheet(
         else -> 0.0
     }
 
-    ModalBottomSheet(
-        onDismissRequest = {
-            if (state.isRunning) onStopTest()
-            onDismiss()
-        },
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("speed_test_sheet")
+    ) {
+        val isWide = maxWidth >= 800.dp
+        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+        if (isWide) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                SpeedTestGaugeCard(
+                    state = state,
+                    activeNetworkLabel = activeNetworkLabel,
+                    displayedMbps = displayedMbps,
+                    animatedProgress = animatedProgress,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SpeedTestStatsAndAction(
+                        state = state,
+                        onStartTest = onStartTest,
+                        onStopTest = onStopTest
+                    )
+                }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .widthIn(max = 680.dp)
+                        .align(Alignment.TopCenter)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 8.dp, bottom = navInsetBottom + 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    SpeedTestGaugeCard(
+                        state = state,
+                        activeNetworkLabel = activeNetworkLabel,
+                        displayedMbps = displayedMbps,
+                        animatedProgress = animatedProgress,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    SpeedTestStatsAndAction(
+                        state = state,
+                        onStartTest = onStartTest,
+                        onStopTest = onStopTest
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeedTestGaugeCard(
+    state: SpeedTestState,
+    activeNetworkLabel: String,
+    displayedMbps: Double,
+    animatedProgress: Float,
+    modifier: Modifier = Modifier
+) {
+    FrostedSurface(
+        shape = RoundedCornerShape(24.dp),
+        borderAccent = if (state.isRunning) MaterialTheme.colorScheme.primary else null,
+        modifier = modifier
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-                .testTag("speed_test_sheet"),
+                .padding(vertical = 20.dp, horizontal = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
@@ -101,7 +175,7 @@ fun SpeedTestSheet(
                 Column {
                     Text(
                         text = "Network Speed Test",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
@@ -125,180 +199,164 @@ fun SpeedTestSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Frosted Gauge Card
-            FrostedSurface(
-                shape = RoundedCornerShape(24.dp),
-                borderAccent = if (state.isRunning) MaterialTheme.colorScheme.primary else null,
-                modifier = Modifier.fillMaxWidth()
+            val trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            val activeGradient = when (state.phase) {
+                SpeedTestPhase.UPLOAD -> listOf(DataAccent, MaterialTheme.colorScheme.primary)
+                else -> listOf(WifiAccent, EmeraldPrimary)
+            }
+
+            Box(
+                modifier = Modifier.size(204.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 20.dp, horizontal = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    val trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                    val activeGradient = when (state.phase) {
-                        SpeedTestPhase.UPLOAD -> listOf(DataAccent, MaterialTheme.colorScheme.primary)
-                        else -> listOf(WifiAccent, EmeraldPrimary)
-                    }
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    val strokeWidth = 14.dp.toPx()
+                    val arcSize = Size(
+                        width = size.width - strokeWidth,
+                        height = size.height - strokeWidth
+                    )
+                    val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
 
-                    Box(
-                        modifier = Modifier.size(188.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Canvas(modifier = Modifier.matchParentSize()) {
-                            val strokeWidth = 14.dp.toPx()
-                            val arcSize = Size(
-                                width = size.width - strokeWidth,
-                                height = size.height - strokeWidth
-                            )
-                            val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
+                    drawArc(
+                        color = trackColor,
+                        startAngle = 150f,
+                        sweepAngle = 240f,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                    )
 
-                            drawArc(
-                                color = trackColor,
-                                startAngle = 150f,
-                                sweepAngle = 240f,
-                                useCenter = false,
-                                topLeft = topLeft,
-                                size = arcSize,
-                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                            )
-
-                            drawArc(
-                                brush = Brush.sweepGradient(activeGradient),
-                                startAngle = 150f,
-                                sweepAngle = 240f * animatedProgress,
-                                useCenter = false,
-                                topLeft = topLeft,
-                                size = arcSize,
-                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                            )
-                        }
-
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = formatMbps(displayedMbps),
-                                style = MaterialTheme.typography.displaySmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Mbps",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = state.phase.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (state.phase == SpeedTestPhase.ERROR) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                }
-                            )
-                        }
-                    }
+                    drawArc(
+                        brush = Brush.sweepGradient(activeGradient),
+                        startAngle = 150f,
+                        sweepAngle = 240f * animatedProgress,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                    )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Ping & Jitter Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                SpeedStatCard(
-                    label = "Ping",
-                    value = state.pingMs?.let { "$it ms" } ?: "—",
-                    icon = Icons.Rounded.NetworkPing,
-                    accent = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f)
-                )
-                SpeedStatCard(
-                    label = "Jitter",
-                    value = state.jitterMs?.let { "$it ms" } ?: "—",
-                    icon = Icons.Rounded.Speed,
-                    accent = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Download & Upload Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                SpeedStatCard(
-                    label = "Download",
-                    value = state.downloadMbps?.let { "${formatMbps(it)} Mbps" } ?: "—",
-                    icon = Icons.Rounded.ArrowDownward,
-                    accent = WifiAccent,
-                    modifier = Modifier.weight(1f)
-                )
-                SpeedStatCard(
-                    label = "Upload",
-                    value = state.uploadMbps?.let { "${formatMbps(it)} Mbps" } ?: "—",
-                    icon = Icons.Rounded.ArrowUpward,
-                    accent = DataAccent,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            state.errorMessage?.let { err ->
-                Spacer(modifier = Modifier.height(12.dp))
-                FrostedSurface(
-                    shape = RoundedCornerShape(14.dp),
-                    tintColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f),
-                    borderAccent = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = err,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(12.dp)
+                        text = formatMbps(displayedMbps),
+                        style = MaterialTheme.typography.displaySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Mbps",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = state.phase.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (state.phase == SpeedTestPhase.ERROR) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = if (state.isRunning) onStopTest else onStartTest,
-                shape = RoundedCornerShape(16.dp),
-                colors = if (state.isRunning) {
-                    ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                } else {
-                    ButtonDefaults.buttonColors()
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("speed_test_action_button")
-            ) {
-                Icon(
-                    imageVector = if (state.isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = when {
-                        state.isRunning -> "Stop Speed Test"
-                        state.phase == SpeedTestPhase.COMPLETED -> "Run Again"
-                        else -> "Start Speed Test"
-                    },
-                    style = MaterialTheme.typography.labelLarge
-                )
             }
         }
+    }
+}
+
+@Composable
+private fun SpeedTestStatsAndAction(
+    state: SpeedTestState,
+    onStartTest: () -> Unit,
+    onStopTest: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        SpeedStatCard(
+            label = "Ping",
+            value = state.pingMs?.let { "$it ms" } ?: "—",
+            icon = Icons.Rounded.NetworkPing,
+            accent = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f)
+        )
+        SpeedStatCard(
+            label = "Jitter",
+            value = state.jitterMs?.let { "$it ms" } ?: "—",
+            icon = Icons.Rounded.Speed,
+            accent = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.weight(1f)
+        )
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        SpeedStatCard(
+            label = "Download",
+            value = state.downloadMbps?.let { "${formatMbps(it)} Mbps" } ?: "—",
+            icon = Icons.Rounded.ArrowDownward,
+            accent = WifiAccent,
+            modifier = Modifier.weight(1f)
+        )
+        SpeedStatCard(
+            label = "Upload",
+            value = state.uploadMbps?.let { "${formatMbps(it)} Mbps" } ?: "—",
+            icon = Icons.Rounded.ArrowUpward,
+            accent = DataAccent,
+            modifier = Modifier.weight(1f)
+        )
+    }
+
+    state.errorMessage?.let { err ->
+        FrostedSurface(
+            shape = RoundedCornerShape(14.dp),
+            tintColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f),
+            borderAccent = MaterialTheme.colorScheme.error,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = err,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.padding(12.dp)
+            )
+        }
+    }
+
+    Button(
+        onClick = if (state.isRunning) onStopTest else onStartTest,
+        shape = RoundedCornerShape(16.dp),
+        colors = if (state.isRunning) {
+            ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError
+            )
+        } else {
+            ButtonDefaults.buttonColors()
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .testTag("speed_test_action_button")
+    ) {
+        Icon(
+            imageVector = if (state.isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = when {
+                state.isRunning -> "Stop Speed Test"
+                state.phase == SpeedTestPhase.COMPLETED -> "Run Again"
+                else -> "Start Speed Test"
+            },
+            style = MaterialTheme.typography.labelLarge
+        )
     }
 }
 

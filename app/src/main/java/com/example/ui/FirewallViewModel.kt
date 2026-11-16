@@ -37,6 +37,8 @@ import com.example.data.model.ThemeMode
 import com.example.data.model.UsageChartMode
 import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
+import com.example.data.model.WebsiteFilterMode
+import com.example.data.model.WebsiteRuleItem
 import com.example.data.network.SpeedTestPhase
 import com.example.data.network.SpeedTestRunner
 import com.example.data.network.SpeedTestState
@@ -67,6 +69,16 @@ data class DataUsageUiState(
     val errorMessage: String? = null
 )
 
+data class WebsiteBlockerUiState(
+    val filterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
+    val blocklistRules: List<WebsiteRuleItem> = emptyList(),
+    val whitelistRules: List<WebsiteRuleItem> = emptyList(),
+    val bypassPackages: Set<String> = emptySet(),
+    val blockedDnsCount: Long = 0L,
+    val allowedDnsCount: Long = 0L,
+    val recentBlockedDomains: List<String> = emptyList()
+)
+
 data class FirewallUiState(
     val currentDestination: AppDestination = AppDestination.FIREWALL,
     val isLoading: Boolean = true,
@@ -86,7 +98,8 @@ data class FirewallUiState(
     val dnsProbeState: DnsProbeState = DnsProbeState(),
     val isSpeedTestOpen: Boolean = false,
     val speedTestState: SpeedTestState = SpeedTestState(),
-    val dataUsageState: DataUsageUiState = DataUsageUiState()
+    val dataUsageState: DataUsageUiState = DataUsageUiState(),
+    val websiteBlockerState: WebsiteBlockerUiState = WebsiteBlockerUiState()
 ) {
     val effectiveNetworkType: ActiveNetworkType
         get() = if (vpnRuntimeState.isServiceRunning && vpnRuntimeState.activeNetworkType != ActiveNetworkType.NONE) {
@@ -116,6 +129,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         context = application,
         ruleDao = database.appNetworkRuleDao(),
         trafficUsageDao = database.appTrafficUsageDao(),
+        websiteRuleDao = database.websiteRuleDao(),
         preferences = preferences
     )
 
@@ -293,8 +307,14 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         uiInteractionFlow,
         connectionDetailsFlow,
         sheetsFlow,
-        combine(currentDestinationFlow, usageStateFlow) { dest, usage -> dest to usage }
-    ) { base, interaction, connDetails, sheets, (destination, dataUsage) ->
+        combine(
+            currentDestinationFlow,
+            usageStateFlow,
+            repository.websiteRulesFlow
+        ) { dest, usage, websiteRules ->
+            Triple(dest, usage, websiteRules)
+        }
+    ) { base, interaction, connDetails, sheets, (destination, dataUsage, websiteRules) ->
         val ruleMap = base.rules.associateBy { it.packageName }
 
         val visibleInstalled = base.installed.filter { app ->
@@ -331,6 +351,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             matchesQuery && matchesFilter
         }
 
+        val websiteState = WebsiteBlockerUiState(
+            filterMode = base.prefs.websiteFilterMode,
+            blocklistRules = websiteRules.filter { !it.isWhitelist },
+            whitelistRules = websiteRules.filter { it.isWhitelist },
+            bypassPackages = base.prefs.websiteBypassPackages,
+            blockedDnsCount = base.vpnState.blockedDnsQueriesCount,
+            allowedDnsCount = base.vpnState.allowedDnsQueriesCount,
+            recentBlockedDomains = base.vpnState.recentBlockedDomains
+        )
+
         FirewallUiState(
             currentDestination = destination,
             isLoading = base.loading,
@@ -350,7 +380,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             dnsProbeState = sheets.dnsProbeState,
             isSpeedTestOpen = sheets.speedTestOpen,
             speedTestState = sheets.speedTestState,
-            dataUsageState = dataUsage
+            dataUsageState = dataUsage,
+            websiteBlockerState = websiteState
         )
     }.stateIn(
         scope = viewModelScope,
@@ -378,11 +409,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun selectDestination(destination: AppDestination) {
         currentDestinationFlow.value = destination
-        if (destination == AppDestination.DATA_USAGE) {
-            if (isSelectionModeFlow.value) {
-                exitSelectionMode()
-            }
-            refreshDataUsage()
+        if (destination != AppDestination.FIREWALL && isSelectionModeFlow.value) {
+            exitSelectionMode()
+        }
+        when (destination) {
+            AppDestination.DATA_USAGE -> refreshDataUsage()
+            AppDestination.SPEED_TEST, AppDestination.DNS -> refreshConnectionDetails()
+            else -> Unit
         }
     }
 
@@ -576,12 +609,14 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openDnsProtection() {
-        refreshConnectionDetails()
-        isDnsProtectionOpenFlow.value = true
+        selectDestination(AppDestination.DNS)
     }
 
     fun closeDnsProtection() {
         isDnsProtectionOpenFlow.value = false
+        if (currentDestinationFlow.value == AppDestination.DNS) {
+            selectDestination(AppDestination.FIREWALL)
+        }
     }
 
     fun testCloudflareDoh() {
@@ -606,13 +641,15 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openSpeedTest() {
-        refreshConnectionDetails()
-        isSpeedTestOpenFlow.value = true
+        selectDestination(AppDestination.SPEED_TEST)
     }
 
     fun closeSpeedTest() {
         stopSpeedTest()
         isSpeedTestOpenFlow.value = false
+        if (currentDestinationFlow.value == AppDestination.SPEED_TEST) {
+            selectDestination(AppDestination.FIREWALL)
+        }
     }
 
     fun startSpeedTest() {
@@ -686,6 +723,65 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             repository.clearAllRules()
             _snackbarMessages.tryEmit("Cleared all per-app network rules")
+        }
+    }
+
+    fun setWebsiteFilterMode(mode: WebsiteFilterMode) {
+        viewModelScope.launch {
+            preferences.setWebsiteFilterMode(mode)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val msg = when {
+                mode == WebsiteFilterMode.OFF -> "Website blocker turned off"
+                firewallOn -> "Website filter set to ${mode.title}"
+                else -> "Website ${mode.title} selected — enable NetGate Firewall to apply"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun addWebsiteRule(rawDomain: String, isWhitelist: Boolean) {
+        viewModelScope.launch {
+            val result = repository.addWebsiteRule(rawDomain, isWhitelist)
+            result.onSuccess { domain ->
+                val listName = if (isWhitelist) "Whitelist" else "Blocklist"
+                _snackbarMessages.tryEmit("Added $domain to $listName")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Enter a valid domain like example.com")
+            }
+        }
+    }
+
+    fun toggleWebsiteRuleEnabled(domain: String, enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setWebsiteRuleEnabled(domain, enabled)
+        }
+    }
+
+    fun deleteWebsiteRule(domain: String) {
+        viewModelScope.launch {
+            repository.deleteWebsiteRule(domain)
+            _snackbarMessages.tryEmit("Removed $domain")
+        }
+    }
+
+    fun clearWebsiteRules(isWhitelist: Boolean) {
+        viewModelScope.launch {
+            repository.clearWebsiteRules(isWhitelist)
+            val listName = if (isWhitelist) "Whitelist" else "Blocklist"
+            _snackbarMessages.tryEmit("Cleared all $listName domains")
+        }
+    }
+
+    fun toggleWebsiteBypassApp(packageName: String) {
+        viewModelScope.launch {
+            preferences.toggleWebsiteBypassPackage(packageName)
+        }
+    }
+
+    fun clearWebsiteBypassApps() {
+        viewModelScope.launch {
+            preferences.clearWebsiteBypassPackages()
+            _snackbarMessages.tryEmit("Cleared selected allowed apps")
         }
     }
 

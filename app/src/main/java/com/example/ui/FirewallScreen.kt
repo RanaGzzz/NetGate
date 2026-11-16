@@ -42,11 +42,14 @@ import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -89,13 +92,13 @@ import com.example.ui.components.AppDetailBottomSheet
 import com.example.ui.components.AppRuleRow
 import com.example.ui.components.BatchSelectionBar
 import com.example.ui.components.ConnectionInfoSheet
-import com.example.ui.components.DnsProtectionSheet
+import com.example.ui.components.DnsProtectionContent
 import com.example.ui.components.FirewallHeaderCard
 import com.example.ui.components.FirewallSettingsSheet
 import com.example.ui.components.FloatingFrostedNavBar
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
-import com.example.ui.components.SpeedTestSheet
+import com.example.ui.components.SpeedTestContent
 import com.example.ui.theme.LocalIsDarkTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,7 +123,7 @@ fun FirewallScreen(
     }
 
     BackHandler(
-        enabled = !uiState.isSelectionMode && uiState.currentDestination == AppDestination.DATA_USAGE
+        enabled = !uiState.isSelectionMode && uiState.currentDestination != AppDestination.FIREWALL
     ) {
         viewModel.selectDestination(AppDestination.FIREWALL)
     }
@@ -167,18 +170,22 @@ fun FirewallScreen(
                         title = {
                             Column {
                                 Text(
-                                    text = if (uiState.currentDestination == AppDestination.DATA_USAGE) {
-                                        stringResource(R.string.data_usage_title)
-                                    } else {
-                                        stringResource(R.string.app_name)
+                                    text = when (uiState.currentDestination) {
+                                        AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_title)
+                                        AppDestination.WEBSITES -> stringResource(R.string.websites_title)
+                                        AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_title)
+                                        AppDestination.DNS -> stringResource(R.string.dns_title)
+                                        AppDestination.FIREWALL -> stringResource(R.string.app_name)
                                     },
                                     style = MaterialTheme.typography.headlineSmall
                                 )
                                 Text(
-                                    text = if (uiState.currentDestination == AppDestination.DATA_USAGE) {
-                                        stringResource(R.string.data_usage_subtitle)
-                                    } else {
-                                        "Wi-Fi & Data Controller"
+                                    text = when (uiState.currentDestination) {
+                                        AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_subtitle)
+                                        AppDestination.WEBSITES -> stringResource(R.string.websites_subtitle)
+                                        AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_subtitle)
+                                        AppDestination.DNS -> stringResource(R.string.dns_subtitle)
+                                        AppDestination.FIREWALL -> "Wi-Fi & Data Controller"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -234,20 +241,22 @@ fun FirewallScreen(
 
                             IconButton(
                                 onClick = {
-                                    if (uiState.currentDestination == AppDestination.DATA_USAGE) {
-                                        viewModel.refreshDataUsage()
-                                    } else {
-                                        viewModel.refreshInstalledApps()
+                                    when (uiState.currentDestination) {
+                                        AppDestination.DATA_USAGE -> viewModel.refreshDataUsage()
+                                        AppDestination.SPEED_TEST, AppDestination.DNS ->
+                                            viewModel.refreshConnectionDetails()
+                                        AppDestination.FIREWALL, AppDestination.WEBSITES ->
+                                            viewModel.refreshInstalledApps()
                                     }
                                 },
                                 modifier = Modifier.testTag("refresh_apps_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = if (uiState.currentDestination == AppDestination.DATA_USAGE) {
-                                        "Sync data usage"
-                                    } else {
-                                        "Refresh installed apps"
+                                    contentDescription = when (uiState.currentDestination) {
+                                        AppDestination.DATA_USAGE -> "Sync data usage"
+                                        AppDestination.SPEED_TEST, AppDestination.DNS -> "Refresh connection status"
+                                        AppDestination.FIREWALL, AppDestination.WEBSITES -> "Refresh installed apps"
                                     }
                                 )
                             }
@@ -292,6 +301,18 @@ fun FirewallScreen(
                                 modifier = Modifier.testTag("nav_rail_firewall")
                             )
                             NavigationRailItem(
+                                selected = uiState.currentDestination == AppDestination.WEBSITES,
+                                onClick = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Public,
+                                        contentDescription = stringResource(R.string.nav_websites)
+                                    )
+                                },
+                                label = { Text(stringResource(R.string.nav_websites)) },
+                                modifier = Modifier.testTag("nav_rail_websites")
+                            )
+                            NavigationRailItem(
                                 selected = uiState.currentDestination == AppDestination.DATA_USAGE,
                                 onClick = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
                                 icon = {
@@ -302,6 +323,30 @@ fun FirewallScreen(
                                 },
                                 label = { Text(stringResource(R.string.nav_data_usage)) },
                                 modifier = Modifier.testTag("nav_rail_data_usage")
+                            )
+                            NavigationRailItem(
+                                selected = uiState.currentDestination == AppDestination.SPEED_TEST,
+                                onClick = { viewModel.selectDestination(AppDestination.SPEED_TEST) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Speed,
+                                        contentDescription = stringResource(R.string.nav_speed_test)
+                                    )
+                                },
+                                label = { Text(stringResource(R.string.nav_speed_test)) },
+                                modifier = Modifier.testTag("nav_rail_speed_test")
+                            )
+                            NavigationRailItem(
+                                selected = uiState.currentDestination == AppDestination.DNS,
+                                onClick = { viewModel.selectDestination(AppDestination.DNS) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Dns,
+                                        contentDescription = stringResource(R.string.nav_dns)
+                                    )
+                                },
+                                label = { Text(stringResource(R.string.nav_dns)) },
+                                modifier = Modifier.testTag("nav_rail_dns")
                             )
                         }
                     }
@@ -316,6 +361,43 @@ fun FirewallScreen(
                                 onFilterCategoryChange = viewModel::setUsageFilterCategory,
                                 onRefreshUsage = viewModel::refreshDataUsage,
                                 onInspectApp = viewModel::openAppDetails
+                            )
+                        } else if (uiState.currentDestination == AppDestination.WEBSITES) {
+                            WebsiteBlockerContent(
+                                state = uiState.websiteBlockerState,
+                                allManagedApps = uiState.allManagedApps,
+                                isFirewallActive = isFirewallActive,
+                                connectionDetails = uiState.connectionDetails,
+                                loadIcon = viewModel::getAppIconBitmap,
+                                onSelectFilterMode = viewModel::setWebsiteFilterMode,
+                                onAddWebsiteRule = viewModel::addWebsiteRule,
+                                onToggleWebsiteRuleEnabled = viewModel::toggleWebsiteRuleEnabled,
+                                onDeleteWebsiteRule = viewModel::deleteWebsiteRule,
+                                onClearWebsiteRules = viewModel::clearWebsiteRules,
+                                onToggleBypassApp = viewModel::toggleWebsiteBypassApp,
+                                onClearBypassApps = viewModel::clearWebsiteBypassApps,
+                                onRequestEnableFirewall = onRequestEnableFirewall,
+                                onOpenDnsProtection = viewModel::openDnsProtection
+                            )
+                        } else if (uiState.currentDestination == AppDestination.SPEED_TEST) {
+                            val activeNetLabel = when (uiState.effectiveNetworkType) {
+                                ActiveNetworkType.WIFI -> "Wi-Fi"
+                                ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
+                                ActiveNetworkType.OTHER -> "Ethernet / Other"
+                                ActiveNetworkType.NONE -> "Offline"
+                            }
+                            SpeedTestContent(
+                                state = uiState.speedTestState,
+                                activeNetworkLabel = activeNetLabel,
+                                onStartTest = viewModel::startSpeedTest,
+                                onStopTest = viewModel::stopSpeedTest
+                            )
+                        } else if (uiState.currentDestination == AppDestination.DNS) {
+                            DnsProtectionContent(
+                                connectionDetails = uiState.connectionDetails,
+                                probeState = uiState.dnsProbeState,
+                                onTestCloudflareDoh = viewModel::testCloudflareDoh,
+                                onCopiedHostname = viewModel::notifyCopiedDnsHostname
                             )
                         } else if (isWideLayout) {
                             Row(
@@ -414,14 +496,12 @@ fun FirewallScreen(
                     ) {
                         FloatingFrostedNavBar(
                             currentDestination = uiState.currentDestination,
-                            isSpeedTestOpen = uiState.isSpeedTestOpen,
-                            isDnsProtectionOpen = uiState.isDnsProtectionOpen,
                             isConnectionInfoOpen = uiState.isConnectionInfoOpen,
                             onSelectFirewall = { viewModel.selectDestination(AppDestination.FIREWALL) },
+                            onSelectWebsites = { viewModel.selectDestination(AppDestination.WEBSITES) },
                             onSelectDataUsage = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
-                            onOpenSpeedTest = viewModel::openSpeedTest,
-                            onOpenDnsProtection = viewModel::openDnsProtection,
-                            onOpenConnectionInfo = viewModel::openConnectionInfo
+                            onSelectSpeedTest = { viewModel.selectDestination(AppDestination.SPEED_TEST) },
+                            onSelectDnsProtection = { viewModel.selectDestination(AppDestination.DNS) }
                         )
                     }
 
@@ -468,32 +548,6 @@ fun FirewallScreen(
             details = uiState.connectionDetails,
             onRefresh = viewModel::refreshConnectionDetails,
             onDismiss = viewModel::closeConnectionInfo
-        )
-    }
-
-    if (uiState.isDnsProtectionOpen) {
-        DnsProtectionSheet(
-            connectionDetails = uiState.connectionDetails,
-            probeState = uiState.dnsProbeState,
-            onTestCloudflareDoh = viewModel::testCloudflareDoh,
-            onCopiedHostname = viewModel::notifyCopiedDnsHostname,
-            onDismiss = viewModel::closeDnsProtection
-        )
-    }
-
-    if (uiState.isSpeedTestOpen) {
-        val activeNetLabel = when (uiState.effectiveNetworkType) {
-            ActiveNetworkType.WIFI -> "Wi-Fi"
-            ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
-            ActiveNetworkType.OTHER -> "Ethernet / Other"
-            ActiveNetworkType.NONE -> "Offline"
-        }
-        SpeedTestSheet(
-            state = uiState.speedTestState,
-            activeNetworkLabel = activeNetLabel,
-            onStartTest = viewModel::startSpeedTest,
-            onStopTest = viewModel::stopSpeedTest,
-            onDismiss = viewModel::closeSpeedTest
         )
     }
 

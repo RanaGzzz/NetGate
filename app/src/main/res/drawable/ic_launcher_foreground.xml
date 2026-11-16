@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_launcher_foreground_art_1794700096870"
+        android:drawable="@drawable/netgate_futuristic_icon_1794809627987"
         android:gravity="center" />
 </layer-list>

@@ -8,13 +8,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [AppNetworkRuleEntity::class, AppTrafficUsageEntity::class],
-    version = 2,
+    entities = [AppNetworkRuleEntity::class, AppTrafficUsageEntity::class, WebsiteRuleEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class NetGateDatabase : RoomDatabase() {
     abstract fun appNetworkRuleDao(): AppNetworkRuleDao
     abstract fun appTrafficUsageDao(): AppTrafficUsageDao
+    abstract fun websiteRuleDao(): WebsiteRuleDao
 
     companion object {
         @Volatile
@@ -37,6 +38,22 @@ abstract class NetGateDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `website_rules` (
+                        `domain` TEXT NOT NULL,
+                        `ruleType` TEXT NOT NULL,
+                        `isEnabled` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`domain`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): NetGateDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -44,7 +61,7 @@ abstract class NetGateDatabase : RoomDatabase() {
                     NetGateDatabase::class.java,
                     "netgate_rules.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }
