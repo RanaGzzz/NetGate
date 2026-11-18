@@ -27,6 +27,7 @@ class LocalFilteringProxyServer(
     private val port: Int,
     private val stripTrackingParams: Boolean,
     private val protectSocket: (Socket) -> Boolean,
+    private val isClientBlocked: (Socket) -> Boolean = { false },
     private val evaluateRequest: (host: String, pathAndQuery: String?) -> ProxyFilterDecision,
     private val resolveTargetHost: (host: String) -> String = { it },
     private val upstreamProxyProvider: () -> Pair<String, Int>? = { null },
@@ -110,6 +111,16 @@ class LocalFilteringProxyServer(
             val method = parts[0].uppercase()
             val target = parts[1]
             val version = parts[2]
+
+            if (isClientBlocked(client)) {
+                val blockedHost = parseAuthority(target, if (method == "CONNECT") 443 else 80).first
+                    .ifBlank { target }
+                val decision = ProxyFilterDecision(allow = false, reason = "App Firewall", isAdBlock = false)
+                onRequestLogged(blockedHost, decision)
+                writeForbiddenResponse(clientOut, decision.reason)
+                runCatching { client.close() }
+                return
+            }
 
             if (method == "CONNECT") {
                 handleHttpsConnectTunnel(

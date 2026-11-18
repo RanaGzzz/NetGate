@@ -1219,4 +1219,57 @@ class ExampleRobolectricTest {
         assertEquals("Router / Local Gateway DNS", wifiPlainState.connectedProvider)
         assertEquals("Wi-Fi Network DNS (Unencrypted Port 53)", wifiPlainState.transportLabel)
     }
+
+    @Test
+    fun `tun packet inspector parses ipv4 tcp syn ipv4 udp and ipv6 packets safely`() {
+        val inspector = com.example.service.TunPacketInspector
+
+        // 1. IPv4 TCP SYN packet from 10.1.10.1:52000 -> 93.184.216.34:443
+        val ipv4Syn = ByteArray(40)
+        ipv4Syn[0] = 0x45.toByte()
+        ipv4Syn[2] = 0
+        ipv4Syn[3] = 40
+        ipv4Syn[9] = 6 // TCP
+        ipv4Syn[12] = 10; ipv4Syn[13] = 1; ipv4Syn[14] = 10; ipv4Syn[15] = 1
+        ipv4Syn[16] = 93; ipv4Syn[17] = 184.toByte(); ipv4Syn[18] = 216.toByte(); ipv4Syn[19] = 34
+        ipv4Syn[20] = (52000 ushr 8).toByte(); ipv4Syn[21] = (52000 and 0xFF).toByte()
+        ipv4Syn[22] = (443 ushr 8).toByte(); ipv4Syn[23] = (443 and 0xFF).toByte()
+        ipv4Syn[32] = 0x50.toByte()
+        ipv4Syn[33] = 0x02 // SYN
+
+        val parsedV4Syn = inspector.parseIpPacket(ipv4Syn, ipv4Syn.size)
+        assertNotNull(parsedV4Syn)
+        assertEquals(4, parsedV4Syn!!.version)
+        assertEquals("TCP", parsedV4Syn.protocolName)
+        assertEquals("10.1.10.1", parsedV4Syn.srcIpText)
+        assertEquals("93.184.216.34", parsedV4Syn.dstIpText)
+        assertEquals(52000, parsedV4Syn.srcPort)
+        assertEquals(443, parsedV4Syn.dstPort)
+        assertTrue(parsedV4Syn.isTcpSyn)
+
+        // 2. IPv6 TCP SYN packet from fd00::1:40000 -> 2606:4700:4700::1111:443
+        val ipv6Syn = ByteArray(60)
+        ipv6Syn[0] = 0x60.toByte()
+        ipv6Syn[4] = 0
+        ipv6Syn[5] = 20 // payload len
+        ipv6Syn[6] = 6 // TCP
+        ipv6Syn[8] = 0xfd.toByte(); ipv6Syn[23] = 1
+        ipv6Syn[24] = 0x26; ipv6Syn[25] = 0x06; ipv6Syn[39] = 0x11
+        ipv6Syn[40] = (40000 ushr 8).toByte(); ipv6Syn[41] = (40000 and 0xFF).toByte()
+        ipv6Syn[42] = (443 ushr 8).toByte(); ipv6Syn[43] = (443 and 0xFF).toByte()
+        ipv6Syn[52] = 0x50.toByte()
+        ipv6Syn[53] = 0x02 // SYN
+
+        val parsedV6Syn = inspector.parseIpPacket(ipv6Syn, ipv6Syn.size)
+        assertNotNull(parsedV6Syn)
+        assertEquals(6, parsedV6Syn!!.version)
+        assertEquals("TCP", parsedV6Syn.protocolName)
+        assertEquals(40000, parsedV6Syn.srcPort)
+        assertEquals(443, parsedV6Syn.dstPort)
+        assertTrue(parsedV6Syn.isTcpSyn)
+
+        // 3. Truncated / invalid packet returns null cleanly
+        assertNull(inspector.parseIpPacket(ByteArray(10), 10))
+        assertNull(inspector.parseIpPacket(ByteArray(24).apply { this[0] = 0x35.toByte() }, 24))
+    }
 }

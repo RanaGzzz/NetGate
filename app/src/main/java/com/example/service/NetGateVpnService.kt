@@ -74,6 +74,7 @@ data class VpnRuntimeState(
     val blockedDnsQueriesCount: Long = 0L,
     val allowedDnsQueriesCount: Long = 0L,
     val blockedAdsCount: Long = 0L,
+    val blockedPacketsCount: Long = 0L,
     val loadedAdDomainsCount: Int = 0,
     val isSafeSearchActive: Boolean = false,
     val youtubeRestrictedMode: YouTubeRestrictedMode = YouTubeRestrictedMode.OFF,
@@ -180,6 +181,7 @@ class NetGateVpnService : VpnService() {
     private val blockedDnsCount = AtomicLong(0L)
     private val allowedDnsCount = AtomicLong(0L)
     private val blockedAdsCount = AtomicLong(0L)
+    private val blockedPacketsCount = AtomicLong(0L)
     private val blockedProxyCount = AtomicLong(0L)
     private val allowedProxyCount = AtomicLong(0L)
     private val safeRewriteCount = AtomicLong(0L)
@@ -189,6 +191,7 @@ class NetGateVpnService : VpnService() {
 
     private val recentBlockedLock = Any()
     private val recentBlockedQueue = ArrayDeque<String>()
+    private val packetLogThrottleMap = HashMap<String, Long>()
 
     private lateinit var preferences: FirewallPreferences
 
@@ -444,9 +447,23 @@ class NetGateVpnService : VpnService() {
             }
         }
         currentNetworkType = nextType
+        syncUnderlyingNetworks(nextType)
         serviceScope.launch {
             rebuildTunnel(forceRebuild = false)
         }
+    }
+
+    private fun syncUnderlyingNetworks(networkType: ActiveNetworkType) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) return
+        val underlying: Array<Network>? = synchronized(this) {
+            when (networkType) {
+                ActiveNetworkType.WIFI -> wifiNetworks.toTypedArray().takeIf { it.isNotEmpty() }
+                ActiveNetworkType.MOBILE_DATA -> cellularNetworks.toTypedArray().takeIf { it.isNotEmpty() }
+                ActiveNetworkType.OTHER -> (wifiNetworks + cellularNetworks).toTypedArray().takeIf { it.isNotEmpty() }
+                ActiveNetworkType.NONE -> emptyArray()
+            }
+        }
+        runCatching { setUnderlyingNetworks(underlying) }
     }
 
     private fun resolvePackageUid(pkg: String): Int? = runCatching {
@@ -555,7 +572,7 @@ class NetGateVpnService : VpnService() {
 
         if (!needsDnsProxy) {
             stopProxyServerLocked()
-            // Pure per-app sinkhole mode: route all traffic of blocked apps into local TUN and drop packets.
+            // Pure per-app sinkhole mode: route all traffic of blocked apps into local TUN and drop/reject packets.
             val builder = Builder()
                 .setSession(getString(R.string.app_name))
                 .setMtu(1500)
@@ -563,6 +580,10 @@ class NetGateVpnService : VpnService() {
                 .addRoute("0.0.0.0", 0)
                 .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
                 .addRoute("::", 0)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
+            }
 
             var addedCount = 0
             for (pkg in installedBlocked) {
@@ -599,8 +620,9 @@ class NetGateVpnService : VpnService() {
 
             vpnInterface = established
             activeTunnelSignature = desiredSignature
+            syncUnderlyingNetworks(netType)
             drainJob = serviceScope.launch(Dispatchers.IO) {
-                drainPackets(established)
+                drainPackets(established, installedBlocked)
             }
 
             publishRuntimeState(
@@ -632,9 +654,12 @@ class NetGateVpnService : VpnService() {
                 .addDnsServer(VIRTUAL_IPV6_DNS_SERVER)
                 .addRoute(VIRTUAL_IPV6_DNS_SERVER, 128)
 
-            if (proxyActiveNow && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                runCatching {
-                    builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
+                if (proxyActiveNow) {
+                    runCatching {
+                        builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort))
+                    }
                 }
             }
 
@@ -663,6 +688,7 @@ class NetGateVpnService : VpnService() {
 
             vpnInterface = established
             activeTunnelSignature = desiredSignature
+            syncUnderlyingNetworks(netType)
             drainJob = serviceScope.launch(Dispatchers.IO) {
                 runDnsProxyLoop(established)
             }
@@ -689,6 +715,7 @@ class NetGateVpnService : VpnService() {
             port = port,
             stripTrackingParams = stripTracking,
             protectSocket = { socket -> protect(socket) },
+            isClientBlocked = ::isProxyClientSocketBlocked,
             evaluateRequest = ::evaluateProxyRequest,
             resolveTargetHost = ::resolveProxyTargetHost,
             upstreamProxyProvider = ::provideUpstreamSniProxy,
@@ -807,19 +834,140 @@ class NetGateVpnService : VpnService() {
         publishDnsStatsOnly()
     }
 
-    private fun drainPackets(pfd: ParcelFileDescriptor) {
+    private fun drainPackets(
+        pfd: ParcelFileDescriptor,
+        blockedPackages: List<String>
+    ) {
         val buffer = ByteArray(32767)
+        val output = FileOutputStream(pfd.fileDescriptor)
         try {
             FileInputStream(pfd.fileDescriptor).use { input ->
                 while (serviceScope.isActive) {
                     val bytesRead = input.read(buffer)
                     if (bytesRead < 0) break
-                    // Packets from blocked apps are intentionally sinkholed here.
+                    if (bytesRead == 0) continue
+
+                    val packetCopy = buffer.copyOf(bytesRead)
+                    val parsed = TunPacketInspector.parseIpPacket(packetCopy, bytesRead)
+                    blockedPacketsCount.incrementAndGet()
+
+                    if (parsed != null) {
+                        if (parsed.protocol == TunPacketInspector.IPPROTO_UDP && parsed.dstPort == 53) {
+                            val dnsQuery = DnsPacketFilter.parseUdpDnsQuery(packetCopy, bytesRead)
+                            if (dnsQuery != null) {
+                                sendNxDomain(dnsQuery, output)
+                                recordInterceptedAppPacket(
+                                    parsed = parsed,
+                                    domainOrHost = dnsQuery.domain,
+                                    blockedPackages = blockedPackages
+                                )
+                                continue
+                            }
+                        } else if (parsed.protocol == TunPacketInspector.IPPROTO_TCP && parsed.isTcpSyn) {
+                            val rstPacket = DnsPacketFilter.buildTcpResetPacket(packetCopy, bytesRead)
+                            if (rstPacket != null) {
+                                synchronized(tunWriteLock) {
+                                    runCatching { output.write(rstPacket) }
+                                }
+                            }
+                        }
+
+                        recordInterceptedAppPacket(
+                            parsed = parsed,
+                            domainOrHost = parsed.dstIpText,
+                            blockedPackages = blockedPackages
+                        )
+                    }
                 }
             }
         } catch (_: IOException) {
             // Expected when interface is closed during rebuild or shutdown
+        } finally {
+            runCatching { output.close() }
         }
+    }
+
+    private fun recordInterceptedAppPacket(
+        parsed: ParsedIpPacket,
+        domainOrHost: String,
+        blockedPackages: List<String>
+    ) {
+        val target = domainOrHost.ifBlank { parsed.dstIpText }.ifBlank { return }
+        val ownerPkg = resolveInterceptedPacketPackage(parsed, blockedPackages)
+        val throttleKey = "$ownerPkg|${parsed.dstIpText}|${parsed.dstPort}"
+        val now = System.currentTimeMillis()
+        val shouldRecord = synchronized(packetLogThrottleMap) {
+            val prev = packetLogThrottleMap[throttleKey] ?: 0L
+            if (now - prev >= 2500L) {
+                if (packetLogThrottleMap.size > 256) {
+                    packetLogThrottleMap.clear()
+                }
+                packetLogThrottleMap[throttleKey] = now
+                true
+            } else {
+                false
+            }
+        }
+        if (!shouldRecord) return
+
+        recordBlockedDomain(target)
+        recordDnsLog(target, DnsQueryStatus.BLOCKED_APP, "App Firewall (${parsed.protocolName})")
+        if (latestIsDeepMonitorEnabled) {
+            ConnectionMonitorHub.recordConnection(
+                context = applicationContext,
+                domain = target,
+                remoteIp = parsed.dstIpText,
+                remotePort = parsed.dstPort,
+                protocol = parsed.protocolName,
+                appPackage = ownerPkg,
+                bytesSent = parsed.totalLength.toLong(),
+                bytesReceived = 0L,
+                actionStatus = "BLOCKED"
+            )
+        }
+        publishDnsStatsOnly()
+    }
+
+    private fun resolveInterceptedPacketPackage(
+        parsed: ParsedIpPacket,
+        blockedPackages: List<String>
+    ): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            (parsed.protocol == TunPacketInspector.IPPROTO_TCP || parsed.protocol == TunPacketInspector.IPPROTO_UDP) &&
+            parsed.srcPort > 0 && parsed.dstPort > 0
+        ) {
+            val cm = connectivityManager
+            val srcAddr = DnsPacketFilter.ipBytesToInetAddress(parsed.srcIp)
+            val dstAddr = DnsPacketFilter.ipBytesToInetAddress(parsed.dstIp)
+            if (cm != null && srcAddr != null && dstAddr != null) {
+                val resolved = runCatching {
+                    val uid = cm.getConnectionOwnerUid(
+                        parsed.protocol,
+                        InetSocketAddress(srcAddr, parsed.srcPort),
+                        InetSocketAddress(dstAddr, parsed.dstPort)
+                    )
+                    if (uid > 0) packageManager.getPackagesForUid(uid)?.firstOrNull().orEmpty() else ""
+                }.getOrDefault("")
+                if (resolved.isNotBlank()) return resolved
+            }
+        }
+        return if (blockedPackages.size == 1) blockedPackages.first() else ""
+    }
+
+    private fun isProxyClientSocketBlocked(client: java.net.Socket): Boolean {
+        val blockedUids = latestBlockedUids
+        if (blockedUids.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val cm = connectivityManager ?: return false
+        val clientLocal = client.remoteSocketAddress as? InetSocketAddress ?: return false
+        val proxyRemote = client.localSocketAddress as? InetSocketAddress ?: return false
+        return runCatching {
+            val uid = cm.getConnectionOwnerUid(
+                TunPacketInspector.IPPROTO_TCP,
+                clientLocal,
+                proxyRemote
+            )
+            uid in blockedUids
+        }.getOrDefault(false)
     }
 
     private fun runDnsProxyLoop(pfd: ParcelFileDescriptor) {
@@ -1196,6 +1344,7 @@ class NetGateVpnService : VpnService() {
             blockedDnsQueriesCount = blockedDnsCount.get(),
             allowedDnsQueriesCount = allowedDnsCount.get(),
             blockedAdsCount = blockedAdsCount.get(),
+            blockedPacketsCount = blockedPacketsCount.get(),
             loadedAdDomainsCount = latestLoadedAdDomainsCount,
             isSafeSearchActive = latestIsSafeSearchEnabled,
             youtubeRestrictedMode = latestYoutubeRestrictedMode,
@@ -1231,6 +1380,7 @@ class NetGateVpnService : VpnService() {
             blockedDnsQueriesCount = blockedDnsCount.get(),
             allowedDnsQueriesCount = allowedDnsCount.get(),
             blockedAdsCount = blockedAdsCount.get(),
+            blockedPacketsCount = blockedPacketsCount.get(),
             loadedAdDomainsCount = latestLoadedAdDomainsCount,
             isSafeSearchActive = latestIsSafeSearchEnabled,
             youtubeRestrictedMode = latestYoutubeRestrictedMode,
