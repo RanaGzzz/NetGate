@@ -19,6 +19,8 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import com.example.data.local.AdFilterListDao
+import com.example.data.local.AdFilterListEntity
 import com.example.data.local.AppNetworkRuleDao
 import com.example.data.local.AppNetworkRuleEntity
 import com.example.data.local.AppTimerDao
@@ -32,17 +34,22 @@ import com.example.data.local.WebsiteRuleDao
 import com.example.data.local.WebsiteRuleEntity
 import com.example.data.local.WebsiteRuleType
 import com.example.data.model.ActiveNetworkType
+import com.example.data.model.AdFilterListItem
 import com.example.data.model.AppCountdownTimer
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSummary
+import com.example.data.model.DnsLeakTestState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.WebsiteRuleItem
+import com.example.data.network.DnsLeakTester
+import com.example.service.AdBlockFilterEngine
 import com.example.service.AppTimerScheduler
 import com.example.service.DnsPacketFilter
+import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -60,6 +67,7 @@ class FirewallRepository(
     private val trafficUsageDao: AppTrafficUsageDao,
     private val websiteRuleDao: WebsiteRuleDao,
     private val appTimerDao: AppTimerDao,
+    private val adFilterListDao: AdFilterListDao,
     val preferences: FirewallPreferences
 ) {
     val rulesFlow: Flow<List<AppNetworkRuleEntity>> = ruleDao.observeAllRules()
@@ -85,6 +93,21 @@ class FirewallRepository(
                     isWhitelist = entity.ruleType == WebsiteRuleType.ALLOW,
                     isEnabled = entity.isEnabled,
                     createdAt = entity.createdAt
+                )
+            }
+        }
+    val adFilterListsFlow: Flow<List<AdFilterListItem>> = adFilterListDao.observeAllFilterLists()
+        .map { entities ->
+            entities.map { entity ->
+                AdFilterListItem(
+                    id = entity.id,
+                    title = entity.title,
+                    description = entity.description,
+                    sourceUrl = entity.sourceUrl,
+                    category = entity.category,
+                    isEnabled = entity.isEnabled,
+                    domainCount = entity.domainCount,
+                    lastSyncedAt = entity.lastSyncedAt
                 )
             }
         }
@@ -336,6 +359,102 @@ class FirewallRepository(
         )
     }
 
+    suspend fun ensureDefaultAdFilterListsSeeded() = withContext(Dispatchers.IO) {
+        adFilterListDao.insertMissingFilterLists(AdBlockFilterEngine.DEFAULT_AD_FILTER_LISTS)
+    }
+
+    suspend fun toggleAdFilterList(id: String, enabled: Boolean) = withContext(Dispatchers.IO) {
+        adFilterListDao.setListEnabled(id, enabled)
+    }
+
+    suspend fun addCustomAdFilterList(
+        rawTitle: String,
+        rawUrl: String,
+        rawCategory: String
+    ): Result<AdFilterListItem> = withContext(Dispatchers.IO) {
+        val title = rawTitle.trim().ifEmpty { "Custom Filter List" }
+        val url = rawUrl.trim()
+        if (!url.startsWith("https://", ignoreCase = true)) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Filter URL must start with https://")
+            )
+        }
+        val parsedHost = runCatching { URL(url).host }.getOrNull().orEmpty()
+        if (parsedHost.isBlank() || '.' !in parsedHost) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Enter a valid HTTPS hosts or Adblock list URL")
+            )
+        }
+        val category = rawCategory.trim().ifEmpty { "Custom" }
+        val id = "custom_${System.currentTimeMillis()}"
+        val entity = AdFilterListEntity(
+            id = id,
+            title = title,
+            description = "Custom filter ($parsedHost)",
+            sourceUrl = url,
+            category = category,
+            isEnabled = true,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        )
+        adFilterListDao.upsertFilterLists(listOf(entity))
+        Result.success(
+            AdFilterListItem(
+                id = entity.id,
+                title = entity.title,
+                description = entity.description,
+                sourceUrl = entity.sourceUrl,
+                category = entity.category,
+                isEnabled = entity.isEnabled,
+                domainCount = entity.domainCount,
+                lastSyncedAt = entity.lastSyncedAt
+            )
+        )
+    }
+
+    suspend fun deleteCustomAdFilterList(id: String) = withContext(Dispatchers.IO) {
+        if (!id.startsWith("custom_")) return@withContext
+        adFilterListDao.deleteFilterList(id)
+        runCatching { AdBlockFilterEngine.getCacheFile(context, id).delete() }
+    }
+
+    suspend fun syncEnabledAdFilterLists(): Result<Int> = withContext(Dispatchers.IO) {
+        ensureDefaultAdFilterListsSeeded()
+        val allLists = adFilterListDao.getAllFilterListsOnce()
+        val enabledLists = allLists.filter { it.isEnabled }
+        if (enabledLists.isEmpty()) {
+            val snapshot = AdBlockFilterEngine.buildMatcherSnapshot(context, emptyList())
+            return@withContext Result.success(snapshot.totalBlockedCount)
+        }
+
+        var syncedCount = 0
+        var lastError: Throwable? = null
+        val now = System.currentTimeMillis()
+        for (list in enabledLists) {
+            val res = AdBlockFilterEngine.downloadAndCacheFilterList(context, list)
+            res.onSuccess { domainCount ->
+                adFilterListDao.updateSyncStats(list.id, domainCount, now)
+                syncedCount++
+            }.onFailure { err ->
+                lastError = err
+            }
+        }
+
+        val updatedLists = adFilterListDao.getAllFilterListsOnce()
+        val snapshot = AdBlockFilterEngine.buildMatcherSnapshot(context, updatedLists)
+
+        if (syncedCount == 0 && lastError != null) {
+            Result.failure(lastError!!)
+        } else {
+            Result.success(snapshot.totalBlockedCount)
+        }
+    }
+
+    suspend fun getLoadedAdDomainsCount(): Int = withContext(Dispatchers.IO) {
+        val lists = adFilterListDao.getAllFilterListsOnce()
+        AdBlockFilterEngine.getLastLoadedDomainsCount(context, lists)
+    }
+
     fun detectCurrentNetworkType(): ActiveNetworkType {
         return detectConnectionDetails().activeNetworkType
     }
@@ -531,31 +650,44 @@ class FirewallRepository(
         )
     }
 
-    suspend fun testCloudflareDohLatency(): Result<Int> = withContext(Dispatchers.IO) {
-        var connection: HttpsURLConnection? = null
+    suspend fun runDnsLeakTest(
+        prefs: FirewallPreferencesState,
+        vpnState: VpnRuntimeState,
+        connectionDetails: ConnectionDetails
+    ): DnsLeakTestState = DnsLeakTester.runDiagnostic(
+        context = context,
+        prefs = prefs,
+        vpnState = vpnState,
+        connectionDetails = connectionDetails
+    )
+
+    suspend fun testCloudflareDohLatency(
+        dohEndpointUrl: String = "https://1.1.1.1/dns-query"
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        val sampleQuery = byteArrayOf(
+            0x19, 0x73,
+            0x01, 0x00,
+            0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x0A, 'c'.code.toByte(), 'l'.code.toByte(), 'o'.code.toByte(), 'u'.code.toByte(),
+            'd'.code.toByte(), 'f'.code.toByte(), 'l'.code.toByte(), 'a'.code.toByte(),
+            'r'.code.toByte(), 'e'.code.toByte(),
+            0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+            0x00,
+            0x00, 0x01,
+            0x00, 0x01
+        )
         try {
-            val url = URL("https://cloudflare-dns.com/dns-query?name=cloudflare.com&type=A")
             val startNs = System.nanoTime()
-            connection = (url.openConnection() as HttpsURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 5000
-                useCaches = false
-                setRequestProperty("Accept", "application/dns-json")
-                setRequestProperty("Connection", "close")
-            }
-            val code = connection.responseCode
-            connection.inputStream.use { it.readBytes() }
+            val resp = AdBlockFilterEngine.forwardDnsOverHttps(sampleQuery, dohEndpointUrl)
             val elapsedMs = ((System.nanoTime() - startNs) / 1_000_000L).toInt().coerceAtLeast(1)
-            if (code in 200..299) {
+            if (resp != null && resp.size >= 12) {
                 Result.success(elapsedMs)
             } else {
-                Result.failure(IllegalStateException("HTTP $code from Cloudflare DoH"))
+                Result.failure(IllegalStateException("DoH endpoint unreachable: $dohEndpointUrl"))
             }
         } catch (e: Exception) {
             Result.failure(e)
-        } finally {
-            runCatching { connection?.disconnect() }
         }
     }
 

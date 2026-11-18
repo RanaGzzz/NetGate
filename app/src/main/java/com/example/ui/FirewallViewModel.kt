@@ -23,6 +23,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.FirewallPreferences
 import com.example.data.local.NetGateDatabase
 import com.example.data.model.ActiveNetworkType
+import com.example.data.model.AdFilterListItem
+import com.example.data.model.AppCountdownTimer
 import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
 import com.example.data.model.AppUsageBreakdownItem
@@ -30,14 +32,16 @@ import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSummary
+import com.example.data.model.DnsLeakTestState
 import com.example.data.model.DnsProbeState
+import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
-import com.example.data.model.AppCountdownTimer
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimerTargetNetwork
+import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.UsageChartMode
 import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
@@ -47,6 +51,7 @@ import com.example.data.network.SpeedTestPhase
 import com.example.data.network.SpeedTestRunner
 import com.example.data.network.SpeedTestState
 import com.example.data.repository.FirewallRepository
+import com.example.service.AdBlockFilterEngine
 import com.example.service.NetGateVpnService
 import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +85,22 @@ data class DataUsageUiState(
 
 data class WebsiteBlockerUiState(
     val filterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
+    val isAdBlockerEnabled: Boolean = false,
+    val isEssentialPassthroughEnabled: Boolean = true,
+    val useDohUpstream: Boolean = true,
+    val selectedUpstreamDns: UpstreamDnsServer = UpstreamDnsServer.CLOUDFLARE_STANDARD,
+    val isHttpsProxyEnabled: Boolean = false,
+    val isHttpsProxyActive: Boolean = false,
+    val httpsProxyPort: Int = 8899,
+    val isProxyStripTrackingParams: Boolean = true,
+    val blockedProxyRequestsCount: Long = 0L,
+    val allowedProxyRequestsCount: Long = 0L,
+    val adFilterLists: List<AdFilterListItem> = emptyList(),
+    val loadedAdDomainsCount: Int = AdBlockFilterEngine.BUILTIN_AD_CORE_DOMAINS.size,
+    val isSyncingAdLists: Boolean = false,
+    val blockedAdsCount: Long = 0L,
+    val lifetimeAdsBlockedCount: Long = 0L,
+    val dnsQueryLogs: List<DnsQueryLogEntry> = emptyList(),
     val blocklistRules: List<WebsiteRuleItem> = emptyList(),
     val whitelistRules: List<WebsiteRuleItem> = emptyList(),
     val bypassPackages: Set<String> = emptySet(),
@@ -105,6 +126,7 @@ data class FirewallUiState(
     val isConnectionInfoOpen: Boolean = false,
     val isDnsProtectionOpen: Boolean = false,
     val dnsProbeState: DnsProbeState = DnsProbeState(),
+    val dnsLeakTestState: DnsLeakTestState = DnsLeakTestState(),
     val isSpeedTestOpen: Boolean = false,
     val speedTestState: SpeedTestState = SpeedTestState(),
     val dataUsageState: DataUsageUiState = DataUsageUiState(),
@@ -144,6 +166,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         trafficUsageDao = database.appTrafficUsageDao(),
         websiteRuleDao = database.websiteRuleDao(),
         appTimerDao = database.appTimerDao(),
+        adFilterListDao = database.adFilterListDao(),
         preferences = preferences
     )
 
@@ -161,6 +184,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val isConnectionInfoOpenFlow = MutableStateFlow(false)
     private val isDnsProtectionOpenFlow = MutableStateFlow(false)
     private val dnsProbeStateFlow = MutableStateFlow(DnsProbeState())
+    private val dnsLeakTestStateFlow = MutableStateFlow(DnsLeakTestState())
     private val isSpeedTestOpenFlow = MutableStateFlow(false)
     private val speedTestRunner = SpeedTestRunner()
     private val speedTestStateFlow = MutableStateFlow(SpeedTestState())
@@ -173,6 +197,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val usageChartModeFlow = MutableStateFlow(UsageChartMode.TOTAL)
     private val usageFilterFlow = MutableStateFlow(UsageFilterCategory.ALL)
     private val usageErrorFlow = MutableStateFlow<String?>(null)
+    private val isSyncingAdListsFlow = MutableStateFlow(false)
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
@@ -199,6 +224,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private var wifiReceiverRegistered = false
 
     init {
+        viewModelScope.launch {
+            repository.ensureDefaultAdFilterListsSeeded()
+        }
         refreshInstalledApps()
         registerNetworkMonitor()
         observeActiveTimerTicker()
@@ -289,9 +317,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     private val dnsUiFlow = combine(
         isDnsProtectionOpenFlow,
-        dnsProbeStateFlow
-    ) { dnsOpen, dnsProbe ->
-        dnsOpen to dnsProbe
+        dnsProbeStateFlow,
+        dnsLeakTestStateFlow
+    ) { dnsOpen, dnsProbe, dnsLeak ->
+        Triple(dnsOpen, dnsProbe, dnsLeak)
     }
 
     private val sheetsFlow = combine(
@@ -300,8 +329,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         isSpeedTestOpenFlow,
         speedTestStateFlow,
         dnsUiFlow
-    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest, (dnsOpen, dnsProbe) ->
-        SheetsSnapshot(settingsOpen, connInfoOpen, dnsOpen, dnsProbe, speedTestOpen, speedTest)
+    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest, (dnsOpen, dnsProbe, dnsLeak) ->
+        SheetsSnapshot(settingsOpen, connInfoOpen, dnsOpen, dnsProbe, dnsLeak, speedTestOpen, speedTest)
     }
 
     private val usageControlsFlow = combine(
@@ -365,6 +394,14 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
+    private val websiteAndAdRepoFlow = combine(
+        repository.websiteRulesFlow,
+        repository.adFilterListsFlow,
+        isSyncingAdListsFlow
+    ) { websiteRules, adLists, isSyncingAds ->
+        Triple(websiteRules, adLists, isSyncingAds)
+    }
+
     val uiState: StateFlow<FirewallUiState> = combine(
         baseDataFlow,
         uiInteractionFlow,
@@ -373,11 +410,12 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         combine(
             currentDestinationFlow,
             usageStateFlow,
-            repository.websiteRulesFlow
-        ) { dest, usage, websiteRules ->
-            Triple(dest, usage, websiteRules)
+            websiteAndAdRepoFlow
+        ) { dest, usage, webAndAd ->
+            Triple(dest, usage, webAndAd)
         }
-    ) { base, interaction, connDetails, sheets, (destination, dataUsage, websiteRules) ->
+    ) { base, interaction, connDetails, sheets, (destination, dataUsage, webAndAd) ->
+        val (websiteRules, adLists, isSyncingAds) = webAndAd
         val ruleMap = base.rules.associateBy { it.packageName }
         val timerMap = base.timers.associateBy { it.packageName }
 
@@ -417,8 +455,31 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             matchesQuery && matchesFilter
         }
 
+        val loadedDomainsCount = if (base.vpnState.loadedAdDomainsCount > 0) {
+            base.vpnState.loadedAdDomainsCount
+        } else {
+            AdBlockFilterEngine.BUILTIN_AD_CORE_DOMAINS.size +
+                adLists.filter { it.isEnabled }.sumOf { it.domainCount }
+        }
+
         val websiteState = WebsiteBlockerUiState(
             filterMode = base.prefs.websiteFilterMode,
+            isAdBlockerEnabled = base.prefs.isAdBlockerEnabled,
+            isEssentialPassthroughEnabled = base.prefs.isEssentialPassthroughEnabled,
+            useDohUpstream = base.prefs.useDohUpstream,
+            selectedUpstreamDns = base.prefs.selectedUpstreamDns,
+            isHttpsProxyEnabled = base.prefs.isHttpsProxyEnabled,
+            isHttpsProxyActive = base.vpnState.isHttpsProxyActive,
+            httpsProxyPort = base.prefs.httpsProxyPort,
+            isProxyStripTrackingParams = base.prefs.isProxyStripTrackingParams,
+            blockedProxyRequestsCount = base.vpnState.blockedProxyRequestsCount,
+            allowedProxyRequestsCount = base.vpnState.allowedProxyRequestsCount,
+            adFilterLists = adLists,
+            loadedAdDomainsCount = loadedDomainsCount,
+            isSyncingAdLists = isSyncingAds,
+            blockedAdsCount = base.vpnState.blockedAdsCount,
+            lifetimeAdsBlockedCount = base.prefs.lifetimeAdsBlockedCount,
+            dnsQueryLogs = base.vpnState.recentDnsLogs,
             blocklistRules = websiteRules.filter { !it.isWhitelist },
             whitelistRules = websiteRules.filter { it.isWhitelist },
             bypassPackages = base.prefs.websiteBypassPackages,
@@ -444,6 +505,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             isConnectionInfoOpen = sheets.connInfoOpen,
             isDnsProtectionOpen = sheets.dnsOpen,
             dnsProbeState = sheets.dnsProbeState,
+            dnsLeakTestState = sheets.dnsLeakTestState,
             isSpeedTestOpen = sheets.speedTestOpen,
             speedTestState = sheets.speedTestState,
             dataUsageState = dataUsage,
@@ -723,18 +785,54 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun testCloudflareDoh() {
         if (dnsProbeStateFlow.value.isTesting) return
+        val prefs = uiState.value.preferences
+        val dohUrl = prefs.resolvedDohUrl()
+        val label = prefs.selectedUpstreamDns.title
         viewModelScope.launch {
             dnsProbeStateFlow.value = DnsProbeState(isTesting = true)
-            val result = repository.testCloudflareDohLatency()
+            val result = repository.testCloudflareDohLatency(dohUrl)
             dnsProbeStateFlow.value = result.fold(
                 onSuccess = { ms -> DnsProbeState(isTesting = false, latencyMs = ms) },
                 onFailure = { err ->
                     DnsProbeState(
                         isTesting = false,
-                        errorMessage = err.message ?: "Cloudflare DoH unreachable on current network"
+                        errorMessage = err.message ?: "$label DoH unreachable on current network"
                     )
                 }
             )
+        }
+    }
+
+    fun selectUpstreamDns(server: UpstreamDnsServer) {
+        viewModelScope.launch {
+            preferences.setSelectedUpstreamDns(server)
+            _snackbarMessages.tryEmit("VPN upstream DNS set to ${server.title}")
+        }
+    }
+
+    fun saveCustomDnsEndpoints(dohUrl: String, udpIp: String) {
+        viewModelScope.launch {
+            preferences.setCustomDnsEndpoints(dohUrl, udpIp)
+            preferences.setSelectedUpstreamDns(UpstreamDnsServer.CUSTOM_DNS)
+            _snackbarMessages.tryEmit("Saved custom upstream DNS settings")
+        }
+    }
+
+    fun runDnsLeakTest() {
+        if (dnsLeakTestStateFlow.value.isRunning) return
+        refreshConnectionDetails()
+        viewModelScope.launch {
+            dnsLeakTestStateFlow.value = dnsLeakTestStateFlow.value.copy(
+                isRunning = true,
+                errorMessage = null
+            )
+            val snapshot = uiState.value
+            val result = repository.runDnsLeakTest(
+                prefs = snapshot.preferences,
+                vpnState = snapshot.vpnRuntimeState,
+                connectionDetails = snapshot.connectionDetails
+            )
+            dnsLeakTestStateFlow.value = result
         }
     }
 
@@ -887,6 +985,120 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setAdBlockerEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setAdBlockerEnabled(enabled)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val msg = when {
+                !enabled -> "System-wide Ad Blocker turned off"
+                firewallOn -> "System-wide Ad & Tracker Blocker active"
+                else -> "Ad Blocker enabled — activate Firewall to filter ads"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun toggleAdFilterList(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            repository.toggleAdFilterList(id, enabled)
+        }
+    }
+
+    fun syncAdFilterLists() {
+        if (isSyncingAdListsFlow.value) return
+        viewModelScope.launch {
+            isSyncingAdListsFlow.value = true
+            val result = repository.syncEnabledAdFilterLists()
+            isSyncingAdListsFlow.value = false
+            result.onSuccess { totalDomains ->
+                _snackbarMessages.tryEmit("Synced ad filter lists (${formatCompactCount(totalDomains)} domains active)")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Unable to download ad filter lists")
+            }
+        }
+    }
+
+    fun setEssentialPassthroughEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setEssentialPassthroughEnabled(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "Essential OS & push passthrough enabled" else "Essential passthrough disabled"
+            )
+        }
+    }
+
+    fun setUseDohUpstream(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setUseDohUpstream(enabled)
+            val dnsName = uiState.value.preferences.selectedUpstreamDns.title
+            _snackbarMessages.tryEmit(
+                if (enabled) "Upstream DNS set to $dnsName DoH" else "Upstream DNS set to UDP/53"
+            )
+        }
+    }
+
+    fun setHttpsProxyEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setHttpsProxyEnabled(enabled)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val port = uiState.value.preferences.httpsProxyPort
+            val msg = when {
+                !enabled -> "HTTPS Filtering Proxy turned off"
+                firewallOn -> "HTTPS Filtering Proxy active on 127.0.0.1:$port"
+                else -> "HTTPS Proxy enabled — activate NetGate Firewall to start listening"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun setHttpsProxyPort(port: Int) {
+        val valid = port.coerceIn(1024, 65535)
+        viewModelScope.launch {
+            preferences.setHttpsProxyPort(valid)
+            _snackbarMessages.tryEmit("HTTPS proxy port updated to $valid")
+        }
+    }
+
+    fun setProxyStripTrackingParams(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setProxyStripTrackingParams(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "URL tracking parameter stripping enabled" else "URL tracking parameter stripping disabled"
+            )
+        }
+    }
+
+    fun addCustomAdFilterList(title: String, sourceUrl: String, category: String) {
+        viewModelScope.launch {
+            val res = repository.addCustomAdFilterList(title, sourceUrl, category)
+            res.onSuccess { item ->
+                _snackbarMessages.tryEmit("Added filter list \"${item.title}\" — tap Sync to download")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Unable to add custom filter list")
+            }
+        }
+    }
+
+    fun deleteCustomAdFilterList(id: String) {
+        viewModelScope.launch {
+            repository.deleteCustomAdFilterList(id)
+            _snackbarMessages.tryEmit("Removed custom filter list")
+        }
+    }
+
+    fun clearDnsLogs() {
+        NetGateVpnService.clearRecentDnsLogs()
+        _snackbarMessages.tryEmit("Cleared DNS query log")
+    }
+
+    private fun formatCompactCount(count: Int): String {
+        return when {
+            count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
+            count >= 1_000 -> String.format(java.util.Locale.US, "%.1fK", count / 1_000.0)
+            else -> count.toString()
+        }
+    }
+
     private data class BaseSnapshot(
         val installed: List<InstalledAppInfo>,
         val loading: Boolean,
@@ -910,6 +1122,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val connInfoOpen: Boolean,
         val dnsOpen: Boolean,
         val dnsProbeState: DnsProbeState,
+        val dnsLeakTestState: DnsLeakTestState,
         val speedTestOpen: Boolean,
         val speedTestState: SpeedTestState
     )

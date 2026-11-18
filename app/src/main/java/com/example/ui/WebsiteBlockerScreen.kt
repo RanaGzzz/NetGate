@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +40,8 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
@@ -48,6 +51,7 @@ import androidx.compose.material.icons.rounded.PublicOff
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -56,6 +60,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -83,12 +88,21 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.model.AdFilterListItem
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DnsQueryLogEntry
+import com.example.data.model.DnsQueryStatus
 import com.example.data.model.ManagedApp
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.model.WebsiteTabSection
+import com.example.ui.components.AdBlockerHeroCard
+import com.example.ui.components.AdFilterListRow
+import com.example.ui.components.DnsLogFilter
+import com.example.ui.components.DnsLogsFilterCard
+import com.example.ui.components.DnsQueryLogRow
 import com.example.ui.components.FrostedSurface
+import com.example.ui.components.HttpsFilteringProxyCard
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
@@ -119,13 +133,28 @@ fun WebsiteBlockerContent(
     onClearWebsiteRules: (Boolean) -> Unit,
     onToggleBypassApp: (String) -> Unit,
     onClearBypassApps: () -> Unit,
+    onToggleAdBlocker: (Boolean) -> Unit,
+    onToggleAdFilterList: (String, Boolean) -> Unit,
+    onSyncAdFilterLists: () -> Unit,
+    onToggleEssentialPassthrough: (Boolean) -> Unit,
+    onToggleUseDohUpstream: (Boolean) -> Unit,
+    onToggleHttpsProxy: (Boolean) -> Unit,
+    onSelectProxyPort: (Int) -> Unit,
+    onToggleProxyStripTracking: (Boolean) -> Unit,
+    onAddCustomAdFilterList: (title: String, url: String, category: String) -> Unit,
+    onDeleteCustomAdFilterList: (String) -> Unit,
+    onCopiedProxyEndpoint: (String) -> Unit,
+    onClearDnsLogs: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
     onOpenDnsProtection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedSection by rememberSaveable { mutableStateOf(WebsiteTabSection.BLOCKLIST) }
+    var selectedSection by rememberSaveable { mutableStateOf(WebsiteTabSection.AD_FILTERS) }
     var domainInput by rememberSaveable { mutableStateOf("") }
     var appSearchQuery by rememberSaveable { mutableStateOf("") }
+    var dnsLogSearchQuery by rememberSaveable { mutableStateOf("") }
+    var dnsLogFilter by rememberSaveable { mutableStateOf(DnsLogFilter.ALL) }
+    var isAddFilterDialogOpen by rememberSaveable { mutableStateOf(false) }
 
     val filteredBypassApps = remember(allManagedApps, appSearchQuery, state.bypassPackages) {
         val q = appSearchQuery.trim().lowercase()
@@ -140,6 +169,23 @@ fun WebsiteBlockerContent(
             compareByDescending<ManagedApp> { it.packageName in state.bypassPackages }
                 .thenBy { it.appName.lowercase() }
         )
+    }
+
+    val filteredDnsLogs = remember(state.dnsQueryLogs, dnsLogSearchQuery, dnsLogFilter) {
+        val q = dnsLogSearchQuery.trim().lowercase()
+        state.dnsQueryLogs.filter { entry ->
+            val matchesQuery = q.isEmpty() ||
+                entry.domain.lowercase().contains(q) ||
+                entry.reason.lowercase().contains(q)
+            val matchesStatus = when (dnsLogFilter) {
+                DnsLogFilter.ALL -> true
+                DnsLogFilter.ADS_BLOCKED -> entry.status == DnsQueryStatus.BLOCKED_AD ||
+                    entry.status == DnsQueryStatus.BLOCKED_HTTPS
+                DnsLogFilter.ALLOWED -> entry.status == DnsQueryStatus.ALLOWED ||
+                    entry.status == DnsQueryStatus.PASSTHROUGH
+            }
+            matchesQuery && matchesStatus
+        }
     }
 
     BoxWithConstraints(
@@ -163,6 +209,28 @@ fun WebsiteBlockerContent(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
+                    item(key = "ad_blocker_card") {
+                        AdBlockerHeroCard(
+                            state = state,
+                            isFirewallActive = isFirewallActive,
+                            onToggleAdBlocker = onToggleAdBlocker,
+                            onSyncFilterLists = onSyncAdFilterLists,
+                            onToggleEssentialPassthrough = onToggleEssentialPassthrough,
+                            onToggleUseDohUpstream = onToggleUseDohUpstream,
+                            onRequestEnableFirewall = onRequestEnableFirewall
+                        )
+                    }
+                    item(key = "https_proxy_card") {
+                        HttpsFilteringProxyCard(
+                            state = state,
+                            isFirewallActive = isFirewallActive,
+                            onToggleHttpsProxy = onToggleHttpsProxy,
+                            onSelectProxyPort = onSelectProxyPort,
+                            onToggleStripTracking = onToggleProxyStripTracking,
+                            onRequestEnableFirewall = onRequestEnableFirewall,
+                            onCopiedEndpoint = onCopiedProxyEndpoint
+                        )
+                    }
                     item(key = "mode_card") {
                         WebsiteModeControlCard(
                             state = state,
@@ -209,12 +277,16 @@ fun WebsiteBlockerContent(
                     item(key = "section_tabs") {
                         WebsiteSectionTabsBar(
                             selectedSection = selectedSection,
+                            adFiltersCount = state.adFilterLists.count { it.isEnabled },
+                            dnsLogsCount = state.dnsQueryLogs.size,
                             blocklistCount = state.blocklistRules.size,
                             whitelistCount = state.whitelistRules.size,
                             allowedAppsCount = state.bypassPackages.size,
                             onSelectSection = { selectedSection = it },
                             onClearCurrent = {
                                 when (selectedSection) {
+                                    WebsiteTabSection.AD_FILTERS -> onSyncAdFilterLists()
+                                    WebsiteTabSection.DNS_LOGS -> onClearDnsLogs()
                                     WebsiteTabSection.BLOCKLIST -> onClearWebsiteRules(false)
                                     WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
                                     WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
@@ -225,6 +297,18 @@ fun WebsiteBlockerContent(
 
                     websiteSectionItems(
                         selectedSection = selectedSection,
+                        adFilterLists = state.adFilterLists,
+                        dnsLogs = filteredDnsLogs,
+                        totalDnsLogsCount = state.dnsQueryLogs.size,
+                        dnsLogSearchQuery = dnsLogSearchQuery,
+                        dnsLogFilter = dnsLogFilter,
+                        onDnsLogSearchChange = { dnsLogSearchQuery = it },
+                        onDnsLogFilterChange = { dnsLogFilter = it },
+                        onToggleAdFilterList = onToggleAdFilterList,
+                        onOpenAddCustomFilterDialog = { isAddFilterDialogOpen = true },
+                        onDeleteCustomAdFilterList = onDeleteCustomAdFilterList,
+                        onBlockDomain = { domain -> onAddWebsiteRule(domain, false) },
+                        onAllowDomain = { domain -> onAddWebsiteRule(domain, true) },
                         blocklistRules = state.blocklistRules,
                         whitelistRules = state.whitelistRules,
                         filteredBypassApps = filteredBypassApps,
@@ -254,6 +338,30 @@ fun WebsiteBlockerContent(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item(key = "ad_blocker_card") {
+                        AdBlockerHeroCard(
+                            state = state,
+                            isFirewallActive = isFirewallActive,
+                            onToggleAdBlocker = onToggleAdBlocker,
+                            onSyncFilterLists = onSyncAdFilterLists,
+                            onToggleEssentialPassthrough = onToggleEssentialPassthrough,
+                            onToggleUseDohUpstream = onToggleUseDohUpstream,
+                            onRequestEnableFirewall = onRequestEnableFirewall
+                        )
+                    }
+
+                    item(key = "https_proxy_card") {
+                        HttpsFilteringProxyCard(
+                            state = state,
+                            isFirewallActive = isFirewallActive,
+                            onToggleHttpsProxy = onToggleHttpsProxy,
+                            onSelectProxyPort = onSelectProxyPort,
+                            onToggleStripTracking = onToggleProxyStripTracking,
+                            onRequestEnableFirewall = onRequestEnableFirewall,
+                            onCopiedEndpoint = onCopiedProxyEndpoint
+                        )
+                    }
+
                     item(key = "mode_card") {
                         WebsiteModeControlCard(
                             state = state,
@@ -294,12 +402,16 @@ fun WebsiteBlockerContent(
                     item(key = "section_tabs") {
                         WebsiteSectionTabsBar(
                             selectedSection = selectedSection,
+                            adFiltersCount = state.adFilterLists.count { it.isEnabled },
+                            dnsLogsCount = state.dnsQueryLogs.size,
                             blocklistCount = state.blocklistRules.size,
                             whitelistCount = state.whitelistRules.size,
                             allowedAppsCount = state.bypassPackages.size,
                             onSelectSection = { selectedSection = it },
                             onClearCurrent = {
                                 when (selectedSection) {
+                                    WebsiteTabSection.AD_FILTERS -> onSyncAdFilterLists()
+                                    WebsiteTabSection.DNS_LOGS -> onClearDnsLogs()
                                     WebsiteTabSection.BLOCKLIST -> onClearWebsiteRules(false)
                                     WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
                                     WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
@@ -310,6 +422,18 @@ fun WebsiteBlockerContent(
 
                     websiteSectionItems(
                         selectedSection = selectedSection,
+                        adFilterLists = state.adFilterLists,
+                        dnsLogs = filteredDnsLogs,
+                        totalDnsLogsCount = state.dnsQueryLogs.size,
+                        dnsLogSearchQuery = dnsLogSearchQuery,
+                        dnsLogFilter = dnsLogFilter,
+                        onDnsLogSearchChange = { dnsLogSearchQuery = it },
+                        onDnsLogFilterChange = { dnsLogFilter = it },
+                        onToggleAdFilterList = onToggleAdFilterList,
+                        onOpenAddCustomFilterDialog = { isAddFilterDialogOpen = true },
+                        onDeleteCustomAdFilterList = onDeleteCustomAdFilterList,
+                        onBlockDomain = { domain -> onAddWebsiteRule(domain, false) },
+                        onAllowDomain = { domain -> onAddWebsiteRule(domain, true) },
                         blocklistRules = state.blocklistRules,
                         whitelistRules = state.whitelistRules,
                         filteredBypassApps = filteredBypassApps,
@@ -329,10 +453,32 @@ fun WebsiteBlockerContent(
             }
         }
     }
+
+    if (isAddFilterDialogOpen) {
+        AddCustomFilterListDialog(
+            onDismiss = { isAddFilterDialogOpen = false },
+            onConfirm = { title, url, category ->
+                onAddCustomAdFilterList(title, url, category)
+                isAddFilterDialogOpen = false
+            }
+        )
+    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
     selectedSection: WebsiteTabSection,
+    adFilterLists: List<AdFilterListItem>,
+    dnsLogs: List<DnsQueryLogEntry>,
+    totalDnsLogsCount: Int,
+    dnsLogSearchQuery: String,
+    dnsLogFilter: DnsLogFilter,
+    onDnsLogSearchChange: (String) -> Unit,
+    onDnsLogFilterChange: (DnsLogFilter) -> Unit,
+    onToggleAdFilterList: (String, Boolean) -> Unit,
+    onOpenAddCustomFilterDialog: () -> Unit,
+    onDeleteCustomAdFilterList: (String) -> Unit,
+    onBlockDomain: (String) -> Unit,
+    onAllowDomain: (String) -> Unit,
     blocklistRules: List<WebsiteRuleItem>,
     whitelistRules: List<WebsiteRuleItem>,
     filteredBypassApps: List<ManagedApp>,
@@ -345,6 +491,81 @@ private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
     onToggleBypassApp: (String) -> Unit
 ) {
     when (selectedSection) {
+        WebsiteTabSection.AD_FILTERS -> {
+            item(key = "add_custom_filter_cta") {
+                OutlinedButton(
+                    onClick = onOpenAddCustomFilterDialog,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .testTag("open_add_custom_filter_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add Custom Hosts / Adblock Filter URL")
+                }
+            }
+            if (adFilterLists.isEmpty()) {
+                item(key = "empty_ad_filters") {
+                    EmptyWebsiteRulesCard(
+                        title = "Loading ad filter lists…",
+                        subtitle = "Built-in ad & tracker protection core is active whenever Ad Blocker is turned on.",
+                        icon = Icons.Rounded.FilterList
+                    )
+                }
+            } else {
+                items(items = adFilterLists, key = { "adlist_${it.id}" }) { item ->
+                    AdFilterListRow(
+                        item = item,
+                        onToggleEnabled = { enabled -> onToggleAdFilterList(item.id, enabled) },
+                        onDeleteCustomList = if (item.id.startsWith("custom_")) {
+                            { onDeleteCustomAdFilterList(item.id) }
+                        } else {
+                            null
+                        }
+                    )
+                }
+            }
+        }
+
+        WebsiteTabSection.DNS_LOGS -> {
+            item(key = "dns_logs_filter_header") {
+                DnsLogsFilterCard(
+                    searchQuery = dnsLogSearchQuery,
+                    selectedFilter = dnsLogFilter,
+                    totalLogsCount = totalDnsLogsCount,
+                    onSearchQueryChange = onDnsLogSearchChange,
+                    onSelectFilter = onDnsLogFilterChange
+                )
+            }
+            if (dnsLogs.isEmpty()) {
+                item(key = "empty_dns_logs") {
+                    EmptyWebsiteRulesCard(
+                        title = if (totalDnsLogsCount == 0) "No DNS queries logged yet" else "No matching DNS queries",
+                        subtitle = if (totalDnsLogsCount == 0) {
+                            "Turn on Ad Blocker or Website Blocker with NetGate Firewall active to inspect live lookups here."
+                        } else {
+                            "Clear your search or filter chip to view all recent DNS lookups."
+                        },
+                        icon = Icons.Rounded.Dns
+                    )
+                }
+            } else {
+                items(items = dnsLogs, key = { "dnslog_${it.id}" }) { entry ->
+                    DnsQueryLogRow(
+                        entry = entry,
+                        onBlockDomain = onBlockDomain,
+                        onAllowDomain = onAllowDomain
+                    )
+                }
+            }
+        }
+
         WebsiteTabSection.BLOCKLIST -> {
             if (blocklistRules.isEmpty()) {
                 item(key = "empty_blocklist") {
@@ -370,7 +591,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
                 item(key = "empty_whitelist") {
                     EmptyWebsiteRulesCard(
                         title = "No whitelisted websites yet",
-                        subtitle = "Add trusted domains here (e.g. wikipedia.org, bank.com). Whitelisted domains always stay accessible—even in strict Lockdown mode.",
+                        subtitle = "Add trusted domains here (e.g. wikipedia.org). Whitelisted domains always bypass both Ad Blocker and Website Lockdown.",
                         icon = Icons.Rounded.GppGood
                     )
                 }
@@ -397,7 +618,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
                 item(key = "empty_allowed_apps") {
                     EmptyWebsiteRulesCard(
                         title = "No matching apps",
-                        subtitle = "Clear your app search query to select apps that bypass Website Lockdown.",
+                        subtitle = "Clear your app search query to select apps that bypass Website & Ad Filtering.",
                         icon = Icons.Rounded.Apps
                     )
                 }
@@ -945,6 +1166,8 @@ private fun RecentBlockedDomainsCard(
 @Composable
 private fun WebsiteSectionTabsBar(
     selectedSection: WebsiteTabSection,
+    adFiltersCount: Int,
+    dnsLogsCount: Int,
     blocklistCount: Int,
     whitelistCount: Int,
     allowedAppsCount: Int,
@@ -953,6 +1176,8 @@ private fun WebsiteSectionTabsBar(
 ) {
     val isDark = LocalIsDarkTheme.current
     val currentCount = when (selectedSection) {
+        WebsiteTabSection.AD_FILTERS -> adFiltersCount
+        WebsiteTabSection.DNS_LOGS -> dnsLogsCount
         WebsiteTabSection.BLOCKLIST -> blocklistCount
         WebsiteTabSection.WHITELIST -> whitelistCount
         WebsiteTabSection.ALLOWED_APPS -> allowedAppsCount
@@ -965,11 +1190,18 @@ private fun WebsiteSectionTabsBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Rules & Allowed Apps",
+                text = "Ad Lists, DNS Log & Rules",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            if (currentCount > 0) {
+            if (selectedSection == WebsiteTabSection.AD_FILTERS) {
+                TextButton(
+                    onClick = onClearCurrent,
+                    modifier = Modifier.testTag("sync_current_ad_section_button")
+                ) {
+                    Text("Sync All")
+                }
+            } else if (currentCount > 0) {
                 TextButton(
                     onClick = onClearCurrent,
                     modifier = Modifier.testTag("clear_current_website_section_button")
@@ -979,12 +1211,14 @@ private fun WebsiteSectionTabsBar(
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Row(
+        LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            WebsiteTabSection.entries.forEach { section ->
+            items(WebsiteTabSection.entries) { section ->
                 val count = when (section) {
+                    WebsiteTabSection.AD_FILTERS -> adFiltersCount
+                    WebsiteTabSection.DNS_LOGS -> dnsLogsCount
                     WebsiteTabSection.BLOCKLIST -> blocklistCount
                     WebsiteTabSection.WHITELIST -> whitelistCount
                     WebsiteTabSection.ALLOWED_APPS -> allowedAppsCount
@@ -1297,3 +1531,72 @@ private fun EmptyWebsiteRulesCard(
         }
     }
 }
+
+@Composable
+private fun AddCustomFilterListDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (title: String, url: String, category: String) -> Unit
+) {
+    var titleInput by rememberSaveable { mutableStateOf("") }
+    var urlInput by rememberSaveable { mutableStateOf("") }
+    var categoryInput by rememberSaveable { mutableStateOf("Custom") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Custom Filter List") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Supports Hosts (0.0.0.0), Adblock (||domain^), and OISD wildcard (*.domain) lists over HTTPS.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    label = { Text("List Name") },
+                    placeholder = { Text("e.g. HaGeZi Light") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_filter_title_input")
+                )
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { Text("HTTPS Filter URL") },
+                    placeholder = { Text("https://example.com/hosts.txt") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_filter_url_input")
+                )
+                OutlinedTextField(
+                    value = categoryInput,
+                    onValueChange = { categoryInput = it },
+                    label = { Text("Category Tag") },
+                    placeholder = { Text("Ads & Trackers") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_filter_category_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(titleInput, urlInput, categoryInput) },
+                enabled = urlInput.trim().startsWith("https://", ignoreCase = true),
+                modifier = Modifier.testTag("confirm_add_custom_filter_button")
+            ) {
+                Text("Add List")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+

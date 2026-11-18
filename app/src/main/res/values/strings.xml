@@ -13,13 +13,13 @@
     <string name="data_usage_title">Data Usage</string>
     <string name="data_usage_subtitle">Blocked vs. Allowed Apps</string>
     <string name="grant_usage_access">Grant Usage Access</string>
-    <string name="nav_websites">Websites</string>
-    <string name="websites_title">Website Blocker</string>
-    <string name="websites_subtitle">Blocklist, Whitelist &amp; Lockdown</string>
+    <string name="nav_websites">Ad &amp; Web</string>
+    <string name="websites_title">Ad &amp; Website Blocker</string>
+    <string name="websites_subtitle">System Ad Filter, DNS Log &amp; Lockdown</string>
     <string name="nav_speed_test">Speed Test</string>
     <string name="speed_test_title">Speed Test</string>
     <string name="speed_test_subtitle">Latency, Download &amp; Upload</string>
     <string name="nav_dns">DNS</string>
-    <string name="dns_title">1.1.1.1 DNS</string>
-    <string name="dns_subtitle">Cloudflare Encrypted Private DNS</string>
+    <string name="dns_title">DNS &amp; Leak Test</string>
+    <string name="dns_subtitle">Upstream DoH, Leak Test &amp; Private DNS</string>
 </resources>

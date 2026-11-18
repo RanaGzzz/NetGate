@@ -61,6 +61,104 @@ enum class DnsProviderPreset(
     )
 }
 
+enum class UpstreamDnsServer(
+    val title: String,
+    val subtitle: String,
+    val dohUrl: String,
+    val primaryUdpIp: String,
+    val secondaryUdpIp: String,
+    val dotHostname: String
+) {
+    CLOUDFLARE_STANDARD(
+        title = "Cloudflare 1.1.1.1",
+        subtitle = "Fastest global encrypted DoH & UDP resolver",
+        dohUrl = "https://1.1.1.1/dns-query",
+        primaryUdpIp = "1.1.1.1",
+        secondaryUdpIp = "1.0.0.1",
+        dotHostname = "one.one.one.one"
+    ),
+    CLOUDFLARE_SECURITY(
+        title = "Cloudflare Security (1.1.1.2)",
+        subtitle = "Blocks malware & phishing domains upstream",
+        dohUrl = "https://security.cloudflare-dns.com/dns-query",
+        primaryUdpIp = "1.1.1.2",
+        secondaryUdpIp = "1.0.0.2",
+        dotHostname = "security.cloudflare-dns.com"
+    ),
+    CLOUDFLARE_FAMILY(
+        title = "Cloudflare Family (1.1.1.3)",
+        subtitle = "Blocks malware & adult domains upstream",
+        dohUrl = "https://family.cloudflare-dns.com/dns-query",
+        primaryUdpIp = "1.1.1.3",
+        secondaryUdpIp = "1.0.0.3",
+        dotHostname = "family.cloudflare-dns.com"
+    ),
+    ADGUARD_DNS(
+        title = "AdGuard DNS",
+        subtitle = "Upstream ad, tracker & phishing filtering",
+        dohUrl = "https://dns.adguard-dns.com/dns-query",
+        primaryUdpIp = "94.140.14.14",
+        secondaryUdpIp = "94.140.15.15",
+        dotHostname = "dns.adguard-dns.com"
+    ),
+    QUAD9_SECURITY(
+        title = "Quad9 Threat Shield (9.9.9.9)",
+        subtitle = "Security-focused DNSSEC threat blocking",
+        dohUrl = "https://dns.quad9.net/dns-query",
+        primaryUdpIp = "9.9.9.9",
+        secondaryUdpIp = "149.112.112.112",
+        dotHostname = "dns.quad9.net"
+    ),
+    GOOGLE_DNS(
+        title = "Google Public DNS (8.8.8.8)",
+        subtitle = "Anycast global DoH & UDP resolver",
+        dohUrl = "https://dns.google/dns-query",
+        primaryUdpIp = "8.8.8.8",
+        secondaryUdpIp = "8.8.4.4",
+        dotHostname = "dns.google"
+    ),
+    CUSTOM_DNS(
+        title = "Custom Upstream DNS",
+        subtitle = "Your own DoH URL or custom UDP resolver IP",
+        dohUrl = "",
+        primaryUdpIp = "1.1.1.1",
+        secondaryUdpIp = "8.8.8.8",
+        dotHostname = ""
+    )
+}
+
+enum class DnsLeakVerdict(val title: String) {
+    IDLE("Ready to Test"),
+    NO_LEAK("No DNS Leaks Detected"),
+    PARTIAL_RISK("Partial Leak / Bypass Risk"),
+    LEAK_DETECTED("DNS Leak Risk Detected")
+}
+
+enum class DnsLeakCheckStatus {
+    PASS,
+    WARN,
+    FAIL
+}
+
+data class DnsLeakCheckItem(
+    val title: String,
+    val detail: String,
+    val status: DnsLeakCheckStatus
+)
+
+data class DnsLeakTestState(
+    val isRunning: Boolean = false,
+    val verdict: DnsLeakVerdict = DnsLeakVerdict.IDLE,
+    val summary: String = "Run a live diagnostic to verify VPN DNS routing, IPv6 leak guard, DoH encryption, and egress POP.",
+    val dohLatencyMs: Int? = null,
+    val egressIp: String? = null,
+    val egressColo: String? = null,
+    val activeSystemDns: List<String> = emptyList(),
+    val checks: List<DnsLeakCheckItem> = emptyList(),
+    val lastTestedAtMs: Long = 0L,
+    val errorMessage: String? = null
+)
+
 data class DnsProbeState(
     val isTesting: Boolean = false,
     val latencyMs: Int? = null,
@@ -168,8 +266,40 @@ data class FirewallPreferencesState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val useDynamicColor: Boolean = true,
     val websiteFilterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
-    val websiteBypassPackages: Set<String> = emptySet()
-)
+    val websiteBypassPackages: Set<String> = emptySet(),
+    val isAdBlockerEnabled: Boolean = false,
+    val isEssentialPassthroughEnabled: Boolean = true,
+    val useDohUpstream: Boolean = true,
+    val lifetimeAdsBlockedCount: Long = 0L,
+    val selectedUpstreamDns: UpstreamDnsServer = UpstreamDnsServer.CLOUDFLARE_STANDARD,
+    val customDohUrl: String = "",
+    val customUdpDnsIp: String = "",
+    val isHttpsProxyEnabled: Boolean = false,
+    val httpsProxyPort: Int = 8899,
+    val isProxyStripTrackingParams: Boolean = true
+) {
+    fun resolvedDohUrl(): String {
+        return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
+            customDohUrl.trim().takeIf { it.startsWith("https://") }
+                ?: UpstreamDnsServer.CLOUDFLARE_STANDARD.dohUrl
+        } else {
+            selectedUpstreamDns.dohUrl
+        }
+    }
+
+    fun resolvedUdpDnsServers(): List<String> {
+        return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
+            val customIp = customUdpDnsIp.trim()
+            if (customIp.isNotEmpty()) {
+                listOf(customIp, "1.1.1.1", "8.8.8.8")
+            } else {
+                listOf("1.1.1.1", "8.8.8.8")
+            }
+        } else {
+            listOf(selectedUpstreamDns.primaryUdpIp, selectedUpstreamDns.secondaryUdpIp, "1.1.1.1").distinct()
+        }
+    }
+}
 
 enum class AppDestination(val label: String) {
     FIREWALL("Firewall"),
@@ -195,10 +325,40 @@ enum class WebsiteFilterMode(val title: String, val subtitle: String) {
 }
 
 enum class WebsiteTabSection(val label: String) {
+    AD_FILTERS("Ad Lists"),
+    DNS_LOGS("DNS Log"),
     BLOCKLIST("Blocklist"),
     WHITELIST("Whitelist"),
     ALLOWED_APPS("Allowed Apps")
 }
+
+enum class DnsQueryStatus(val label: String) {
+    ALLOWED("Allowed"),
+    BLOCKED_AD("Ad Blocked"),
+    BLOCKED_WEBSITE("Site Blocked"),
+    BLOCKED_APP("App Blocked"),
+    BLOCKED_HTTPS("HTTPS Proxy Blocked"),
+    PASSTHROUGH("Passthrough")
+}
+
+data class DnsQueryLogEntry(
+    val id: Long,
+    val domain: String,
+    val status: DnsQueryStatus,
+    val reason: String,
+    val timestampMs: Long
+)
+
+data class AdFilterListItem(
+    val id: String,
+    val title: String,
+    val description: String,
+    val sourceUrl: String,
+    val category: String,
+    val isEnabled: Boolean,
+    val domainCount: Int,
+    val lastSyncedAt: Long
+)
 
 data class WebsiteRuleItem(
     val domain: String,

@@ -61,10 +61,13 @@ fun FirewallHeaderCard(
     wifiBlockedCount: Int,
     dataBlockedCount: Int,
     activeBlockedNowCount: Int,
+    isAdBlockerEnabled: Boolean = false,
+    blockedAdsCount: Long = 0L,
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onOpenDnsProtection: () -> Unit,
     onOpenSpeedTest: () -> Unit,
+    onOpenAdBlocker: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -223,7 +226,7 @@ fun FirewallHeaderCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Blocked App Counters + Tappable Wi-Fi / Connection Info Strip
+            // Blocked App & Ad Counters
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -240,6 +243,16 @@ fun FirewallHeaderCard(
                     count = dataBlockedCount,
                     accent = if (dataBlockedCount > 0) BlockedRed else DataAccent,
                     modifier = Modifier.weight(1f)
+                )
+                StatMetricPill(
+                    label = if (isAdBlockerEnabled) "Ads Blk" else "Ad Guard",
+                    count = blockedAdsCount.toInt(),
+                    accent = if (isAdBlockerEnabled) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenAdBlocker)
+                        .testTag("header_ad_guard_pill")
                 )
             }
 

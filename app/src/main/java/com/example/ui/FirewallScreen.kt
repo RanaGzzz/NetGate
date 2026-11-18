@@ -377,6 +377,18 @@ fun FirewallScreen(
                                 onClearWebsiteRules = viewModel::clearWebsiteRules,
                                 onToggleBypassApp = viewModel::toggleWebsiteBypassApp,
                                 onClearBypassApps = viewModel::clearWebsiteBypassApps,
+                                onToggleAdBlocker = viewModel::setAdBlockerEnabled,
+                                onToggleAdFilterList = viewModel::toggleAdFilterList,
+                                onSyncAdFilterLists = viewModel::syncAdFilterLists,
+                                onToggleEssentialPassthrough = viewModel::setEssentialPassthroughEnabled,
+                                onToggleUseDohUpstream = viewModel::setUseDohUpstream,
+                                onToggleHttpsProxy = viewModel::setHttpsProxyEnabled,
+                                onSelectProxyPort = viewModel::setHttpsProxyPort,
+                                onToggleProxyStripTracking = viewModel::setProxyStripTrackingParams,
+                                onAddCustomAdFilterList = viewModel::addCustomAdFilterList,
+                                onDeleteCustomAdFilterList = viewModel::deleteCustomAdFilterList,
+                                onCopiedProxyEndpoint = viewModel::notifyCopiedDnsHostname,
+                                onClearDnsLogs = viewModel::clearDnsLogs,
                                 onRequestEnableFirewall = onRequestEnableFirewall,
                                 onOpenDnsProtection = viewModel::openDnsProtection
                             )
@@ -396,8 +408,17 @@ fun FirewallScreen(
                         } else if (uiState.currentDestination == AppDestination.DNS) {
                             DnsProtectionContent(
                                 connectionDetails = uiState.connectionDetails,
+                                preferences = uiState.preferences,
+                                isFirewallActive = isFirewallActive,
+                                vpnRuntimeState = uiState.vpnRuntimeState,
                                 probeState = uiState.dnsProbeState,
+                                leakTestState = uiState.dnsLeakTestState,
+                                onSelectUpstreamDns = viewModel::selectUpstreamDns,
+                                onSaveCustomDns = viewModel::saveCustomDnsEndpoints,
+                                onToggleDohUpstream = viewModel::setUseDohUpstream,
+                                onRunDnsLeakTest = viewModel::runDnsLeakTest,
                                 onTestCloudflareDoh = viewModel::testCloudflareDoh,
+                                onRequestEnableFirewall = onRequestEnableFirewall,
                                 onCopiedHostname = viewModel::notifyCopiedDnsHostname
                             )
                         } else if (isWideLayout) {
@@ -419,12 +440,15 @@ fun FirewallScreen(
                                     wifiBlockedCount = uiState.wifiBlockedCount,
                                     dataBlockedCount = uiState.dataBlockedCount,
                                     activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
+                                    isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
+                                    blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
                                     onToggleFirewall = { enable ->
                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                     },
                                     onOpenConnectionInfo = viewModel::openConnectionInfo,
                                     onOpenDnsProtection = viewModel::openDnsProtection,
-                                    onOpenSpeedTest = viewModel::openSpeedTest
+                                    onOpenSpeedTest = viewModel::openSpeedTest,
+                                    onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) }
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
                                 SearchAndFiltersBlock(
@@ -469,12 +493,15 @@ fun FirewallScreen(
                                                 wifiBlockedCount = uiState.wifiBlockedCount,
                                                 dataBlockedCount = uiState.dataBlockedCount,
                                                 activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
+                                                isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
+                                                blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
                                                 onToggleFirewall = { enable ->
                                                     if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                                 },
                                                 onOpenConnectionInfo = viewModel::openConnectionInfo,
                                                 onOpenDnsProtection = viewModel::openDnsProtection,
-                                                onOpenSpeedTest = viewModel::openSpeedTest
+                                                onOpenSpeedTest = viewModel::openSpeedTest,
+                                                onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) }
                                             )
                                             Spacer(modifier = Modifier.height(14.dp))
                                             SearchAndFiltersBlock(

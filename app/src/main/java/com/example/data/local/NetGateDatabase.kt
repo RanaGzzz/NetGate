@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AppTrafficUsageEntity::class,
         WebsiteRuleEntity::class,
         AppTrafficHistoryEntity::class,
-        AppTimerEntity::class
+        AppTimerEntity::class,
+        AdFilterListEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class NetGateDatabase : RoomDatabase() {
@@ -23,6 +24,7 @@ abstract class NetGateDatabase : RoomDatabase() {
     abstract fun appTrafficUsageDao(): AppTrafficUsageDao
     abstract fun websiteRuleDao(): WebsiteRuleDao
     abstract fun appTimerDao(): AppTimerDao
+    abstract fun adFilterListDao(): AdFilterListDao
 
     companion object {
         @Volatile
@@ -102,6 +104,26 @@ abstract class NetGateDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `ad_filter_lists` (
+                        `id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `sourceUrl` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `isEnabled` INTEGER NOT NULL,
+                        `domainCount` INTEGER NOT NULL,
+                        `lastSyncedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): NetGateDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -109,7 +131,13 @@ abstract class NetGateDatabase : RoomDatabase() {
                     NetGateDatabase::class.java,
                     "netgate_rules.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6
+                    )
                     .build()
                     .also { INSTANCE = it }
             }

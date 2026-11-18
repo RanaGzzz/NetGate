@@ -12,6 +12,8 @@ import com.example.data.model.BatchAction
 import com.example.data.model.ManagedApp
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.repository.FirewallRepository
+import com.example.service.AdBlockFilterEngine
+import com.example.service.AdBlockMatcherSnapshot
 import com.example.service.DnsPacketFilter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -47,6 +49,7 @@ class ExampleRobolectricTest {
             trafficUsageDao = database.appTrafficUsageDao(),
             websiteRuleDao = database.websiteRuleDao(),
             appTimerDao = database.appTimerDao(),
+            adFilterListDao = database.adFilterListDao(),
             preferences = FirewallPreferences(context)
         )
     }
@@ -427,5 +430,217 @@ class ExampleRobolectricTest {
         assertEquals("05:00", com.example.data.model.formatCountdownTimer(300_000L))
         assertEquals("14:59", com.example.data.model.formatCountdownTimer(899_000L))
         assertEquals("1:05:00", com.example.data.model.formatCountdownTimer(3_900_000L))
+    }
+
+    @Test
+    fun `ad block filter engine parses hosts and adblock syntax cleanly`() {
+        assertNull(AdBlockFilterEngine.parseFilterLine("# comment line"))
+        assertNull(AdBlockFilterEngine.parseFilterLine("! Adblock comment"))
+        assertNull(AdBlockFilterEngine.parseFilterLine("0.0.0.0 localhost"))
+        assertNull(AdBlockFilterEngine.parseFilterLine("example.com##.ad-banner"))
+
+        val hostsZero = AdBlockFilterEngine.parseFilterLine("0.0.0.0 ads.tracker.example.com # inline")
+        assertNotNull(hostsZero)
+        assertEquals("ads.tracker.example.com", hostsZero!!.domain)
+        assertFalse(hostsZero.isException)
+
+        val hostsLoopback = AdBlockFilterEngine.parseFilterLine("127.0.0.1 telemetry.sdk.io")
+        assertNotNull(hostsLoopback)
+        assertEquals("telemetry.sdk.io", hostsLoopback!!.domain)
+        assertFalse(hostsLoopback.isException)
+
+        val adguardBlock = AdBlockFilterEngine.parseFilterLine("||doubleclick.net^\$third-party")
+        assertNotNull(adguardBlock)
+        assertEquals("doubleclick.net", adguardBlock!!.domain)
+        assertFalse(adguardBlock.isException)
+
+        val exceptionRule = AdBlockFilterEngine.parseFilterLine("@@||analytics.trusted.org^")
+        assertNotNull(exceptionRule)
+        assertEquals("analytics.trusted.org", exceptionRule!!.domain)
+        assertTrue(exceptionRule.isException)
+    }
+
+    @Test
+    fun `ad block matcher matches subdomains respects exceptions and essential passthrough`() {
+        val snapshot = AdBlockMatcherSnapshot(
+            blockedDomains = setOf("doubleclick.net", "trusted.org", "adservice.google.com"),
+            exceptionDomains = setOf("analytics.trusted.org")
+        )
+
+        // Exact & parent-domain match
+        assertTrue(snapshot.isBlockedByAdFilter("doubleclick.net"))
+        assertTrue(snapshot.isBlockedByAdFilter("cm.g.doubleclick.net."))
+        assertTrue(snapshot.isBlockedByAdFilter("adservice.google.com"))
+
+        // Exception overrides blocked parent domain
+        assertTrue(snapshot.isBlockedByAdFilter("ads.trusted.org"))
+        assertFalse(snapshot.isBlockedByAdFilter("analytics.trusted.org"))
+        assertFalse(snapshot.isBlockedByAdFilter("sub.analytics.trusted.org"))
+
+        // Essential passthrough detection for OS connectivity & push
+        assertTrue(snapshot.isEssentialPassthrough("connectivitycheck.gstatic.com"))
+        assertTrue(snapshot.isEssentialPassthrough("mtalk.google.com"))
+        assertFalse(snapshot.isEssentialPassthrough("cm.g.doubleclick.net"))
+    }
+
+    @Test
+    fun `room ad filter lists seed 10 defaults and support custom list crud`() = runTest {
+        repository.ensureDefaultAdFilterListsSeeded()
+        val seeded = repository.adFilterListsFlow.first()
+        assertEquals(10, seeded.size)
+        assertTrue(seeded.first { it.id == "stevenblack" }.isEnabled)
+        assertTrue(seeded.first { it.id == "adguard_dns" }.isEnabled)
+        assertTrue(seeded.first { it.id == "oisd_big" }.isEnabled)
+        assertTrue(seeded.first { it.id == "hagezi_tif" }.isEnabled)
+        assertFalse(seeded.first { it.id == "peter_lowe" }.isEnabled)
+
+        repository.toggleAdFilterList("peter_lowe", enabled = true)
+        repository.toggleAdFilterList("stevenblack", enabled = false)
+
+        val customRes = repository.addCustomAdFilterList(
+            rawTitle = "My Blocklist",
+            rawUrl = "https://example.org/hosts.txt",
+            rawCategory = "Custom"
+        )
+        assertTrue(customRes.isSuccess)
+        val customId = customRes.getOrThrow().id
+        assertTrue(customId.startsWith("custom_"))
+
+        val updated = repository.adFilterListsFlow.first().associateBy { it.id }
+        assertEquals(11, updated.size)
+        assertTrue(updated["peter_lowe"]!!.isEnabled)
+        assertFalse(updated["stevenblack"]!!.isEnabled)
+
+        repository.deleteCustomAdFilterList(customId)
+        assertEquals(10, repository.adFilterListsFlow.first().size)
+    }
+
+    @Test
+    fun `ad block engine parses wildcard domains strips tracking params and flags ad paths`() {
+        val wildcard = AdBlockFilterEngine.parseFilterLine("*.ads.network.io")
+        assertNotNull(wildcard)
+        assertEquals("ads.network.io", wildcard!!.domain)
+        assertFalse(wildcard.isException)
+
+        val ipv6Host = AdBlockFilterEngine.parseFilterLine("::0 tracker.v6.example")
+        assertNotNull(ipv6Host)
+        assertEquals("tracker.v6.example", ipv6Host!!.domain)
+
+        assertTrue(AdBlockFilterEngine.isAdOrTrackerUrlPath("/pagead/js/adsbygoogle.js"))
+        assertTrue(AdBlockFilterEngine.isAdOrTrackerUrlPath("/gtm.js?id=GTM-123"))
+        assertFalse(AdBlockFilterEngine.isAdOrTrackerUrlPath("/articles/kotlin-compose"))
+
+        val cleaned = AdBlockFilterEngine.stripTrackingQueryParams(
+            "/article?id=42&utm_source=newsletter&fbclid=xyz123&page=2&gclid=abc"
+        )
+        assertEquals("/article?id=42&page=2", cleaned)
+        assertEquals(
+            "/home",
+            AdBlockFilterEngine.stripTrackingQueryParams("/home?utm_campaign=launch&igshid=99")
+        )
+    }
+
+    @Test
+    fun `local filtering proxy parses authority and extracts tls sni hostname`() {
+        val (host, port) = com.example.service.LocalFilteringProxyServer.parseAuthority("ads.example.com:443", 443)
+        assertEquals("ads.example.com", host)
+        assertEquals(443, port)
+
+        val (v6Host, v6Port) = com.example.service.LocalFilteringProxyServer.parseAuthority("[2001:db8::1]:8443", 443)
+        assertEquals("2001:db8::1", v6Host)
+        assertEquals(8443, v6Port)
+
+        // Build a synthetic TLS 1.2 ClientHello with SNI = "doubleclick.net"
+        val sniHost = "doubleclick.net".toByteArray(Charsets.US_ASCII)
+        val sniEntryLen = 1 + 2 + sniHost.size
+        val sniListLen = sniEntryLen
+        val extDataLen = 2 + sniListLen
+        val extensionsLen = 4 + extDataLen
+
+        val clientHelloBody = java.io.ByteArrayOutputStream()
+        clientHelloBody.write(byteArrayOf(0x03, 0x03)) // TLS 1.2
+        clientHelloBody.write(ByteArray(32)) // Random
+        clientHelloBody.write(0x00) // Session ID len = 0
+        clientHelloBody.write(byteArrayOf(0x00, 0x02, 0x13, 0x01)) // 1 cipher suite
+        clientHelloBody.write(byteArrayOf(0x01, 0x00)) // Compression methods len=1 (null)
+        clientHelloBody.write(byteArrayOf(((extensionsLen ushr 8) and 0xFF).toByte(), (extensionsLen and 0xFF).toByte()))
+        // Extension 0x0000 (server_name)
+        clientHelloBody.write(byteArrayOf(0x00, 0x00))
+        clientHelloBody.write(byteArrayOf(((extDataLen ushr 8) and 0xFF).toByte(), (extDataLen and 0xFF).toByte()))
+        clientHelloBody.write(byteArrayOf(((sniListLen ushr 8) and 0xFF).toByte(), (sniListLen and 0xFF).toByte()))
+        clientHelloBody.write(0x00) // host_name
+        clientHelloBody.write(byteArrayOf(((sniHost.size ushr 8) and 0xFF).toByte(), (sniHost.size and 0xFF).toByte()))
+        clientHelloBody.write(sniHost)
+
+        val bodyBytes = clientHelloBody.toByteArray()
+        val hsLen = bodyBytes.size
+        val recordPayloadLen = 4 + hsLen
+
+        val tlsRecord = java.io.ByteArrayOutputStream()
+        tlsRecord.write(byteArrayOf(0x16, 0x03, 0x01)) // Handshake record
+        tlsRecord.write(byteArrayOf(((recordPayloadLen ushr 8) and 0xFF).toByte(), (recordPayloadLen and 0xFF).toByte()))
+        tlsRecord.write(0x01) // ClientHello
+        tlsRecord.write(byteArrayOf(((hsLen ushr 16) and 0xFF).toByte(), ((hsLen ushr 8) and 0xFF).toByte(), (hsLen and 0xFF).toByte()))
+        tlsRecord.write(bodyBytes)
+
+        val rawTls = tlsRecord.toByteArray()
+        assertEquals(
+            "doubleclick.net",
+            com.example.service.LocalFilteringProxyServer.extractTlsSniHostname(rawTls, rawTls.size)
+        )
+    }
+
+    @Test
+    fun `dns leak evaluator distinguishes protected doh vpn tunnel from unguarded isp dns`() {
+        val protectedReport = com.example.data.network.DnsLeakTester.evaluateLeakReport(
+            prefs = com.example.data.model.FirewallPreferencesState(
+                isFirewallEnabled = true,
+                isAdBlockerEnabled = true,
+                useDohUpstream = true,
+                isHttpsProxyEnabled = true,
+                httpsProxyPort = 8899
+            ),
+            vpnState = com.example.service.VpnRuntimeState(
+                isServiceRunning = true,
+                isTunnelActive = true,
+                isHttpsProxyActive = true
+            ),
+            connectionDetails = com.example.data.model.ConnectionDetails(
+                activeNetworkType = ActiveNetworkType.WIFI,
+                dnsServers = listOf("192.168.1.1")
+            ),
+            vpnDnsServers = listOf("10.1.10.2", "fd00:1:fd00:1:fd00:1:fd00:2"),
+            physicalDnsServers = listOf("192.168.1.1"),
+            hasVpnIpv6Dns = true,
+            hasVpnHttpProxy = true,
+            dohLatencyMs = 24,
+            dohValid = true,
+            egressIp = "203.0.113.10",
+            egressColo = "SJC",
+            testedAtMs = 1_700_000_000_000L
+        )
+        assertEquals(com.example.data.model.DnsLeakVerdict.NO_LEAK, protectedReport.verdict)
+
+        val exposedReport = com.example.data.network.DnsLeakTester.evaluateLeakReport(
+            prefs = com.example.data.model.FirewallPreferencesState(
+                isFirewallEnabled = false,
+                useDohUpstream = false
+            ),
+            vpnState = com.example.service.VpnRuntimeState(isServiceRunning = false, isTunnelActive = false),
+            connectionDetails = com.example.data.model.ConnectionDetails(
+                activeNetworkType = ActiveNetworkType.WIFI,
+                dnsServers = listOf("192.168.1.1", "fe80::1")
+            ),
+            vpnDnsServers = emptyList(),
+            physicalDnsServers = listOf("192.168.1.1", "fe80::1"),
+            hasVpnIpv6Dns = false,
+            hasVpnHttpProxy = false,
+            dohLatencyMs = null,
+            dohValid = false,
+            egressIp = null,
+            egressColo = null,
+            testedAtMs = 1_700_000_000_000L
+        )
+        assertEquals(com.example.data.model.DnsLeakVerdict.LEAK_DETECTED, exposedReport.verdict)
     }
 }

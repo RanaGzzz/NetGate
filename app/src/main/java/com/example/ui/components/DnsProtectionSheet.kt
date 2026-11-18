@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,15 +34,24 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.GppGood
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,19 +61,40 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DnsLeakCheckItem
+import com.example.data.model.DnsLeakCheckStatus
+import com.example.data.model.DnsLeakTestState
+import com.example.data.model.DnsLeakVerdict
 import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsProviderPreset
+import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.UpstreamDnsServer
+import com.example.service.VpnRuntimeState
+import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.WarningAmber
+import com.example.ui.theme.WifiAccent
 
 @Composable
 fun DnsProtectionContent(
     connectionDetails: ConnectionDetails,
+    preferences: FirewallPreferencesState,
+    isFirewallActive: Boolean,
+    vpnRuntimeState: VpnRuntimeState,
     probeState: DnsProbeState,
+    leakTestState: DnsLeakTestState,
+    onSelectUpstreamDns: (UpstreamDnsServer) -> Unit,
+    onSaveCustomDns: (dohUrl: String, udpIp: String) -> Unit,
+    onToggleDohUpstream: (Boolean) -> Unit,
+    onRunDnsLeakTest: () -> Unit,
     onTestCloudflareDoh: () -> Unit,
+    onRequestEnableFirewall: () -> Unit,
     onCopiedHostname: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -90,8 +123,18 @@ fun DnsProtectionContent(
                         .padding(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    DnsLeakTestCard(
+                        leakTestState = leakTestState,
+                        preferences = preferences,
+                        isFirewallActive = isFirewallActive,
+                        vpnRuntimeState = vpnRuntimeState,
+                        onRunDnsLeakTest = onRunDnsLeakTest,
+                        onRequestEnableFirewall = onRequestEnableFirewall
+                    )
+
                     DnsStatusAndSetupCards(
                         connectionDetails = connectionDetails,
+                        preferences = preferences,
                         selectedPreset = selectedPreset,
                         probeState = probeState,
                         onTestCloudflareDoh = onTestCloudflareDoh,
@@ -108,8 +151,15 @@ fun DnsProtectionContent(
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
                         .padding(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    VpnUpstreamDnsSelectorCard(
+                        preferences = preferences,
+                        onSelectUpstreamDns = onSelectUpstreamDns,
+                        onSaveCustomDns = onSaveCustomDns,
+                        onToggleDohUpstream = onToggleDohUpstream
+                    )
+
                     DnsPresetsList(
                         selectedPreset = selectedPreset,
                         onSelectPreset = { selectedPreset = it },
@@ -132,8 +182,25 @@ fun DnsProtectionContent(
                         .padding(top = 8.dp, bottom = navInsetBottom + 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    DnsLeakTestCard(
+                        leakTestState = leakTestState,
+                        preferences = preferences,
+                        isFirewallActive = isFirewallActive,
+                        vpnRuntimeState = vpnRuntimeState,
+                        onRunDnsLeakTest = onRunDnsLeakTest,
+                        onRequestEnableFirewall = onRequestEnableFirewall
+                    )
+
+                    VpnUpstreamDnsSelectorCard(
+                        preferences = preferences,
+                        onSelectUpstreamDns = onSelectUpstreamDns,
+                        onSaveCustomDns = onSaveCustomDns,
+                        onToggleDohUpstream = onToggleDohUpstream
+                    )
+
                     DnsStatusAndSetupCards(
                         connectionDetails = connectionDetails,
+                        preferences = preferences,
                         selectedPreset = selectedPreset,
                         probeState = probeState,
                         onTestCloudflareDoh = onTestCloudflareDoh,
@@ -158,9 +225,469 @@ fun DnsProtectionContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DnsLeakTestCard(
+    leakTestState: DnsLeakTestState,
+    preferences: FirewallPreferencesState,
+    isFirewallActive: Boolean,
+    vpnRuntimeState: VpnRuntimeState,
+    onRunDnsLeakTest: () -> Unit,
+    onRequestEnableFirewall: () -> Unit
+) {
+    val accent = when (leakTestState.verdict) {
+        DnsLeakVerdict.NO_LEAK -> EmeraldPrimary
+        DnsLeakVerdict.PARTIAL_RISK -> WarningAmber
+        DnsLeakVerdict.LEAK_DETECTED -> BlockedRed
+        DnsLeakVerdict.IDLE -> WifiAccent
+    }
+
+    FrostedSurface(
+        shape = RoundedCornerShape(22.dp),
+        tintColor = accent.copy(alpha = 0.08f),
+        borderAccent = accent.copy(alpha = 0.55f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("dns_leak_test_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = accent.copy(alpha = 0.16f),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = when (leakTestState.verdict) {
+                                    DnsLeakVerdict.NO_LEAK -> Icons.Rounded.GppGood
+                                    DnsLeakVerdict.PARTIAL_RISK -> Icons.Rounded.WarningAmber
+                                    DnsLeakVerdict.LEAK_DETECTED -> Icons.Rounded.ErrorOutline
+                                    DnsLeakVerdict.IDLE -> Icons.Rounded.Radar
+                                },
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "DNS Leak & Encryption Audit",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = leakTestState.verdict.title,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = accent
+                        )
+                    }
+                }
+
+                if (vpnRuntimeState.isTunnelActive) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = EmeraldPrimary.copy(alpha = 0.14f)
+                    ) {
+                        Text(
+                            text = "VPN ON",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = EmeraldPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = leakTestState.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (leakTestState.dohLatencyMs != null ||
+                leakTestState.egressIp != null ||
+                leakTestState.activeSystemDns.isNotEmpty()
+            ) {
+                Spacer(modifier = Modifier.height(10.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    leakTestState.dohLatencyMs?.let { ms ->
+                        LeakTelemetryBadge(
+                            label = "DoH Latency",
+                            value = "$ms ms",
+                            accent = EmeraldPrimary
+                        )
+                    }
+                    leakTestState.egressIp?.let { ip ->
+                        LeakTelemetryBadge(
+                            label = "Egress IP",
+                            value = ip,
+                            accent = WifiAccent
+                        )
+                    }
+                    leakTestState.egressColo?.let { colo ->
+                        LeakTelemetryBadge(
+                            label = "POP / Edge",
+                            value = colo,
+                            accent = WifiAccent
+                        )
+                    }
+                    if (leakTestState.activeSystemDns.isNotEmpty()) {
+                        LeakTelemetryBadge(
+                            label = "Active DNS",
+                            value = leakTestState.activeSystemDns.joinToString(", "),
+                            accent = accent
+                        )
+                    }
+                }
+            }
+
+            if (leakTestState.checks.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    leakTestState.checks.forEach { item ->
+                        LeakCheckRow(item = item)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = onRunDnsLeakTest,
+                    enabled = !leakTestState.isRunning,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("run_dns_leak_test_button")
+                ) {
+                    if (leakTestState.isRunning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Auditing DNS…")
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Radar,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            if (leakTestState.lastTestedAtMs > 0L) "Re-run Leak Test" else "Run DNS Leak Test"
+                        )
+                    }
+                }
+
+                if (!isFirewallActive) {
+                    FilledTonalButton(
+                        onClick = onRequestEnableFirewall,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("leak_enable_firewall_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PowerSettingsNew,
+                            contentDescription = "Enable Firewall",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Enable VPN")
+                    }
+                }
+            }
+
+            if (preferences.isFirewallEnabled && !vpnRuntimeState.isTunnelActive) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Tip: Enable Ad Blocker, Website Filter, or HTTPS Proxy so DNS routes through NetGate TUN.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = WarningAmber
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LeakTelemetryBadge(
+    label: String,
+    value: String,
+    accent: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = accent.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.28f))
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = accent
+            )
+        }
+    }
+}
+
+@Composable
+private fun LeakCheckRow(item: DnsLeakCheckItem) {
+    val itemAccent = when (item.status) {
+        DnsLeakCheckStatus.PASS -> EmeraldPrimary
+        DnsLeakCheckStatus.WARN -> WarningAmber
+        DnsLeakCheckStatus.FAIL -> BlockedRed
+    }
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = itemAccent.copy(alpha = 0.09f),
+        border = BorderStroke(1.dp, itemAccent.copy(alpha = 0.28f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = when (item.status) {
+                    DnsLeakCheckStatus.PASS -> Icons.Rounded.CheckCircle
+                    DnsLeakCheckStatus.WARN -> Icons.Rounded.WarningAmber
+                    DnsLeakCheckStatus.FAIL -> Icons.Rounded.ErrorOutline
+                },
+                contentDescription = item.status.name,
+                tint = itemAccent,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = item.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VpnUpstreamDnsSelectorCard(
+    preferences: FirewallPreferencesState,
+    onSelectUpstreamDns: (UpstreamDnsServer) -> Unit,
+    onSaveCustomDns: (dohUrl: String, udpIp: String) -> Unit,
+    onToggleDohUpstream: (Boolean) -> Unit
+) {
+    var customDohInput by remember(preferences.customDohUrl) {
+        mutableStateOf(preferences.customDohUrl)
+    }
+    var customUdpInput by remember(preferences.customUdpDnsIp) {
+        mutableStateOf(preferences.customUdpDnsIp)
+    }
+
+    FrostedSurface(
+        shape = RoundedCornerShape(20.dp),
+        borderAccent = WifiAccent.copy(alpha = 0.4f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("vpn_upstream_dns_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "VPN Upstream DNS Server",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Used by NetGate VPN DNS Proxy & HTTPS Proxy",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Rounded.Dns,
+                    contentDescription = null,
+                    tint = WifiAccent,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Encrypted DoH Transport (RFC 8484)",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Send allowed queries over HTTPS instead of plaintext UDP/53",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = preferences.useDohUpstream,
+                        onCheckedChange = onToggleDohUpstream,
+                        modifier = Modifier.testTag("dns_tab_doh_switch")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                UpstreamDnsServer.entries.forEach { server ->
+                    val selected = preferences.selectedUpstreamDns == server
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.44f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                        },
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                            } else {
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onSelectUpstreamDns(server) }
+                            .testTag("upstream_dns_${server.name.lowercase()}")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selected,
+                                onClick = { onSelectUpstreamDns(server) }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = server.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = server.subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (server != UpstreamDnsServer.CUSTOM_DNS) {
+                                    Text(
+                                        text = "${server.primaryUdpIp} • ${server.dohUrl}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (preferences.selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = customDohInput,
+                    onValueChange = { customDohInput = it },
+                    label = { Text("Custom DoH Endpoint URL") },
+                    placeholder = { Text("https://dns.nextdns.io/your-id") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_doh_url_input")
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = customUdpInput,
+                    onValueChange = { customUdpInput = it },
+                    label = { Text("Fallback UDP DNS IP") },
+                    placeholder = { Text("1.1.1.1") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_udp_ip_input")
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                FilledTonalButton(
+                    onClick = { onSaveCustomDns(customDohInput, customUdpInput) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("save_custom_dns_button")
+                ) {
+                    Text("Save Custom Upstream DNS")
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DnsStatusAndSetupCards(
     connectionDetails: ConnectionDetails,
+    preferences: FirewallPreferencesState,
     selectedPreset: DnsProviderPreset,
     probeState: DnsProbeState,
     onTestCloudflareDoh: () -> Unit,
@@ -204,7 +731,7 @@ private fun DnsStatusAndSetupCards(
                                 isAnyPrivateActive && !connectionDetails.privateDnsHostname.isNullOrBlank() ->
                                     "Custom Private DNS Active"
                                 isAnyPrivateActive -> "Private DNS Active (Automatic)"
-                                else -> "Using Default / ISP DNS"
+                                else -> "System Private DNS: Off / Default"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
@@ -214,8 +741,8 @@ private fun DnsStatusAndSetupCards(
                                 !connectionDetails.privateDnsHostname.isNullOrBlank() ->
                                     "Hostname: ${connectionDetails.privateDnsHostname}"
                                 connectionDetails.dnsServers.isNotEmpty() ->
-                                    "Active DNS: ${connectionDetails.dnsServers.joinToString(", ")}"
-                                else -> "Set Private DNS to one.one.one.one below"
+                                    "Interface DNS: ${connectionDetails.dnsServers.joinToString(", ")}"
+                                else -> "Set Private DNS to ${selectedPreset.hostname} below"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -238,15 +765,13 @@ private fun DnsStatusAndSetupCards(
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                text = "How to enable system-wide (works with NetGate Firewall):",
+                text = "System Private DNS (DoT) & Reachability",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "1. Tap Copy & Open Private DNS Settings below.\n" +
-                    "2. Tap Private DNS → Private DNS provider hostname.\n" +
-                    "3. Paste ${selectedPreset.hostname} and tap Save.",
+                text = "Note: For Ad Blocker / Website Blocker inside NetGate VPN, keep Android Private DNS on Automatic and pick your upstream resolver above.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -290,7 +815,7 @@ private fun DnsStatusAndSetupCards(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Testing Cloudflare 1.1.1.1…")
+                    Text("Testing ${preferences.selectedUpstreamDns.title} DoH…")
                 } else {
                     Icon(
                         imageVector = Icons.Rounded.Speed,
@@ -301,10 +826,10 @@ private fun DnsStatusAndSetupCards(
                     Text(
                         text = when {
                             probeState.latencyMs != null ->
-                                "Cloudflare DoH Reachable (${probeState.latencyMs} ms) — Retest"
+                                "${preferences.selectedUpstreamDns.title} DoH (${probeState.latencyMs} ms) — Retest"
                             probeState.errorMessage != null ->
-                                "Retry Cloudflare 1.1.1.1 Check"
-                            else -> "Test Cloudflare 1.1.1.1 Reachability"
+                                "Retry DoH Latency Check"
+                            else -> "Ping ${preferences.selectedUpstreamDns.title} DoH"
                         }
                     )
                 }
@@ -329,7 +854,7 @@ private fun DnsPresetsList(
     onCopyPreset: (String) -> Unit
 ) {
     Text(
-        text = "Select Encrypted DNS Hostname",
+        text = "Android Private DNS (DoT) Hostnames",
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurface
     )
@@ -415,3 +940,4 @@ private fun openNetworkOrPrivateDnsSettings(context: Context) {
         }
     }
 }
+
