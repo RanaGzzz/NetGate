@@ -249,8 +249,12 @@ fun FirewallScreen(
                                                 viewModel.runDeviceSecurityAudit()
                                             }
                                         }
-                                        AppDestination.SPEED_TEST, AppDestination.DNS ->
+                                        AppDestination.SPEED_TEST ->
                                             viewModel.refreshConnectionDetails()
+                                        AppDestination.DNS -> {
+                                            viewModel.refreshConnectionDetails()
+                                            viewModel.runDnsCheck()
+                                        }
                                         AppDestination.FIREWALL, AppDestination.WEBSITES ->
                                             viewModel.refreshInstalledApps()
                                     }
@@ -447,9 +451,11 @@ fun FirewallScreen(
                                 vpnRuntimeState = uiState.vpnRuntimeState,
                                 probeState = uiState.dnsProbeState,
                                 leakTestState = uiState.dnsLeakTestState,
+                                dnsCheckState = uiState.dnsCheckState,
                                 onSelectUpstreamDns = viewModel::selectUpstreamDns,
                                 onSaveCustomDns = viewModel::saveCustomDnsEndpoints,
                                 onToggleDohUpstream = viewModel::setUseDohUpstream,
+                                onRunDnsCheck = viewModel::runDnsCheck,
                                 onRunDnsLeakTest = viewModel::runDnsLeakTest,
                                 onTestCloudflareDoh = viewModel::testCloudflareDoh,
                                 onRequestEnableFirewall = onRequestEnableFirewall,

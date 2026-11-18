@@ -165,6 +165,31 @@ data class DnsProbeState(
     val errorMessage: String? = null
 )
 
+data class DnsServerIdentity(
+    val address: String,
+    val providerName: String,
+    val roleLabel: String,
+    val isEncrypted: Boolean = false
+)
+
+data class DnsCheckState(
+    val isChecking: Boolean = false,
+    val connectedProvider: String = "Checking DNS…",
+    val transportLabel: String = "",
+    val isEncrypted: Boolean = false,
+    val isUsingCustomPrivateDns: Boolean = false,
+    val privateDnsHostname: String? = null,
+    val resolvedExitDnsIp: String? = null,
+    val resolvedExitDnsOrg: String? = null,
+    val resolvedExitDnsLocation: String? = null,
+    val resolvedExitDnsFlag: String = "",
+    val systemDnsServers: List<DnsServerIdentity> = emptyList(),
+    val resolutionLatencyMs: Int? = null,
+    val checkedAtMs: Long = 0L,
+    val summary: String = "Run a live check to verify the exact DNS resolver answering your queries.",
+    val errorMessage: String? = null
+)
+
 data class InstalledAppInfo(
     val packageName: String,
     val appName: String,

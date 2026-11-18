@@ -67,12 +67,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.DnsCheckState
 import com.example.data.model.DnsLeakCheckItem
 import com.example.data.model.DnsLeakCheckStatus
 import com.example.data.model.DnsLeakTestState
 import com.example.data.model.DnsLeakVerdict
 import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsProviderPreset
+import com.example.data.model.DnsServerIdentity
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.UpstreamDnsServer
 import com.example.service.VpnRuntimeState
@@ -89,9 +91,11 @@ fun DnsProtectionContent(
     vpnRuntimeState: VpnRuntimeState,
     probeState: DnsProbeState,
     leakTestState: DnsLeakTestState,
+    dnsCheckState: DnsCheckState,
     onSelectUpstreamDns: (UpstreamDnsServer) -> Unit,
     onSaveCustomDns: (dohUrl: String, udpIp: String) -> Unit,
     onToggleDohUpstream: (Boolean) -> Unit,
+    onRunDnsCheck: () -> Unit,
     onRunDnsLeakTest: () -> Unit,
     onTestCloudflareDoh: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
@@ -123,6 +127,12 @@ fun DnsProtectionContent(
                         .padding(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    ActiveDnsCheckCard(
+                        dnsCheckState = dnsCheckState,
+                        isFirewallActive = isFirewallActive,
+                        onRunDnsCheck = onRunDnsCheck
+                    )
+
                     DnsLeakTestCard(
                         leakTestState = leakTestState,
                         preferences = preferences,
@@ -182,6 +192,12 @@ fun DnsProtectionContent(
                         .padding(top = 8.dp, bottom = navInsetBottom + 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    ActiveDnsCheckCard(
+                        dnsCheckState = dnsCheckState,
+                        isFirewallActive = isFirewallActive,
+                        onRunDnsCheck = onRunDnsCheck
+                    )
+
                     DnsLeakTestCard(
                         leakTestState = leakTestState,
                         preferences = preferences,
@@ -220,6 +236,260 @@ fun DnsProtectionContent(
                         }
                     )
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ActiveDnsCheckCard(
+    dnsCheckState: DnsCheckState,
+    isFirewallActive: Boolean,
+    onRunDnsCheck: () -> Unit
+) {
+    val accent = when {
+        dnsCheckState.errorMessage != null -> BlockedRed
+        dnsCheckState.isEncrypted -> EmeraldPrimary
+        else -> WarningAmber
+    }
+
+    FrostedSurface(
+        shape = RoundedCornerShape(22.dp),
+        tintColor = accent.copy(alpha = 0.09f),
+        borderAccent = accent.copy(alpha = 0.58f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("active_dns_check_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = accent.copy(alpha = 0.16f),
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.Dns,
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Connected DNS Resolver",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = dnsCheckState.connectedProvider,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = accent.copy(alpha = 0.16f)
+                ) {
+                    Text(
+                        text = if (dnsCheckState.isEncrypted) "ENCRYPTED" else "UNENCRYPTED",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = accent,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (dnsCheckState.transportLabel.isNotBlank() || dnsCheckState.resolutionLatencyMs != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (dnsCheckState.transportLabel.isNotBlank()) {
+                        LeakTelemetryBadge(
+                            label = "Transport",
+                            value = dnsCheckState.transportLabel,
+                            accent = WifiAccent
+                        )
+                    }
+                    dnsCheckState.resolutionLatencyMs?.let { ms ->
+                        LeakTelemetryBadge(
+                            label = "Lookup RTT",
+                            value = "$ms ms",
+                            accent = EmeraldPrimary
+                        )
+                    }
+                    if (isFirewallActive) {
+                        LeakTelemetryBadge(
+                            label = "Firewall Tunnel",
+                            value = "Active",
+                            accent = EmeraldPrimary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = dnsCheckState.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (dnsCheckState.errorMessage != null) {
+                    BlockedRed
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+
+            dnsCheckState.resolvedExitDnsIp?.let { exitIp ->
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = EmeraldPrimary.copy(alpha = 0.10f),
+                    border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.32f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("live_verified_exit_resolver_box")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "LIVE VERIFIED EXIT RESOLVER",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = EmeraldPrimary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = buildString {
+                                if (dnsCheckState.resolvedExitDnsFlag.isNotBlank()) {
+                                    append(dnsCheckState.resolvedExitDnsFlag)
+                                    append(" ")
+                                }
+                                append(exitIp)
+                            },
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        val orgAndLocation = listOfNotNull(
+                            dnsCheckState.resolvedExitDnsOrg?.takeIf { it.isNotBlank() },
+                            dnsCheckState.resolvedExitDnsLocation?.takeIf { it.isNotBlank() }
+                        ).joinToString(" • ")
+                        if (orgAndLocation.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = orgAndLocation,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (dnsCheckState.systemDnsServers.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    dnsCheckState.systemDnsServers.forEach { server ->
+                        DnsServerIdentityRow(server = server)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onRunDnsCheck,
+                enabled = !dnsCheckState.isChecking,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("check_active_dns_button")
+            ) {
+                if (dnsCheckState.isChecking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Checking Connected DNS…")
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Dns,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (dnsCheckState.checkedAtMs > 0L) {
+                            "Re-check Connected DNS"
+                        } else {
+                            "Check Connected DNS"
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DnsServerIdentityRow(server: DnsServerIdentity) {
+    val badgeColor = if (server.isEncrypted) EmeraldPrimary else WarningAmber
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = server.roleLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = server.providerName,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = server.address,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = badgeColor.copy(alpha = 0.14f)
+            ) {
+                Text(
+                    text = if (server.isEncrypted) "Encrypted" else "Plaintext",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = badgeColor,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
             }
         }
     }

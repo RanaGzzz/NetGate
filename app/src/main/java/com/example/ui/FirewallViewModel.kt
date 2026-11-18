@@ -36,6 +36,7 @@ import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSubTab
 import com.example.data.model.DataUsageSummary
 import com.example.data.model.DeviceSecurityAuditReport
+import com.example.data.model.DnsCheckState
 import com.example.data.model.DnsLeakTestState
 import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsQueryLogEntry
@@ -57,6 +58,7 @@ import com.example.data.model.UsageTimeRange
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.model.YouTubeRestrictedMode
+import com.example.data.network.DnsConnectionChecker
 import com.example.data.network.SpeedTestPhase
 import com.example.data.network.SpeedTestRunner
 import com.example.data.network.SpeedTestState
@@ -168,6 +170,7 @@ data class FirewallUiState(
     val isDnsProtectionOpen: Boolean = false,
     val dnsProbeState: DnsProbeState = DnsProbeState(),
     val dnsLeakTestState: DnsLeakTestState = DnsLeakTestState(),
+    val dnsCheckState: DnsCheckState = DnsCheckState(),
     val isSpeedTestOpen: Boolean = false,
     val speedTestState: SpeedTestState = SpeedTestState(),
     val dataUsageState: DataUsageUiState = DataUsageUiState(),
@@ -228,6 +231,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val isDnsProtectionOpenFlow = MutableStateFlow(false)
     private val dnsProbeStateFlow = MutableStateFlow(DnsProbeState())
     private val dnsLeakTestStateFlow = MutableStateFlow(DnsLeakTestState())
+    private val dnsCheckStateFlow = MutableStateFlow(DnsCheckState())
     private val isSpeedTestOpenFlow = MutableStateFlow(false)
     private val speedTestRunner = SpeedTestRunner()
     private val speedTestStateFlow = MutableStateFlow(SpeedTestState())
@@ -380,9 +384,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val dnsUiFlow = combine(
         isDnsProtectionOpenFlow,
         dnsProbeStateFlow,
-        dnsLeakTestStateFlow
-    ) { dnsOpen, dnsProbe, dnsLeak ->
-        Triple(dnsOpen, dnsProbe, dnsLeak)
+        dnsLeakTestStateFlow,
+        dnsCheckStateFlow
+    ) { dnsOpen, dnsProbe, dnsLeak, dnsCheck ->
+        DnsUiSnapshot(dnsOpen, dnsProbe, dnsLeak, dnsCheck)
     }
 
     private val sheetsFlow = combine(
@@ -391,8 +396,17 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         isSpeedTestOpenFlow,
         speedTestStateFlow,
         dnsUiFlow
-    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest, (dnsOpen, dnsProbe, dnsLeak) ->
-        SheetsSnapshot(settingsOpen, connInfoOpen, dnsOpen, dnsProbe, dnsLeak, speedTestOpen, speedTest)
+    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest, dnsUi ->
+        SheetsSnapshot(
+            settingsOpen = settingsOpen,
+            connInfoOpen = connInfoOpen,
+            dnsOpen = dnsUi.dnsOpen,
+            dnsProbeState = dnsUi.dnsProbeState,
+            dnsLeakTestState = dnsUi.dnsLeakTestState,
+            dnsCheckState = dnsUi.dnsCheckState,
+            speedTestOpen = speedTestOpen,
+            speedTestState = speedTest
+        )
     }
 
     private val usageControlsFlow = combine(
@@ -638,6 +652,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             safeRewriteCount = base.vpnState.safeRewriteCount
         )
 
+        val effectiveDnsCheck = if (sheets.dnsCheckState.checkedAtMs == 0L && !sheets.dnsCheckState.isChecking) {
+            DnsConnectionChecker.buildInstantSnapshot(
+                prefs = base.prefs,
+                vpnState = base.vpnState,
+                connectionDetails = connDetails
+            )
+        } else {
+            sheets.dnsCheckState
+        }
+
         FirewallUiState(
             currentDestination = destination,
             isLoading = base.loading,
@@ -656,6 +680,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             isDnsProtectionOpen = sheets.dnsOpen,
             dnsProbeState = sheets.dnsProbeState,
             dnsLeakTestState = sheets.dnsLeakTestState,
+            dnsCheckState = effectiveDnsCheck,
             isSpeedTestOpen = sheets.speedTestOpen,
             speedTestState = sheets.speedTestState,
             dataUsageState = dataUsage,
@@ -701,7 +726,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                     runDeviceSecurityAudit()
                 }
             }
-            AppDestination.SPEED_TEST, AppDestination.DNS -> refreshConnectionDetails()
+            AppDestination.SPEED_TEST -> refreshConnectionDetails()
+            AppDestination.DNS -> {
+                refreshConnectionDetails()
+                if (dnsCheckStateFlow.value.checkedAtMs == 0L) {
+                    runDnsCheck()
+                }
+            }
             else -> Unit
         }
     }
@@ -1091,6 +1122,26 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun runDnsCheck() {
+        if (dnsCheckStateFlow.value.isChecking) return
+        refreshConnectionDetails()
+        viewModelScope.launch {
+            val currentSnapshot = uiState.value
+            val instant = DnsConnectionChecker.buildInstantSnapshot(
+                prefs = currentSnapshot.preferences,
+                vpnState = currentSnapshot.vpnRuntimeState,
+                connectionDetails = currentSnapshot.connectionDetails
+            )
+            dnsCheckStateFlow.value = instant.copy(isChecking = true)
+            val result = repository.runLiveDnsCheck(
+                prefs = currentSnapshot.preferences,
+                vpnState = currentSnapshot.vpnRuntimeState,
+                connectionDetails = currentSnapshot.connectionDetails
+            )
+            dnsCheckStateFlow.value = result
+        }
+    }
+
     fun notifyCopiedDnsHostname(hostname: String) {
         _snackbarMessages.tryEmit("Copied $hostname to clipboard")
     }
@@ -1469,12 +1520,20 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val inspected: String?
     )
 
+    private data class DnsUiSnapshot(
+        val dnsOpen: Boolean,
+        val dnsProbeState: DnsProbeState,
+        val dnsLeakTestState: DnsLeakTestState,
+        val dnsCheckState: DnsCheckState
+    )
+
     private data class SheetsSnapshot(
         val settingsOpen: Boolean,
         val connInfoOpen: Boolean,
         val dnsOpen: Boolean,
         val dnsProbeState: DnsProbeState,
         val dnsLeakTestState: DnsLeakTestState,
+        val dnsCheckState: DnsCheckState,
         val speedTestOpen: Boolean,
         val speedTestState: SpeedTestState
     )

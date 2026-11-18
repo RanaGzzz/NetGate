@@ -42,12 +42,14 @@ import com.example.data.model.ConnectionDetails
 import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSummary
 import com.example.data.model.DeviceSecurityAuditReport
+import com.example.data.model.DnsCheckState
 import com.example.data.model.DnsLeakTestState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.SiteConnectionRecord
 import com.example.data.model.WebsiteRuleItem
+import com.example.data.network.DnsConnectionChecker
 import com.example.data.network.DnsLeakTester
 import com.example.service.AdBlockFilterEngine
 import com.example.service.AppTimerScheduler
@@ -666,6 +668,17 @@ class FirewallRepository(
         vpnState: VpnRuntimeState,
         connectionDetails: ConnectionDetails
     ): DnsLeakTestState = DnsLeakTester.runDiagnostic(
+        context = context,
+        prefs = prefs,
+        vpnState = vpnState,
+        connectionDetails = connectionDetails
+    )
+
+    suspend fun runLiveDnsCheck(
+        prefs: FirewallPreferencesState,
+        vpnState: VpnRuntimeState,
+        connectionDetails: ConnectionDetails
+    ): DnsCheckState = DnsConnectionChecker.runLiveDnsCheck(
         context = context,
         prefs = prefs,
         vpnState = vpnState,

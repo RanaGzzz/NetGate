@@ -1117,4 +1117,106 @@ class ExampleRobolectricTest {
         prefs.setDeepMonitorEnabled(false)
         assertFalse(prefs.preferencesFlow.first().isDeepMonitorEnabled)
     }
+
+    @Test
+    fun `dns connection checker identifies known dns ips and private dns hostnames`() {
+        val checker = com.example.data.network.DnsConnectionChecker
+
+        assertEquals("Cloudflare 1.1.1.1", checker.identifyKnownDnsIp("1.1.1.1"))
+        assertEquals("Google Public DNS", checker.identifyKnownDnsIp("8.8.8.8"))
+        assertEquals("Quad9 Threat Shield", checker.identifyKnownDnsIp("9.9.9.9"))
+        assertEquals("AdGuard DNS", checker.identifyKnownDnsIp("94.140.14.14"))
+        assertEquals("Router / Local Gateway DNS", checker.identifyKnownDnsIp("192.168.1.1"))
+
+        assertEquals("Cloudflare 1.1.1.1", checker.identifyKnownPrivateDnsHostname("one.one.one.one"))
+        assertEquals("Google Public DNS", checker.identifyKnownPrivateDnsHostname("dns.google"))
+        assertEquals("AdGuard DNS", checker.identifyKnownPrivateDnsHostname("dns.adguard-dns.com"))
+        assertEquals("Custom DoT (custom.example.com)", checker.identifyKnownPrivateDnsHostname("custom.example.com"))
+    }
+
+    @Test
+    fun `dns connection checker evaluates vpn doh private dns dot and wifi dhcp states`() {
+        val checker = com.example.data.network.DnsConnectionChecker
+
+        // 1. Active NetGate VPN DoH upstream
+        val vpnDohState = checker.evaluateDnsSnapshot(
+            prefs = com.example.data.model.FirewallPreferencesState(
+                isFirewallEnabled = true,
+                isAdBlockerEnabled = true,
+                useDohUpstream = true,
+                selectedUpstreamDns = com.example.data.model.UpstreamDnsServer.ADGUARD_DNS
+            ),
+            vpnState = com.example.service.VpnRuntimeState(
+                isServiceRunning = true,
+                isTunnelActive = true
+            ),
+            connectionDetails = com.example.data.model.ConnectionDetails(
+                activeNetworkType = ActiveNetworkType.WIFI,
+                dnsServers = listOf("192.168.1.1")
+            ),
+            vpnDnsServers = listOf("10.1.10.2"),
+            physicalDnsServers = listOf("192.168.1.1"),
+            resolvedExitDnsIp = "94.140.14.14",
+            resolvedExitDnsOrg = "AdGuard",
+            resolvedExitDnsLocation = "Frankfurt, Germany",
+            resolvedExitDnsFlag = "\uD83C\uDDE9\uD83C\uDDEA",
+            resolutionLatencyMs = 19,
+            checkedAtMs = 1_700_000_000_000L,
+            probeError = null
+        )
+        assertTrue(vpnDohState.isEncrypted)
+        assertEquals("AdGuard DNS", vpnDohState.connectedProvider)
+        assertEquals("Encrypted DoH via NetGate VPN", vpnDohState.transportLabel)
+        assertEquals("94.140.14.14", vpnDohState.resolvedExitDnsIp)
+        assertTrue(vpnDohState.systemDnsServers.any { it.address == "10.1.10.2" })
+
+        // 2. Android Strict Private DNS (DoT) active while VPN is off
+        val privateDnsState = checker.evaluateDnsSnapshot(
+            prefs = com.example.data.model.FirewallPreferencesState(isFirewallEnabled = false),
+            vpnState = com.example.service.VpnRuntimeState(isServiceRunning = false),
+            connectionDetails = com.example.data.model.ConnectionDetails(
+                activeNetworkType = ActiveNetworkType.MOBILE_DATA,
+                isPrivateDnsActive = true,
+                privateDnsMode = "hostname",
+                privateDnsHostname = "one.one.one.one",
+                dnsServers = listOf("8.8.8.8")
+            ),
+            vpnDnsServers = emptyList(),
+            physicalDnsServers = listOf("8.8.8.8"),
+            resolvedExitDnsIp = "1.1.1.1",
+            resolvedExitDnsOrg = "Cloudflare, Inc.",
+            resolvedExitDnsLocation = "San Jose, United States",
+            resolvedExitDnsFlag = "\uD83C\uDDFA\uD83C\uDDF8",
+            resolutionLatencyMs = 14,
+            checkedAtMs = 1_700_000_000_000L,
+            probeError = null
+        )
+        assertTrue(privateDnsState.isEncrypted)
+        assertTrue(privateDnsState.isUsingCustomPrivateDns)
+        assertEquals("Cloudflare 1.1.1.1", privateDnsState.connectedProvider)
+        assertEquals("Android Private DNS (DoT • Port 853)", privateDnsState.transportLabel)
+
+        // 3. Unencrypted Wi-Fi DHCP fallback when both VPN and Private DNS are off
+        val wifiPlainState = checker.evaluateDnsSnapshot(
+            prefs = com.example.data.model.FirewallPreferencesState(isFirewallEnabled = false),
+            vpnState = com.example.service.VpnRuntimeState(isServiceRunning = false),
+            connectionDetails = com.example.data.model.ConnectionDetails(
+                activeNetworkType = ActiveNetworkType.WIFI,
+                isPrivateDnsActive = false,
+                dnsServers = listOf("192.168.1.1")
+            ),
+            vpnDnsServers = emptyList(),
+            physicalDnsServers = listOf("192.168.1.1"),
+            resolvedExitDnsIp = null,
+            resolvedExitDnsOrg = null,
+            resolvedExitDnsLocation = null,
+            resolvedExitDnsFlag = "",
+            resolutionLatencyMs = null,
+            checkedAtMs = 0L,
+            probeError = null
+        )
+        assertFalse(wifiPlainState.isEncrypted)
+        assertEquals("Router / Local Gateway DNS", wifiPlainState.connectedProvider)
+        assertEquals("Wi-Fi Network DNS (Unencrypted Port 53)", wifiPlainState.transportLabel)
+    }
 }
