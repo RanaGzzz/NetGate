@@ -643,4 +643,156 @@ class ExampleRobolectricTest {
         )
         assertEquals(com.example.data.model.DnsLeakVerdict.LEAK_DETECTED, exposedReport.verdict)
     }
+
+    @Test
+    fun `safesearch and youtube restricted mode resolve official safe vip aliases`() {
+        val disabled = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "www.google.com",
+            safeSearchEnabled = false,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.OFF
+        )
+        assertNull(disabled)
+
+        val googleSafe = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "www.google.co.uk",
+            safeSearchEnabled = true,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.OFF
+        )
+        assertNotNull(googleSafe)
+        assertEquals("forcesafesearch.google.com", googleSafe!!.aliasDomain)
+
+        val bingSafe = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "www.bing.com",
+            safeSearchEnabled = true,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.OFF
+        )
+        assertEquals("strict.bing.com", bingSafe!!.aliasDomain)
+
+        val ddgSafe = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "duckduckgo.com",
+            safeSearchEnabled = true,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.OFF
+        )
+        assertEquals("safe.duckduckgo.com", ddgSafe!!.aliasDomain)
+
+        val braveSafe = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "search.brave.com",
+            safeSearchEnabled = true,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.OFF
+        )
+        assertEquals("safesearch.brave.com", braveSafe!!.aliasDomain)
+
+        assertNull(
+            DnsPacketFilter.resolveSafeSearchAlias(
+                domain = "wikipedia.org",
+                safeSearchEnabled = true,
+                youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.STRICT
+            )
+        )
+
+        val ytModerate = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "m.youtube.com",
+            safeSearchEnabled = false,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.MODERATE
+        )
+        assertEquals("restrictmoderate.youtube.com", ytModerate!!.aliasDomain)
+
+        val ytStrict = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = "www.youtube.com",
+            safeSearchEnabled = false,
+            youtubeRestrictedMode = com.example.data.model.YouTubeRestrictedMode.STRICT
+        )
+        assertEquals("restrict.youtube.com", ytStrict!!.aliasDomain)
+    }
+
+    @Test
+    fun `dns packet filter rewrites safesearch query and binds upstream vip answer to original domain`() {
+        val rawDnsQuery = byteArrayOf(
+            0x22, 0x33, // Tx ID
+            0x01, 0x00, // RD=1
+            0x00, 0x01, // QDCOUNT=1
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x03, 'w'.code.toByte(), 'w'.code.toByte(), 'w'.code.toByte(),
+            0x06, 'g'.code.toByte(), 'o'.code.toByte(), 'o'.code.toByte(), 'g'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+            0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+            0x00,
+            0x00, 0x01, // A
+            0x00, 0x01  // IN
+        )
+        val udpLen = 8 + rawDnsQuery.size
+        val totalLen = 20 + udpLen
+        val ipPacket = ByteArray(totalLen)
+        ipPacket[0] = 0x45.toByte()
+        ipPacket[2] = ((totalLen ushr 8) and 0xFF).toByte()
+        ipPacket[3] = (totalLen and 0xFF).toByte()
+        ipPacket[9] = 17
+        ipPacket[12] = 10; ipPacket[13] = 1; ipPacket[14] = 10; ipPacket[15] = 1
+        ipPacket[16] = 10; ipPacket[17] = 1; ipPacket[18] = 10; ipPacket[19] = 2
+        ipPacket[20] = 0x30; ipPacket[21] = 0x39
+        ipPacket[22] = 0x00; ipPacket[23] = 53
+        ipPacket[24] = (udpLen ushr 8).toByte(); ipPacket[25] = (udpLen and 0xFF).toByte()
+        System.arraycopy(rawDnsQuery, 0, ipPacket, 28, rawDnsQuery.size)
+
+        val parsed = DnsPacketFilter.parseUdpDnsQuery(ipPacket, ipPacket.size)!!
+        val rewrittenQuery = DnsPacketFilter.buildRewrittenQueryPayload(parsed, "forcesafesearch.google.com")
+        assertNotNull(rewrittenQuery)
+
+        // Build synthetic upstream response for forcesafesearch.google.com -> A 216.239.38.120
+        val upstreamResp = java.io.ByteArrayOutputStream()
+        upstreamResp.write(rewrittenQuery!!, 0, 2) // Tx ID
+        upstreamResp.write(byteArrayOf(0x81.toByte(), 0x80.toByte())) // QR=1, RD=1, RA=1, NOERROR
+        upstreamResp.write(byteArrayOf(0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00)) // QD=1, AN=1
+        upstreamResp.write(rewrittenQuery, 12, rewrittenQuery.size - 12) // Question
+        // Answer RR: pointer 0xC00C, Type A, Class IN, TTL 300, RDLEN 4, 216.239.38.120
+        upstreamResp.write(byteArrayOf(0xC0.toByte(), 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2C, 0x00, 0x04))
+        upstreamResp.write(byteArrayOf(216.toByte(), 239.toByte(), 38, 120))
+
+        val boundAnswer = DnsPacketFilter.buildRewrittenAnswerPayload(parsed, upstreamResp.toByteArray())
+        assertNotNull(boundAnswer)
+        val respBytes = boundAnswer!!
+        assertEquals(0x22.toByte(), respBytes[0])
+        assertEquals(0x33.toByte(), respBytes[1])
+        assertEquals(1, ((respBytes[6].toInt() and 0xFF) shl 8) or (respBytes[7].toInt() and 0xFF))
+        // Ends with VIP IPv4 216.239.38.120
+        val n = respBytes.size
+        assertEquals(216.toByte(), respBytes[n - 4])
+        assertEquals(239.toByte(), respBytes[n - 3])
+        assertEquals(38.toByte(), respBytes[n - 2])
+        assertEquals(120.toByte(), respBytes[n - 1])
+    }
+
+    @Test
+    fun `youtube ad blocker targets ad endpoints and paths without breaking video streams`() {
+        assertTrue(AdBlockFilterEngine.isYoutubeAdDomain("ads.youtube.com"))
+        assertTrue(AdBlockFilterEngine.isYoutubeAdDomain("s.youtube.com"))
+        assertTrue(AdBlockFilterEngine.isYoutubeAdDomain("googleads.g.doubleclick.net"))
+        assertTrue(AdBlockFilterEngine.isYoutubeAdDomain("pagead2.googlesyndication.com"))
+
+        // Normal video streaming & thumbnails must remain intact
+        assertFalse(AdBlockFilterEngine.isYoutubeAdDomain("www.youtube.com"))
+        assertFalse(AdBlockFilterEngine.isYoutubeAdDomain("i.ytimg.com"))
+        assertFalse(AdBlockFilterEngine.isYoutubeAdDomain("rr2---sn-4g5e6nze.googlevideo.com"))
+
+        assertTrue(AdBlockFilterEngine.isYoutubeAdUrlPath("/youtubei/v1/player/ad_break?key=abc"))
+        assertTrue(AdBlockFilterEngine.isYoutubeAdUrlPath("/api/stats/ads?ns=yt"))
+        assertFalse(AdBlockFilterEngine.isYoutubeAdUrlPath("/watch?v=dQw4w9WgXcQ"))
+    }
+
+    @Test
+    fun `sni proxy presets and custom upstream proxy persist cleanly in preferences`() = runTest {
+        val prefs = FirewallPreferences(context)
+        prefs.applySniProxyPreset(com.example.data.model.SniProxyPreset.FAMILY_SAFE)
+        var state = prefs.preferencesFlow.first()
+        assertEquals(com.example.data.model.SniProxyPreset.FAMILY_SAFE, state.sniProxyPreset)
+        assertTrue(state.isHttpsProxyEnabled)
+        assertTrue(state.isAdBlockerEnabled)
+        assertTrue(state.isYoutubeAdBlockEnabled)
+        assertTrue(state.isSafeSearchEnabled)
+        assertEquals(com.example.data.model.YouTubeRestrictedMode.STRICT, state.youtubeRestrictedMode)
+
+        prefs.setCustomSniProxy("proxy.corp.local", 3128)
+        state = prefs.preferencesFlow.first()
+        assertEquals(com.example.data.model.SniProxyPreset.CUSTOM_UPSTREAM_SNI, state.sniProxyPreset)
+        assertEquals("proxy.corp.local" to 3128, state.resolvedUpstreamSniProxy())
+    }
 }

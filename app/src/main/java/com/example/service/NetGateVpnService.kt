@@ -29,8 +29,10 @@ import com.example.data.model.ActiveNetworkType
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.DnsQueryStatus
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.SniProxyPreset
 import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.WebsiteFilterMode
+import com.example.data.model.YouTubeRestrictedMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -73,6 +75,11 @@ data class VpnRuntimeState(
     val allowedDnsQueriesCount: Long = 0L,
     val blockedAdsCount: Long = 0L,
     val loadedAdDomainsCount: Int = 0,
+    val isSafeSearchActive: Boolean = false,
+    val youtubeRestrictedMode: YouTubeRestrictedMode = YouTubeRestrictedMode.OFF,
+    val isYoutubeAdBlockActive: Boolean = false,
+    val activeSniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
+    val safeRewriteCount: Long = 0L,
     val recentBlockedDomains: List<String> = emptyList(),
     val recentDnsLogs: List<DnsQueryLogEntry> = emptyList()
 )
@@ -130,6 +137,24 @@ class NetGateVpnService : VpnService() {
     private var latestStripTrackingParams: Boolean = true
 
     @Volatile
+    private var latestIsSafeSearchEnabled: Boolean = false
+
+    @Volatile
+    private var latestYoutubeRestrictedMode: YouTubeRestrictedMode = YouTubeRestrictedMode.OFF
+
+    @Volatile
+    private var latestIsYoutubeAdBlockEnabled: Boolean = false
+
+    @Volatile
+    private var latestSniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT
+
+    @Volatile
+    private var latestCustomSniProxyHost: String = ""
+
+    @Volatile
+    private var latestCustomSniProxyPort: Int = 8080
+
+    @Volatile
     private var latestAdMatcherSnapshot: AdBlockMatcherSnapshot = AdBlockMatcherSnapshot.EMPTY
 
     @Volatile
@@ -154,6 +179,7 @@ class NetGateVpnService : VpnService() {
     private val blockedAdsCount = AtomicLong(0L)
     private val blockedProxyCount = AtomicLong(0L)
     private val allowedProxyCount = AtomicLong(0L)
+    private val safeRewriteCount = AtomicLong(0L)
     private val pendingLifetimeAdsDelta = AtomicLong(0L)
     private val isFlushingLifetimeAds = AtomicBoolean(false)
     private val dnsLogSeq = AtomicLong(1L)
@@ -283,8 +309,14 @@ class NetGateVpnService : VpnService() {
                 latestIsHttpsProxyEnabled = prefs.isHttpsProxyEnabled
                 latestHttpsProxyPort = prefs.httpsProxyPort.coerceIn(1024, 65535)
                 latestStripTrackingParams = prefs.isProxyStripTrackingParams
+                latestIsSafeSearchEnabled = prefs.isSafeSearchEnabled
+                latestYoutubeRestrictedMode = prefs.youtubeRestrictedMode
+                latestIsYoutubeAdBlockEnabled = prefs.isYoutubeAdBlockEnabled
+                latestSniProxyPreset = prefs.sniProxyPreset
+                latestCustomSniProxyHost = prefs.customSniProxyHost.trim()
+                latestCustomSniProxyPort = prefs.customSniProxyPort.coerceIn(1, 65535)
 
-                val desiredAdSig = if (!prefs.isAdBlockerEnabled) {
+                val desiredAdSig = if (!prefs.isAdBlockerEnabled && !prefs.isYoutubeAdBlockEnabled) {
                     "OFF"
                 } else {
                     snapshot.adFilterLists
@@ -439,7 +471,15 @@ class NetGateVpnService : VpnService() {
         val httpsProxyEnabled = latestIsHttpsProxyEnabled
         val proxyPort = latestHttpsProxyPort.coerceIn(1024, 65535)
         val stripTracking = latestStripTrackingParams
-        val needsDnsProxy = websiteMode != WebsiteFilterMode.OFF || adBlockEnabled || httpsProxyEnabled
+        val safeSearchEnabled = latestIsSafeSearchEnabled
+        val youtubeRestrictedMode = latestYoutubeRestrictedMode
+        val youtubeAdBlockEnabled = latestIsYoutubeAdBlockEnabled
+        val needsDnsProxy = websiteMode != WebsiteFilterMode.OFF ||
+            adBlockEnabled ||
+            httpsProxyEnabled ||
+            safeSearchEnabled ||
+            youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
+            youtubeAdBlockEnabled
         val targetBlockedPackages = when (netType) {
             ActiveNetworkType.WIFI -> latestRules.filter { it.blockWifi }.map { it.packageName }
             ActiveNetworkType.MOBILE_DATA -> latestRules.filter { it.blockMobileData }.map { it.packageName }
@@ -465,6 +505,10 @@ class NetGateVpnService : VpnService() {
             httpsProxyEnabled = httpsProxyEnabled,
             httpsProxyPort = proxyPort,
             stripTrackingParams = stripTracking,
+            safeSearchEnabled = safeSearchEnabled,
+            youtubeRestrictedMode = youtubeRestrictedMode,
+            youtubeAdBlockEnabled = youtubeAdBlockEnabled,
+            sniProxyPreset = latestSniProxyPreset,
             blockedPackages = if (!needsDnsProxy) installedBlocked else emptyList(),
             bypassPackages = effectiveBypass
         )
@@ -640,6 +684,8 @@ class NetGateVpnService : VpnService() {
             stripTrackingParams = stripTracking,
             protectSocket = { socket -> protect(socket) },
             evaluateRequest = ::evaluateProxyRequest,
+            resolveTargetHost = ::resolveProxyTargetHost,
+            upstreamProxyProvider = ::provideUpstreamSniProxy,
             onRequestLogged = ::handleProxyLogged
         )
         return if (server.start()) {
@@ -649,6 +695,22 @@ class NetGateVpnService : VpnService() {
         } else {
             false
         }
+    }
+
+    private fun resolveProxyTargetHost(host: String): String {
+        val rewrite = DnsPacketFilter.resolveSafeSearchAlias(
+            domain = host,
+            safeSearchEnabled = latestIsSafeSearchEnabled,
+            youtubeRestrictedMode = latestYoutubeRestrictedMode
+        )
+        return rewrite?.aliasDomain ?: host
+    }
+
+    private fun provideUpstreamSniProxy(): Pair<String, Int>? {
+        if (latestSniProxyPreset != SniProxyPreset.CUSTOM_UPSTREAM_SNI) return null
+        val host = latestCustomSniProxyHost.trim()
+        if (host.isEmpty()) return null
+        return host to latestCustomSniProxyPort.coerceIn(1, 65535)
     }
 
     private fun stopProxyServerLocked() {
@@ -689,6 +751,14 @@ class NetGateVpnService : VpnService() {
             return ProxyFilterDecision(allow = true, reason = "Essential Passthrough")
         }
 
+        if (!isExplicitlyWhitelisted && latestIsYoutubeAdBlockEnabled) {
+            if (AdBlockFilterEngine.isYoutubeAdDomain(domain) ||
+                AdBlockFilterEngine.isYoutubeAdUrlPath(pathAndQuery)
+            ) {
+                return ProxyFilterDecision(allow = false, reason = "YouTube Ad Blocker", isAdBlock = true)
+            }
+        }
+
         if (!isExplicitlyWhitelisted && (latestIsAdBlockerEnabled || latestIsHttpsProxyEnabled)) {
             if (adMatcher.isBlockedByAdFilter(domain)) {
                 return ProxyFilterDecision(allow = false, reason = "HTTPS Ad/Tracker Domain", isAdBlock = true)
@@ -698,7 +768,7 @@ class NetGateVpnService : VpnService() {
             }
         }
 
-        return ProxyFilterDecision(allow = true, reason = "HTTPS Proxy")
+        return ProxyFilterDecision(allow = true, reason = "SNI Proxy (${latestSniProxyPreset.title})")
     }
 
     private fun handleProxyLogged(host: String, decision: ProxyFilterDecision) {
@@ -820,6 +890,19 @@ class NetGateVpnService : VpnService() {
         val isPassthrough = latestIsEssentialPassthroughEnabled &&
             adMatcher.isEssentialPassthrough(query.domain)
 
+        if (!isExplicitlyWhitelisted && !isPassthrough && latestIsYoutubeAdBlockEnabled) {
+            if (AdBlockFilterEngine.isYoutubeAdDomain(query.domain)) {
+                sendNxDomain(query, output)
+                blockedDnsCount.incrementAndGet()
+                blockedAdsCount.incrementAndGet()
+                scheduleFlushLifetimeAds()
+                recordBlockedDomain(query.domain)
+                recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, "YouTube Ad Blocker")
+                publishDnsStatsOnly()
+                return
+            }
+        }
+
         if (!isExplicitlyWhitelisted && !isPassthrough && latestIsAdBlockerEnabled) {
             if (adMatcher.isBlockedByAdFilter(query.domain)) {
                 sendNxDomain(query, output)
@@ -833,18 +916,42 @@ class NetGateVpnService : VpnService() {
             }
         }
 
-        var upstreamLabel = "${latestUpstreamDnsTitle} UDP"
-        val upstreamDnsResponse = if (latestUseDohUpstream) {
-            val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(query.dnsPayload, latestDohUrl)
-            if (dohResp != null) {
-                upstreamLabel = "${latestUpstreamDnsTitle} DoH"
-                dohResp
-            } else {
-                forwardDnsQuery(query.dnsPayload)
-            }
+        val safeRewrite = if (!isExplicitlyWhitelisted) {
+            DnsPacketFilter.resolveSafeSearchAlias(
+                domain = query.domain,
+                safeSearchEnabled = latestIsSafeSearchEnabled,
+                youtubeRestrictedMode = latestYoutubeRestrictedMode
+            )
         } else {
-            forwardDnsQuery(query.dnsPayload)
+            null
         }
+
+        if (safeRewrite != null) {
+            val rewrittenPayload = DnsPacketFilter.buildRewrittenQueryPayload(query, safeRewrite.aliasDomain)
+            if (rewrittenPayload != null) {
+                val aliasResponse = resolveDnsUpstream(rewrittenPayload).first
+                if (aliasResponse != null) {
+                    val rewrittenAnswer = DnsPacketFilter.buildRewrittenAnswerPayload(query, aliasResponse)
+                    if (rewrittenAnswer != null) {
+                        val responsePacket = DnsPacketFilter.buildDnsResponsePacket(query, rewrittenAnswer)
+                        synchronized(tunWriteLock) {
+                            runCatching { output.write(responsePacket) }
+                        }
+                        safeRewriteCount.incrementAndGet()
+                        allowedDnsCount.incrementAndGet()
+                        recordDnsLog(
+                            query.domain,
+                            DnsQueryStatus.SAFE_REWRITE,
+                            "${safeRewrite.label} (${safeRewrite.aliasDomain})"
+                        )
+                        publishDnsStatsOnly()
+                        return
+                    }
+                }
+            }
+        }
+
+        val (upstreamDnsResponse, upstreamLabel) = resolveDnsUpstream(query.dnsPayload)
 
         if (upstreamDnsResponse != null) {
             val responsePacket = DnsPacketFilter.buildDnsResponsePacket(query, upstreamDnsResponse)
@@ -856,6 +963,19 @@ class NetGateVpnService : VpnService() {
             val reason = if (isPassthrough) "Essential Passthrough ($upstreamLabel)" else upstreamLabel
             recordDnsLog(query.domain, status, reason)
             publishDnsStatsOnly()
+        }
+    }
+
+    private fun resolveDnsUpstream(dnsPayload: ByteArray): Pair<ByteArray?, String> {
+        return if (latestUseDohUpstream) {
+            val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+            if (dohResp != null) {
+                dohResp to "${latestUpstreamDnsTitle} DoH"
+            } else {
+                forwardDnsQuery(dnsPayload) to "${latestUpstreamDnsTitle} UDP"
+            }
+        } else {
+            forwardDnsQuery(dnsPayload) to "${latestUpstreamDnsTitle} UDP"
         }
     }
 
@@ -971,6 +1091,11 @@ class NetGateVpnService : VpnService() {
             allowedDnsQueriesCount = allowedDnsCount.get(),
             blockedAdsCount = blockedAdsCount.get(),
             loadedAdDomainsCount = latestLoadedAdDomainsCount,
+            isSafeSearchActive = latestIsSafeSearchEnabled,
+            youtubeRestrictedMode = latestYoutubeRestrictedMode,
+            isYoutubeAdBlockActive = latestIsYoutubeAdBlockEnabled,
+            activeSniProxyPreset = latestSniProxyPreset,
+            safeRewriteCount = safeRewriteCount.get(),
             recentBlockedDomains = recentSnapshot,
             recentDnsLogs = logSnapshot
         )
@@ -1001,6 +1126,11 @@ class NetGateVpnService : VpnService() {
             allowedDnsQueriesCount = allowedDnsCount.get(),
             blockedAdsCount = blockedAdsCount.get(),
             loadedAdDomainsCount = latestLoadedAdDomainsCount,
+            isSafeSearchActive = latestIsSafeSearchEnabled,
+            youtubeRestrictedMode = latestYoutubeRestrictedMode,
+            isYoutubeAdBlockActive = latestIsYoutubeAdBlockEnabled,
+            activeSniProxyPreset = latestSniProxyPreset,
+            safeRewriteCount = safeRewriteCount.get(),
             recentBlockedDomains = recentSnapshot,
             recentDnsLogs = logSnapshot
         )
@@ -1096,7 +1226,10 @@ class NetGateVpnService : VpnService() {
         val proxyActive = proxyServer?.isRunning == true
         val adSuffix = buildString {
             if (adBlockEnabled) append(" + Ad Blocker")
-            if (proxyActive) append(" + HTTPS Proxy")
+            if (latestIsYoutubeAdBlockEnabled) append(" + YT Ads")
+            if (latestIsSafeSearchEnabled) append(" + SafeSearch")
+            if (latestYoutubeRestrictedMode != YouTubeRestrictedMode.OFF) append(" + YT Kids")
+            if (proxyActive) append(" + SNI Proxy")
         }
         val contentText = when (websiteMode) {
             WebsiteFilterMode.WHITELIST_ONLY ->
@@ -1105,13 +1238,13 @@ class NetGateVpnService : VpnService() {
                 "$netLabel • Website Blocklist$adSuffix${if (blockedCount > 0) " + $blockedCount blocked app(s)" else ""}"
             WebsiteFilterMode.OFF -> when {
                 proxyActive && blockedCount > 0 ->
-                    "$netLabel • HTTPS Proxy + Ad Filter + $blockedCount blocked app${if (blockedCount == 1) "" else "s"}"
+                    "$netLabel • SNI Proxy$adSuffix + $blockedCount blocked app${if (blockedCount == 1) "" else "s"}"
                 proxyActive ->
-                    "$netLabel • HTTPS Filtering Proxy & VPN active (127.0.0.1:$latestHttpsProxyPort)"
-                adBlockEnabled && blockedCount > 0 ->
-                    "$netLabel • Ad Blocker active + Blocking $blockedCount app${if (blockedCount == 1) "" else "s"}"
-                adBlockEnabled ->
-                    "$netLabel • System-Wide Ad & Tracker Blocker active"
+                    "$netLabel • SNI Proxy (${latestSniProxyPreset.title}) on 127.0.0.1:$latestHttpsProxyPort"
+                (adBlockEnabled || latestIsSafeSearchEnabled || latestYoutubeRestrictedMode != YouTubeRestrictedMode.OFF) && blockedCount > 0 ->
+                    "$netLabel • Filter active$adSuffix + $blockedCount blocked app${if (blockedCount == 1) "" else "s"}"
+                adBlockEnabled || latestIsSafeSearchEnabled || latestYoutubeRestrictedMode != YouTubeRestrictedMode.OFF ->
+                    "$netLabel • NetGate Guard$adSuffix"
                 blockedCount > 0 ->
                     "$netLabel active • Blocking $blockedCount app${if (blockedCount == 1) "" else "s"}"
                 else ->
@@ -1143,6 +1276,10 @@ class NetGateVpnService : VpnService() {
         val httpsProxyEnabled: Boolean,
         val httpsProxyPort: Int,
         val stripTrackingParams: Boolean,
+        val safeSearchEnabled: Boolean,
+        val youtubeRestrictedMode: YouTubeRestrictedMode,
+        val youtubeAdBlockEnabled: Boolean,
+        val sniProxyPreset: SniProxyPreset,
         val blockedPackages: List<String>,
         val bypassPackages: Set<String>
     )

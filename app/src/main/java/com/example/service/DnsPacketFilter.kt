@@ -3,7 +3,14 @@ package com.example.service
 import com.example.data.local.WebsiteRuleEntity
 import com.example.data.local.WebsiteRuleType
 import com.example.data.model.WebsiteFilterMode
+import com.example.data.model.YouTubeRestrictedMode
+import java.io.ByteArrayOutputStream
 import java.net.InetAddress
+
+data class SafeRewriteResult(
+    val aliasDomain: String,
+    val label: String
+)
 
 data class ParsedDnsQuery(
     val domain: String,
@@ -19,6 +26,27 @@ data class ParsedDnsQuery(
 object DnsPacketFilter {
 
     private val LABEL_REGEX = Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    private val GOOGLE_SEARCH_DOMAINS_REGEX = Regex(
+        "^(?:www\\.)?google\\.(?:com|[a-z]{2}|co\\.[a-z]{2}|com\\.[a-z]{2})$"
+    )
+    private val BING_SEARCH_DOMAINS = setOf("bing.com", "www.bing.com")
+    private val DUCKDUCKGO_DOMAINS = setOf(
+        "duckduckgo.com",
+        "www.duckduckgo.com",
+        "start.duckduckgo.com",
+        "html.duckduckgo.com"
+    )
+    private val BRAVE_SEARCH_DOMAINS = setOf("search.brave.com")
+    private val YANDEX_SEARCH_DOMAINS = setOf("yandex.com", "www.yandex.com", "yandex.ru", "www.yandex.ru")
+    private val PIXABAY_DOMAINS = setOf("pixabay.com", "www.pixabay.com")
+    private val YOUTUBE_RESTRICT_DOMAINS = setOf(
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtubei.googleapis.com",
+        "youtube.googleapis.com",
+        "www.youtube-nocookie.com"
+    )
 
     // Canary & DoH bootstrap domains that browsers (Chrome, Firefox, Safari/WebKit) query
     // to enable or auto-upgrade DNS-over-HTTPS bypassing local VPN DNS filtering.
@@ -39,6 +67,182 @@ object DnsPacketFilter {
         "mask.icloud.com",
         "mask-h2.icloud.com"
     )
+
+    fun resolveSafeSearchAlias(
+        domain: String,
+        safeSearchEnabled: Boolean,
+        youtubeRestrictedMode: YouTubeRestrictedMode
+    ): SafeRewriteResult? {
+        val normalized = domain.trim().trimEnd('.').lowercase()
+        if (normalized.isEmpty()) return null
+
+        val ytTarget = youtubeRestrictedMode.targetHost
+        if (ytTarget != null && normalized in YOUTUBE_RESTRICT_DOMAINS) {
+            return SafeRewriteResult(
+                aliasDomain = ytTarget,
+                label = "YouTube ${youtubeRestrictedMode.title}"
+            )
+        }
+
+        if (!safeSearchEnabled) return null
+
+        return when {
+            normalized == "forcesafesearch.google.com" -> null
+            GOOGLE_SEARCH_DOMAINS_REGEX.matches(normalized) -> SafeRewriteResult(
+                aliasDomain = "forcesafesearch.google.com",
+                label = "SafeSearch Google"
+            )
+            normalized in BING_SEARCH_DOMAINS -> SafeRewriteResult(
+                aliasDomain = "strict.bing.com",
+                label = "SafeSearch Bing"
+            )
+            normalized in DUCKDUCKGO_DOMAINS -> SafeRewriteResult(
+                aliasDomain = "safe.duckduckgo.com",
+                label = "SafeSearch DuckDuckGo"
+            )
+            normalized in BRAVE_SEARCH_DOMAINS -> SafeRewriteResult(
+                aliasDomain = "safesearch.brave.com",
+                label = "SafeSearch Brave"
+            )
+            normalized in PIXABAY_DOMAINS -> SafeRewriteResult(
+                aliasDomain = "safesearch.pixabay.com",
+                label = "SafeSearch Pixabay"
+            )
+            normalized in YANDEX_SEARCH_DOMAINS -> SafeRewriteResult(
+                aliasDomain = "familysearch.yandex.com",
+                label = "SafeSearch Yandex"
+            )
+            else -> null
+        }
+    }
+
+    fun buildRewrittenQueryPayload(originalQuery: ParsedDnsQuery, aliasDomain: String): ByteArray? {
+        if (originalQuery.questionEndOffset > originalQuery.dnsPayload.size ||
+            originalQuery.questionEndOffset < 16
+        ) {
+            return null
+        }
+        val labels = aliasDomain.trim().trimEnd('.').lowercase().split('.').filter { it.isNotEmpty() }
+        if (labels.isEmpty()) return null
+
+        val out = ByteArrayOutputStream(64)
+        // Copy 12-byte DNS header, force QDCOUNT=1 and zero answer/authority/additional counts
+        out.write(originalQuery.dnsPayload, 0, 4)
+        out.write(0x00); out.write(0x01) // QDCOUNT = 1
+        out.write(ByteArray(6)) // ANCOUNT=0, NSCOUNT=0, ARCOUNT=0
+
+        for (label in labels) {
+            val bytes = label.toByteArray(Charsets.US_ASCII)
+            if (bytes.size > 63) return null
+            out.write(bytes.size and 0xFF)
+            out.write(bytes)
+        }
+        out.write(0x00)
+        // Preserve original QTYPE + QCLASS (last 4 bytes of question)
+        out.write(originalQuery.dnsPayload, originalQuery.questionEndOffset - 4, 4)
+        return out.toByteArray()
+    }
+
+    fun buildRewrittenAnswerPayload(
+        originalQuery: ParsedDnsQuery,
+        upstreamAliasResponse: ByteArray
+    ): ByteArray? {
+        if (upstreamAliasResponse.size < 12) return null
+        val qdCount = ((upstreamAliasResponse[4].toInt() and 0xFF) shl 8) or
+            (upstreamAliasResponse[5].toInt() and 0xFF)
+        val anCount = ((upstreamAliasResponse[6].toInt() and 0xFF) shl 8) or
+            (upstreamAliasResponse[7].toInt() and 0xFF)
+        val rcode = upstreamAliasResponse[3].toInt() and 0x0F
+
+        val qType = ((originalQuery.dnsPayload[originalQuery.questionEndOffset - 4].toInt() and 0xFF) shl 8) or
+            (originalQuery.dnsPayload[originalQuery.questionEndOffset - 3].toInt() and 0xFF)
+        val qClass = ((originalQuery.dnsPayload[originalQuery.questionEndOffset - 2].toInt() and 0xFF) shl 8) or
+            (originalQuery.dnsPayload[originalQuery.questionEndOffset - 1].toInt() and 0xFF)
+
+        var pos = 12
+        repeat(qdCount) {
+            pos = skipDnsName(upstreamAliasResponse, pos) ?: return null
+            if (pos + 4 > upstreamAliasResponse.size) return null
+            pos += 4
+        }
+
+        val matchingIps = mutableListOf<ByteArray>()
+        var minTtl = 300L
+        repeat(anCount) {
+            pos = skipDnsName(upstreamAliasResponse, pos) ?: return@repeat
+            if (pos + 10 > upstreamAliasResponse.size) return@repeat
+            val rrType = ((upstreamAliasResponse[pos].toInt() and 0xFF) shl 8) or
+                (upstreamAliasResponse[pos + 1].toInt() and 0xFF)
+            val rrClass = ((upstreamAliasResponse[pos + 2].toInt() and 0xFF) shl 8) or
+                (upstreamAliasResponse[pos + 3].toInt() and 0xFF)
+            val ttl = readUInt32(upstreamAliasResponse, pos + 4).coerceIn(30L, 3600L)
+            val rdLen = ((upstreamAliasResponse[pos + 8].toInt() and 0xFF) shl 8) or
+                (upstreamAliasResponse[pos + 9].toInt() and 0xFF)
+            pos += 10
+            if (pos + rdLen > upstreamAliasResponse.size) return@repeat
+
+            val isExpectedIp = rrClass == qClass && (
+                (qType == 1 && rrType == 1 && rdLen == 4) ||
+                    (qType == 28 && rrType == 28 && rdLen == 16)
+                )
+            if (isExpectedIp) {
+                matchingIps.add(upstreamAliasResponse.copyOfRange(pos, pos + rdLen))
+                minTtl = minOf(minTtl, ttl)
+            }
+            pos += rdLen
+        }
+
+        val out = ByteArrayOutputStream(originalQuery.questionEndOffset + matchingIps.size * 32)
+        // TxID from original query
+        out.write(originalQuery.dnsPayload[0].toInt() and 0xFF)
+        out.write(originalQuery.dnsPayload[1].toInt() and 0xFF)
+        // Flags: QR=1, RD preserved, RA=1, preserve upstream RCODE
+        val rdBit = originalQuery.dnsPayload[2].toInt() and 0x01
+        out.write(0x80 or rdBit)
+        out.write(0x80 or (rcode and 0x0F))
+        // QDCOUNT = 1
+        out.write(0x00); out.write(0x01)
+        // ANCOUNT = matchingIps.size
+        out.write((matchingIps.size ushr 8) and 0xFF); out.write(matchingIps.size and 0xFF)
+        // NSCOUNT = 0, ARCOUNT = 0
+        out.write(ByteArray(4))
+
+        // Original question bytes (offset 12 .. questionEndOffset)
+        out.write(
+            originalQuery.dnsPayload,
+            12,
+            originalQuery.questionEndOffset - 12
+        )
+
+        // Append Answer RRs bound via pointer 0xC00C to original QNAME at offset 12
+        for (ipBytes in matchingIps) {
+            out.write(0xC0); out.write(0x0C)
+            out.write((qType ushr 8) and 0xFF); out.write(qType and 0xFF)
+            out.write((qClass ushr 8) and 0xFF); out.write(qClass and 0xFF)
+            out.write(((minTtl ushr 24) and 0xFF).toInt())
+            out.write(((minTtl ushr 16) and 0xFF).toInt())
+            out.write(((minTtl ushr 8) and 0xFF).toInt())
+            out.write((minTtl and 0xFF).toInt())
+            out.write((ipBytes.size ushr 8) and 0xFF); out.write(ipBytes.size and 0xFF)
+            out.write(ipBytes)
+        }
+        return out.toByteArray()
+    }
+
+    private fun skipDnsName(buf: ByteArray, startOffset: Int): Int? {
+        var offset = startOffset
+        var hops = 0
+        while (offset < buf.size && hops < 64) {
+            val len = buf[offset].toInt() and 0xFF
+            if (len == 0) return offset + 1
+            if ((len and 0xC0) == 0xC0) {
+                return if (offset + 2 <= buf.size) offset + 2 else null
+            }
+            offset += 1 + len
+            hops++
+        }
+        return null
+    }
 
     fun normalizeDomainInput(raw: String): String? {
         var cleaned = raw.trim().lowercase()

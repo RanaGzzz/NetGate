@@ -39,6 +39,7 @@ import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.ManagedApp
+import com.example.data.model.SniProxyPreset
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimerTargetNetwork
 import com.example.data.model.UpstreamDnsServer
@@ -47,6 +48,7 @@ import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
+import com.example.data.model.YouTubeRestrictedMode
 import com.example.data.network.SpeedTestPhase
 import com.example.data.network.SpeedTestRunner
 import com.example.data.network.SpeedTestState
@@ -106,7 +108,14 @@ data class WebsiteBlockerUiState(
     val bypassPackages: Set<String> = emptySet(),
     val blockedDnsCount: Long = 0L,
     val allowedDnsCount: Long = 0L,
-    val recentBlockedDomains: List<String> = emptyList()
+    val recentBlockedDomains: List<String> = emptyList(),
+    val isSafeSearchEnabled: Boolean = false,
+    val youtubeRestrictedMode: YouTubeRestrictedMode = YouTubeRestrictedMode.OFF,
+    val isYoutubeAdBlockEnabled: Boolean = false,
+    val sniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
+    val customSniProxyHost: String = "",
+    val customSniProxyPort: Int = 8080,
+    val safeRewriteCount: Long = 0L
 )
 
 data class FirewallUiState(
@@ -485,7 +494,14 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             bypassPackages = base.prefs.websiteBypassPackages,
             blockedDnsCount = base.vpnState.blockedDnsQueriesCount,
             allowedDnsCount = base.vpnState.allowedDnsQueriesCount,
-            recentBlockedDomains = base.vpnState.recentBlockedDomains
+            recentBlockedDomains = base.vpnState.recentBlockedDomains,
+            isSafeSearchEnabled = base.prefs.isSafeSearchEnabled,
+            youtubeRestrictedMode = base.prefs.youtubeRestrictedMode,
+            isYoutubeAdBlockEnabled = base.prefs.isYoutubeAdBlockEnabled,
+            sniProxyPreset = base.prefs.sniProxyPreset,
+            customSniProxyHost = base.prefs.customSniProxyHost,
+            customSniProxyPort = base.prefs.customSniProxyPort,
+            safeRewriteCount = base.vpnState.safeRewriteCount
         )
 
         FirewallUiState(
@@ -1065,6 +1081,65 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             _snackbarMessages.tryEmit(
                 if (enabled) "URL tracking parameter stripping enabled" else "URL tracking parameter stripping disabled"
             )
+        }
+    }
+
+    fun setSafeSearchEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setSafeSearchEnabled(enabled)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val msg = when {
+                !enabled -> "SafeSearch enforcement turned off"
+                firewallOn -> "SafeSearch active for Google, Bing, DuckDuckGo & Brave"
+                else -> "SafeSearch enabled — activate NetGate Firewall to enforce"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun setYoutubeRestrictedMode(mode: YouTubeRestrictedMode) {
+        viewModelScope.launch {
+            preferences.setYoutubeRestrictedMode(mode)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val msg = when {
+                mode == YouTubeRestrictedMode.OFF -> "YouTube Restricted Mode turned off"
+                firewallOn -> "YouTube Kids Safety set to ${mode.title}"
+                else -> "YouTube ${mode.title} selected — activate NetGate Firewall to apply"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun setYoutubeAdBlockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setYoutubeAdBlockEnabled(enabled)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val msg = when {
+                !enabled -> "YouTube Ad Blocker turned off"
+                firewallOn -> "YouTube Ad Blocker active"
+                else -> "YouTube Ad Blocker ready — activate NetGate Firewall to filter"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun selectSniProxyPreset(preset: SniProxyPreset) {
+        viewModelScope.launch {
+            preferences.applySniProxyPreset(preset)
+            _snackbarMessages.tryEmit("SNI Proxy preset: ${preset.title}")
+        }
+    }
+
+    fun saveCustomSniProxy(host: String, port: Int) {
+        val cleanedHost = host.trim()
+        if (cleanedHost.isEmpty()) {
+            _snackbarMessages.tryEmit("Enter a valid upstream proxy host or IP")
+            return
+        }
+        val validPort = port.coerceIn(1, 65535)
+        viewModelScope.launch {
+            preferences.setCustomSniProxy(cleanedHost, validPort)
+            _snackbarMessages.tryEmit("Saved custom upstream SNI proxy $cleanedHost:$validPort")
         }
     }
 

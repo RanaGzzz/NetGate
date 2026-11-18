@@ -626,6 +626,39 @@ object AdBlockFilterEngine {
         }
     }
 
+    private val YOUTUBE_AD_DOMAINS: Set<String> = setOf(
+        "ads.youtube.com",
+        "ad.youtube.com",
+        "ads-api.youtube.com",
+        "s.youtube.com",
+        "s2.youtube.com",
+        "video-stats.l.google.com",
+        "video-stats.video.google.com",
+        "googleads.g.doubleclick.net",
+        "pubads.g.doubleclick.net",
+        "securepubads.g.doubleclick.net",
+        "ad.doubleclick.net",
+        "m.doubleclick.net",
+        "stats.g.doubleclick.net",
+        "cm.g.doubleclick.net",
+        "pagead2.googlesyndication.com",
+        "tpc.googlesyndication.com",
+        "adservice.google.com",
+        "pagead-googlehosted.l.google.com"
+    )
+
+    private val YOUTUBE_AD_URL_FRAGMENTS = listOf(
+        "/youtubei/v1/player/ad_break",
+        "/api/stats/ads",
+        "/api/stats/atr",
+        "/ptracking",
+        "/pagead/",
+        "&adformat=",
+        "?adformat=",
+        "&oad=",
+        "ctier=l"
+    )
+
     private val AD_URL_PATH_FRAGMENTS = listOf(
         "/pagead/",
         "/doubleclick/",
@@ -659,6 +692,24 @@ object AdBlockFilterEngine {
         "_hsenc",
         "_hsmi"
     )
+
+    fun isYoutubeAdDomain(domain: String): Boolean {
+        var candidate = domain.trim().trimEnd('.').lowercase()
+        if (candidate.isEmpty() || '.' !in candidate) return false
+        while (true) {
+            if (candidate in YOUTUBE_AD_DOMAINS) return true
+            val dotIdx = candidate.indexOf('.')
+            if (dotIdx < 0 || dotIdx == candidate.lastIndex) break
+            candidate = candidate.substring(dotIdx + 1)
+        }
+        return false
+    }
+
+    fun isYoutubeAdUrlPath(pathAndQuery: String?): Boolean {
+        if (pathAndQuery.isNullOrBlank()) return false
+        val lower = pathAndQuery.lowercase()
+        return YOUTUBE_AD_URL_FRAGMENTS.any { it in lower }
+    }
 
     fun isAdOrTrackerUrlPath(pathAndQuery: String?): Boolean {
         if (pathAndQuery.isNullOrBlank()) return false

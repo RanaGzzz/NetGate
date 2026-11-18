@@ -11,9 +11,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.SniProxyPreset
 import com.example.data.model.ThemeMode
 import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.WebsiteFilterMode
+import com.example.data.model.YouTubeRestrictedMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -43,6 +45,12 @@ class FirewallPreferences(private val context: Context) {
         val IS_HTTPS_PROXY_ENABLED = booleanPreferencesKey("is_https_proxy_enabled")
         val HTTPS_PROXY_PORT = intPreferencesKey("https_proxy_port")
         val IS_PROXY_STRIP_TRACKING_PARAMS = booleanPreferencesKey("is_proxy_strip_tracking_params")
+        val IS_SAFE_SEARCH_ENABLED = booleanPreferencesKey("is_safe_search_enabled")
+        val YOUTUBE_RESTRICTED_MODE = stringPreferencesKey("youtube_restricted_mode")
+        val IS_YOUTUBE_AD_BLOCK_ENABLED = booleanPreferencesKey("is_youtube_ad_block_enabled")
+        val SNI_PROXY_PRESET = stringPreferencesKey("sni_proxy_preset")
+        val CUSTOM_SNI_PROXY_HOST = stringPreferencesKey("custom_sni_proxy_host")
+        val CUSTOM_SNI_PROXY_PORT = intPreferencesKey("custom_sni_proxy_port")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -54,6 +62,12 @@ class FirewallPreferences(private val context: Context) {
         val upstreamName = prefs[Keys.SELECTED_UPSTREAM_DNS] ?: UpstreamDnsServer.CLOUDFLARE_STANDARD.name
         val upstreamDns = UpstreamDnsServer.entries.firstOrNull { it.name == upstreamName }
             ?: UpstreamDnsServer.CLOUDFLARE_STANDARD
+        val youtubeModeName = prefs[Keys.YOUTUBE_RESTRICTED_MODE] ?: YouTubeRestrictedMode.OFF.name
+        val youtubeMode = YouTubeRestrictedMode.entries.firstOrNull { it.name == youtubeModeName }
+            ?: YouTubeRestrictedMode.OFF
+        val sniPresetName = prefs[Keys.SNI_PROXY_PRESET] ?: SniProxyPreset.STANDARD_DIRECT.name
+        val sniPreset = SniProxyPreset.entries.firstOrNull { it.name == sniPresetName }
+            ?: SniProxyPreset.STANDARD_DIRECT
 
         FirewallPreferencesState(
             isFirewallEnabled = prefs[Keys.IS_FIREWALL_ENABLED] ?: false,
@@ -74,7 +88,13 @@ class FirewallPreferences(private val context: Context) {
             customUdpDnsIp = prefs[Keys.CUSTOM_UDP_DNS_IP] ?: "",
             isHttpsProxyEnabled = prefs[Keys.IS_HTTPS_PROXY_ENABLED] ?: false,
             httpsProxyPort = (prefs[Keys.HTTPS_PROXY_PORT] ?: 8899).coerceIn(1024, 65535),
-            isProxyStripTrackingParams = prefs[Keys.IS_PROXY_STRIP_TRACKING_PARAMS] ?: true
+            isProxyStripTrackingParams = prefs[Keys.IS_PROXY_STRIP_TRACKING_PARAMS] ?: true,
+            isSafeSearchEnabled = prefs[Keys.IS_SAFE_SEARCH_ENABLED] ?: false,
+            youtubeRestrictedMode = youtubeMode,
+            isYoutubeAdBlockEnabled = prefs[Keys.IS_YOUTUBE_AD_BLOCK_ENABLED] ?: false,
+            sniProxyPreset = sniPreset,
+            customSniProxyHost = prefs[Keys.CUSTOM_SNI_PROXY_HOST] ?: "",
+            customSniProxyPort = (prefs[Keys.CUSTOM_SNI_PROXY_PORT] ?: 8080).coerceIn(1, 65535)
         )
     }
 
@@ -166,5 +186,46 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setProxyStripTrackingParams(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.IS_PROXY_STRIP_TRACKING_PARAMS] = enabled }
+    }
+
+    suspend fun setSafeSearchEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.IS_SAFE_SEARCH_ENABLED] = enabled }
+    }
+
+    suspend fun setYoutubeRestrictedMode(mode: YouTubeRestrictedMode) {
+        context.firewallDataStore.edit { it[Keys.YOUTUBE_RESTRICTED_MODE] = mode.name }
+    }
+
+    suspend fun setYoutubeAdBlockEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.IS_YOUTUBE_AD_BLOCK_ENABLED] = enabled }
+    }
+
+    suspend fun applySniProxyPreset(preset: SniProxyPreset) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.SNI_PROXY_PRESET] = preset.name
+            prefs[Keys.IS_HTTPS_PROXY_ENABLED] = true
+            prefs[Keys.IS_PROXY_STRIP_TRACKING_PARAMS] = preset.defaultStripTracking
+            if (preset.defaultAdBlocker) {
+                prefs[Keys.IS_AD_BLOCKER_ENABLED] = true
+            }
+            if (preset.defaultYoutubeAdBlock) {
+                prefs[Keys.IS_YOUTUBE_AD_BLOCK_ENABLED] = true
+            }
+            if (preset.defaultSafeSearch) {
+                prefs[Keys.IS_SAFE_SEARCH_ENABLED] = true
+            }
+            preset.defaultYoutubeMode?.let { mode ->
+                prefs[Keys.YOUTUBE_RESTRICTED_MODE] = mode.name
+            }
+        }
+    }
+
+    suspend fun setCustomSniProxy(host: String, port: Int) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.CUSTOM_SNI_PROXY_HOST] = host.trim()
+            prefs[Keys.CUSTOM_SNI_PROXY_PORT] = port.coerceIn(1, 65535)
+            prefs[Keys.SNI_PROXY_PRESET] = SniProxyPreset.CUSTOM_UPSTREAM_SNI.name
+            prefs[Keys.IS_HTTPS_PROXY_ENABLED] = true
+        }
     }
 }

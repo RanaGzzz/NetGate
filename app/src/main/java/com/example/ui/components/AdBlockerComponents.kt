@@ -7,6 +7,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -25,6 +28,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.FamilyRestroom
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.Http
@@ -43,12 +47,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,11 +65,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AdFilterListItem
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.DnsQueryStatus
+import com.example.data.model.SniProxyPreset
+import com.example.data.model.YouTubeRestrictedMode
 import com.example.ui.WebsiteBlockerUiState
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
@@ -266,6 +278,152 @@ fun AdBlockerHeroCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SafeSearchAndYoutubeCard(
+    state: WebsiteBlockerUiState,
+    isFirewallActive: Boolean,
+    onToggleSafeSearch: (Boolean) -> Unit,
+    onSelectYoutubeMode: (YouTubeRestrictedMode) -> Unit,
+    onToggleYoutubeAdBlock: (Boolean) -> Unit,
+    onRequestEnableFirewall: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isAnySafetyActive = state.isSafeSearchEnabled ||
+        state.youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
+        state.isYoutubeAdBlockEnabled
+    val accent = when {
+        isAnySafetyActive && isFirewallActive -> EmeraldPrimary
+        isAnySafetyActive -> WifiAccent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    FrostedSurface(
+        shape = RoundedCornerShape(22.dp),
+        borderAccent = if (isAnySafetyActive) accent.copy(alpha = 0.55f) else null,
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("safesearch_youtube_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = accent.copy(alpha = 0.16f),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.FamilyRestroom,
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "SafeSearch & YouTube Guard",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = when {
+                                !isAnySafetyActive -> "Search engine SafeSearch, Kids Mode & YT Ad Block"
+                                isFirewallActive -> "Active • ${state.safeRewriteCount} safe DNS rewrites applied"
+                                else -> "Ready — enable NetGate Firewall to enforce"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isAnySafetyActive) accent else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AdOptionToggleRow(
+                title = "SafeSearch (Google, Bing, DDG, Brave)",
+                subtitle = "Enforces strict SafeSearch VIPs across search engines & browsers",
+                checked = state.isSafeSearchEnabled,
+                onCheckedChange = { enabled ->
+                    onToggleSafeSearch(enabled)
+                    if (enabled && !isFirewallActive) {
+                        onRequestEnableFirewall()
+                    }
+                },
+                testTag = "safesearch_switch"
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            AdOptionToggleRow(
+                title = "YouTube Ad Blocker",
+                subtitle = "Blocks YouTube ad-break, tracking & doubleclick endpoints cleanly",
+                checked = state.isYoutubeAdBlockEnabled,
+                onCheckedChange = { enabled ->
+                    onToggleYoutubeAdBlock(enabled)
+                    if (enabled && !isFirewallActive) {
+                        onRequestEnableFirewall()
+                    }
+                },
+                testTag = "youtube_adblock_switch"
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "YouTube Restricted Mode (Kids Safety)",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = state.youtubeRestrictedMode.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                YouTubeRestrictedMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = state.youtubeRestrictedMode == mode,
+                        onClick = {
+                            onSelectYoutubeMode(mode)
+                            if (mode != YouTubeRestrictedMode.OFF && !isFirewallActive) {
+                                onRequestEnableFirewall()
+                            }
+                        },
+                        label = {
+                            Text(
+                                text = mode.title,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("youtube_mode_${mode.name.lowercase()}")
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HttpsFilteringProxyCard(
     state: WebsiteBlockerUiState,
@@ -273,6 +431,8 @@ fun HttpsFilteringProxyCard(
     onToggleHttpsProxy: (Boolean) -> Unit,
     onSelectProxyPort: (Int) -> Unit,
     onToggleStripTracking: (Boolean) -> Unit,
+    onSelectSniPreset: (SniProxyPreset) -> Unit,
+    onSaveCustomSniProxy: (host: String, port: Int) -> Unit,
     onRequestEnableFirewall: () -> Unit,
     onCopiedEndpoint: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -283,6 +443,12 @@ fun HttpsFilteringProxyCard(
         state.isHttpsProxyEnabled && isFirewallActive && state.isHttpsProxyActive -> EmeraldPrimary
         state.isHttpsProxyEnabled -> WifiAccent
         else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    var customHostInput by remember(state.customSniProxyHost) {
+        mutableStateOf(state.customSniProxyHost)
+    }
+    var customPortInput by remember(state.customSniProxyPort) {
+        mutableStateOf(state.customSniProxyPort.toString())
     }
 
     FrostedSurface(
@@ -319,16 +485,16 @@ fun HttpsFilteringProxyCard(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "HTTPS Filtering Proxy & VPN",
+                            text = "SNI Proxy & HTTPS Filter",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = when {
                                 !state.isHttpsProxyEnabled ->
-                                    "Inspects CONNECT hosts, TLS SNI & ad URLs root-free"
+                                    "Inspects CONNECT hosts, TLS SNI & ad URLs with presets"
                                 isFirewallActive && state.isHttpsProxyActive ->
-                                    "Listening on $endpoint • VPN Proxy attached"
+                                    "${state.sniProxyPreset.title} • $endpoint"
                                 else ->
                                     "Ready on $endpoint — activate Firewall to start"
                             },
@@ -394,7 +560,7 @@ fun HttpsFilteringProxyCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Local Proxy",
+                                text = "SNI Endpoint",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -420,6 +586,91 @@ fun HttpsFilteringProxyCard(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "SNI Proxy Presets",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = state.sniProxyPreset.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                SniProxyPreset.entries.forEach { preset ->
+                    FilterChip(
+                        selected = state.sniProxyPreset == preset,
+                        onClick = {
+                            onSelectSniPreset(preset)
+                            if (!isFirewallActive) {
+                                onRequestEnableFirewall()
+                            }
+                        },
+                        label = {
+                            Text(
+                                text = preset.title,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("sni_preset_${preset.name.lowercase()}")
+                    )
+                }
+            }
+
+            if (state.sniProxyPreset == SniProxyPreset.CUSTOM_UPSTREAM_SNI) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = customHostInput,
+                        onValueChange = { customHostInput = it },
+                        label = { Text("Upstream Proxy Host / IP") },
+                        placeholder = { Text("proxy.example.com") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(2f)
+                            .testTag("custom_sni_host_input")
+                    )
+                    OutlinedTextField(
+                        value = customPortInput,
+                        onValueChange = { customPortInput = it.filter { ch -> ch.isDigit() }.take(5) },
+                        label = { Text("Port") },
+                        placeholder = { Text("8080") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("custom_sni_port_input")
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                FilledTonalButton(
+                    onClick = {
+                        val portVal = customPortInput.toIntOrNull() ?: 8080
+                        onSaveCustomSniProxy(customHostInput, portVal)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("save_custom_sni_proxy_button")
+                ) {
+                    Text("Apply Upstream SNI Proxy")
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             Row(
@@ -428,7 +679,7 @@ fun HttpsFilteringProxyCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Port:",
+                    text = "Local Port:",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -771,6 +1022,7 @@ fun DnsQueryLogRow(
         DnsQueryStatus.BLOCKED_HTTPS -> BlockedRed
         DnsQueryStatus.BLOCKED_APP -> WarningAmber
         DnsQueryStatus.PASSTHROUGH -> DataAccent
+        DnsQueryStatus.SAFE_REWRITE -> WifiAccent
         DnsQueryStatus.ALLOWED -> EmeraldPrimary
     }
     val isBlocked = entry.status == DnsQueryStatus.BLOCKED_AD ||
@@ -803,6 +1055,7 @@ fun DnsQueryLogRow(
                             DnsQueryStatus.BLOCKED_HTTPS -> Icons.Rounded.Http
                             DnsQueryStatus.BLOCKED_APP -> Icons.Rounded.Shield
                             DnsQueryStatus.PASSTHROUGH -> Icons.Rounded.VerifiedUser
+                            DnsQueryStatus.SAFE_REWRITE -> Icons.Rounded.FamilyRestroom
                             DnsQueryStatus.ALLOWED -> Icons.Rounded.CheckCircle
                         },
                         contentDescription = entry.status.label,

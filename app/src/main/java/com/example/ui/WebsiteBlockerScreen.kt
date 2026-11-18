@@ -93,9 +93,11 @@ import com.example.data.model.ConnectionDetails
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.DnsQueryStatus
 import com.example.data.model.ManagedApp
+import com.example.data.model.SniProxyPreset
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.model.WebsiteTabSection
+import com.example.data.model.YouTubeRestrictedMode
 import com.example.ui.components.AdBlockerHeroCard
 import com.example.ui.components.AdFilterListRow
 import com.example.ui.components.DnsLogFilter
@@ -103,6 +105,7 @@ import com.example.ui.components.DnsLogsFilterCard
 import com.example.ui.components.DnsQueryLogRow
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.HttpsFilteringProxyCard
+import com.example.ui.components.SafeSearchAndYoutubeCard
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
@@ -141,6 +144,11 @@ fun WebsiteBlockerContent(
     onToggleHttpsProxy: (Boolean) -> Unit,
     onSelectProxyPort: (Int) -> Unit,
     onToggleProxyStripTracking: (Boolean) -> Unit,
+    onToggleSafeSearch: (Boolean) -> Unit,
+    onSelectYoutubeMode: (YouTubeRestrictedMode) -> Unit,
+    onToggleYoutubeAdBlock: (Boolean) -> Unit,
+    onSelectSniPreset: (SniProxyPreset) -> Unit,
+    onSaveCustomSniProxy: (host: String, port: Int) -> Unit,
     onAddCustomAdFilterList: (title: String, url: String, category: String) -> Unit,
     onDeleteCustomAdFilterList: (String) -> Unit,
     onCopiedProxyEndpoint: (String) -> Unit,
@@ -220,6 +228,16 @@ fun WebsiteBlockerContent(
                             onRequestEnableFirewall = onRequestEnableFirewall
                         )
                     }
+                    item(key = "safesearch_youtube_card") {
+                        SafeSearchAndYoutubeCard(
+                            state = state,
+                            isFirewallActive = isFirewallActive,
+                            onToggleSafeSearch = onToggleSafeSearch,
+                            onSelectYoutubeMode = onSelectYoutubeMode,
+                            onToggleYoutubeAdBlock = onToggleYoutubeAdBlock,
+                            onRequestEnableFirewall = onRequestEnableFirewall
+                        )
+                    }
                     item(key = "https_proxy_card") {
                         HttpsFilteringProxyCard(
                             state = state,
@@ -227,6 +245,8 @@ fun WebsiteBlockerContent(
                             onToggleHttpsProxy = onToggleHttpsProxy,
                             onSelectProxyPort = onSelectProxyPort,
                             onToggleStripTracking = onToggleProxyStripTracking,
+                            onSelectSniPreset = onSelectSniPreset,
+                            onSaveCustomSniProxy = onSaveCustomSniProxy,
                             onRequestEnableFirewall = onRequestEnableFirewall,
                             onCopiedEndpoint = onCopiedProxyEndpoint
                         )
@@ -350,6 +370,17 @@ fun WebsiteBlockerContent(
                         )
                     }
 
+                    item(key = "safesearch_youtube_card") {
+                        SafeSearchAndYoutubeCard(
+                            state = state,
+                            isFirewallActive = isFirewallActive,
+                            onToggleSafeSearch = onToggleSafeSearch,
+                            onSelectYoutubeMode = onSelectYoutubeMode,
+                            onToggleYoutubeAdBlock = onToggleYoutubeAdBlock,
+                            onRequestEnableFirewall = onRequestEnableFirewall
+                        )
+                    }
+
                     item(key = "https_proxy_card") {
                         HttpsFilteringProxyCard(
                             state = state,
@@ -357,6 +388,8 @@ fun WebsiteBlockerContent(
                             onToggleHttpsProxy = onToggleHttpsProxy,
                             onSelectProxyPort = onSelectProxyPort,
                             onToggleStripTracking = onToggleProxyStripTracking,
+                            onSelectSniPreset = onSelectSniPreset,
+                            onSaveCustomSniProxy = onSaveCustomSniProxy,
                             onRequestEnableFirewall = onRequestEnableFirewall,
                             onCopiedEndpoint = onCopiedProxyEndpoint
                         )

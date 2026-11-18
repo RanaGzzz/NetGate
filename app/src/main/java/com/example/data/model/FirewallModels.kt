@@ -257,6 +257,84 @@ data class ConnectionDetails(
         }
 }
 
+enum class YouTubeRestrictedMode(
+    val title: String,
+    val subtitle: String,
+    val targetHost: String?
+) {
+    OFF(
+        title = "Off",
+        subtitle = "Standard YouTube content without restriction",
+        targetHost = null
+    ),
+    MODERATE(
+        title = "Moderate",
+        subtitle = "Filters mature videos via restrictmoderate.youtube.com",
+        targetHost = "restrictmoderate.youtube.com"
+    ),
+    STRICT(
+        title = "Strict (Kids Safe)",
+        subtitle = "Strict family-safe filtering via restrict.youtube.com",
+        targetHost = "restrict.youtube.com"
+    )
+}
+
+enum class SniProxyPreset(
+    val title: String,
+    val subtitle: String,
+    val defaultAdBlocker: Boolean,
+    val defaultYoutubeAdBlock: Boolean,
+    val defaultSafeSearch: Boolean,
+    val defaultYoutubeMode: YouTubeRestrictedMode?,
+    val defaultStripTracking: Boolean
+) {
+    STANDARD_DIRECT(
+        title = "Standard Direct",
+        subtitle = "Local CONNECT & TLS SNI filter on 127.0.0.1 with tracking cleanup",
+        defaultAdBlocker = false,
+        defaultYoutubeAdBlock = false,
+        defaultSafeSearch = false,
+        defaultYoutubeMode = null,
+        defaultStripTracking = true
+    ),
+    AD_TRACKER_SHIELD(
+        title = "Ad & YouTube SNI",
+        subtitle = "Blocks ad networks, YouTube ad endpoints & strips tracking params",
+        defaultAdBlocker = true,
+        defaultYoutubeAdBlock = true,
+        defaultSafeSearch = false,
+        defaultYoutubeMode = null,
+        defaultStripTracking = true
+    ),
+    FAMILY_SAFE(
+        title = "Family & Kids Safe",
+        subtitle = "Enforces SafeSearch, YouTube Strict Kids Mode & YouTube Ad Block",
+        defaultAdBlocker = true,
+        defaultYoutubeAdBlock = true,
+        defaultSafeSearch = true,
+        defaultYoutubeMode = YouTubeRestrictedMode.STRICT,
+        defaultStripTracking = true
+    ),
+    STRICT_PRIVACY(
+        title = "Strict Privacy Guard",
+        subtitle = "Combines SNI ad/tracker blocking, SafeSearch & URL param stripping",
+        defaultAdBlocker = true,
+        defaultYoutubeAdBlock = true,
+        defaultSafeSearch = true,
+        defaultYoutubeMode = null,
+        defaultStripTracking = true
+    ),
+    CUSTOM_UPSTREAM_SNI(
+        title = "Custom Upstream SNI",
+        subtitle = "Filters SNI locally then forwards CONNECT tunnels to a custom proxy",
+        defaultAdBlocker = false,
+        defaultYoutubeAdBlock = false,
+        defaultSafeSearch = false,
+        defaultYoutubeMode = null,
+        defaultStripTracking = true
+    )
+}
+
 data class FirewallPreferencesState(
     val isFirewallEnabled: Boolean = false,
     val showOfflineApps: Boolean = false,
@@ -276,7 +354,13 @@ data class FirewallPreferencesState(
     val customUdpDnsIp: String = "",
     val isHttpsProxyEnabled: Boolean = false,
     val httpsProxyPort: Int = 8899,
-    val isProxyStripTrackingParams: Boolean = true
+    val isProxyStripTrackingParams: Boolean = true,
+    val isSafeSearchEnabled: Boolean = false,
+    val youtubeRestrictedMode: YouTubeRestrictedMode = YouTubeRestrictedMode.OFF,
+    val isYoutubeAdBlockEnabled: Boolean = false,
+    val sniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
+    val customSniProxyHost: String = "",
+    val customSniProxyPort: Int = 8080
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
@@ -298,6 +382,13 @@ data class FirewallPreferencesState(
         } else {
             listOf(selectedUpstreamDns.primaryUdpIp, selectedUpstreamDns.secondaryUdpIp, "1.1.1.1").distinct()
         }
+    }
+
+    fun resolvedUpstreamSniProxy(): Pair<String, Int>? {
+        if (sniProxyPreset != SniProxyPreset.CUSTOM_UPSTREAM_SNI) return null
+        val host = customSniProxyHost.trim()
+        if (host.isEmpty()) return null
+        return host to customSniProxyPort.coerceIn(1, 65535)
     }
 }
 
@@ -338,7 +429,8 @@ enum class DnsQueryStatus(val label: String) {
     BLOCKED_WEBSITE("Site Blocked"),
     BLOCKED_APP("App Blocked"),
     BLOCKED_HTTPS("HTTPS Proxy Blocked"),
-    PASSTHROUGH("Passthrough")
+    PASSTHROUGH("Passthrough"),
+    SAFE_REWRITE("SafeSearch / Kids")
 }
 
 data class DnsQueryLogEntry(

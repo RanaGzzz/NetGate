@@ -28,6 +28,8 @@ class LocalFilteringProxyServer(
     private val stripTrackingParams: Boolean,
     private val protectSocket: (Socket) -> Boolean,
     private val evaluateRequest: (host: String, pathAndQuery: String?) -> ProxyFilterDecision,
+    private val resolveTargetHost: (host: String) -> String = { it },
+    private val upstreamProxyProvider: () -> Pair<String, Int>? = { null },
     private val onRequestLogged: (host: String, decision: ProxyFilterDecision) -> Unit
 ) {
     private val running = AtomicBoolean(false)
@@ -144,6 +146,9 @@ class LocalFilteringProxyServer(
             return
         }
 
+        val connectHost = resolveTargetHost(host).ifBlank { host }
+        val upstreamProxy = upstreamProxyProvider()
+
         val upstream = Socket()
         try {
             if (!protectSocket(upstream)) {
@@ -151,11 +156,32 @@ class LocalFilteringProxyServer(
                 runCatching { client.close() }
                 return
             }
-            upstream.connect(InetSocketAddress(host, targetPort), 8_000)
+            if (upstreamProxy != null) {
+                val (proxyHost, proxyPort) = upstreamProxy
+                upstream.connect(InetSocketAddress(proxyHost, proxyPort), 8_000)
+                val upstreamOut = upstream.getOutputStream()
+                val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
+                    "Host: $connectHost:$targetPort\r\n" +
+                    "Proxy-Connection: keep-alive\r\n\r\n"
+                upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
+                upstreamOut.flush()
+
+                val proxyRespBytes = readHttpHeaderBlock(upstream.getInputStream())
+                val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
+                    .substringBefore("\r\n")
+                if (!statusLine.contains(" 200")) {
+                    writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
+                    runCatching { upstream.close() }
+                    runCatching { client.close() }
+                    return
+                }
+            } else {
+                upstream.connect(InetSocketAddress(connectHost, targetPort), 8_000)
+            }
             upstream.soTimeout = 0
             client.soTimeout = 0
 
-            clientOut.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: NetGate-Proxy\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            clientOut.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: NetGate-SNI-Proxy\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
             clientOut.flush()
 
             // Peek first TLS ClientHello packet to verify SNI matches allowed rules
@@ -240,6 +266,7 @@ class LocalFilteringProxyServer(
             return
         }
 
+        val connectHost = resolveTargetHost(host).ifBlank { host }
         val upstream = Socket()
         try {
             if (!protectSocket(upstream)) {
@@ -247,7 +274,7 @@ class LocalFilteringProxyServer(
                 runCatching { client.close() }
                 return
             }
-            upstream.connect(InetSocketAddress(host, targetPort), 8_000)
+            upstream.connect(InetSocketAddress(connectHost, targetPort), 8_000)
             upstream.soTimeout = 0
             client.soTimeout = 0
 
