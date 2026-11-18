@@ -244,6 +244,41 @@ object DnsPacketFilter {
         return null
     }
 
+    fun extractResolvedIpsFromDnsResponse(dnsPayload: ByteArray): List<String> {
+        if (dnsPayload.size < 12) return emptyList()
+        val qdCount = ((dnsPayload[4].toInt() and 0xFF) shl 8) or (dnsPayload[5].toInt() and 0xFF)
+        val anCount = ((dnsPayload[6].toInt() and 0xFF) shl 8) or (dnsPayload[7].toInt() and 0xFF)
+        if (anCount <= 0 || anCount > 64) return emptyList()
+
+        var pos = 12
+        repeat(qdCount.coerceAtMost(8)) {
+            pos = skipDnsName(dnsPayload, pos) ?: return emptyList()
+            if (pos + 4 > dnsPayload.size) return emptyList()
+            pos += 4
+        }
+
+        val ips = mutableListOf<String>()
+        repeat(anCount) {
+            pos = skipDnsName(dnsPayload, pos) ?: return ips
+            if (pos + 10 > dnsPayload.size) return ips
+            val rrType = ((dnsPayload[pos].toInt() and 0xFF) shl 8) or (dnsPayload[pos + 1].toInt() and 0xFF)
+            val rrClass = ((dnsPayload[pos + 2].toInt() and 0xFF) shl 8) or (dnsPayload[pos + 3].toInt() and 0xFF)
+            val rdLen = ((dnsPayload[pos + 8].toInt() and 0xFF) shl 8) or (dnsPayload[pos + 9].toInt() and 0xFF)
+            pos += 10
+            if (pos + rdLen > dnsPayload.size) return ips
+            if (rrClass == 1 && ((rrType == 1 && rdLen == 4) || (rrType == 28 && rdLen == 16))) {
+                val ip = runCatching {
+                    InetAddress.getByAddress(dnsPayload.copyOfRange(pos, pos + rdLen)).hostAddress
+                }.getOrNull()
+                if (!ip.isNullOrBlank()) {
+                    ips.add(ip)
+                }
+            }
+            pos += rdLen
+        }
+        return ips.distinct()
+    }
+
     fun normalizeDomainInput(raw: String): String? {
         var cleaned = raw.trim().lowercase()
         if (cleaned.isEmpty()) return null

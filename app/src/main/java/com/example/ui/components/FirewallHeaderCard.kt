@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SignalCellularOff
@@ -47,6 +48,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.LiveNetworkTelemetry
+import com.example.data.model.formatDataBytes
+import com.example.data.model.formatSpeedBytesPerSec
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
@@ -63,11 +67,13 @@ fun FirewallHeaderCard(
     activeBlockedNowCount: Int,
     isAdBlockerEnabled: Boolean = false,
     blockedAdsCount: Long = 0L,
+    liveTelemetry: LiveNetworkTelemetry = LiveNetworkTelemetry(),
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onOpenDnsProtection: () -> Unit,
     onOpenSpeedTest: () -> Unit,
     onOpenAdBlocker: () -> Unit = {},
+    onOpenNetworkMonitor: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -417,6 +423,55 @@ fun FirewallHeaderCard(
                             maxLines = 1
                         )
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Live System-Wide Network Monitor Quick Strip
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = EmeraldPrimary.copy(alpha = if (isDark) 0.14f else 0.10f),
+                border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.36f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenNetworkMonitor)
+                    .testTag("header_live_monitor_strip")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MonitorHeart,
+                            contentDescription = "Open live network monitor",
+                            tint = EmeraldPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "↓ ${formatSpeedBytesPerSec(liveTelemetry.downloadBytesPerSec)}  •  ↑ ${formatSpeedBytesPerSec(liveTelemetry.uploadBytesPerSec)}",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Today ${formatDataBytes(liveTelemetry.todayTotalBytes)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EmeraldPrimary,
+                        maxLines = 1
+                    )
                 }
             }
 

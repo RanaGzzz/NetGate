@@ -53,6 +53,15 @@
                 android:value="Local per-app Wi-Fi and mobile data firewall using Android VpnService" />
         </service>
 
+        <service
+            android:name=".service.NetworkMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Displays real-time system-wide internet upload and download speed and data usage in the status bar" />
+        </service>
+
         <receiver
             android:name=".service.AppTimerReceiver"
             android:exported="false" />

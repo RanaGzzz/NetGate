@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WebsiteRuleEntity::class,
         AppTrafficHistoryEntity::class,
         AppTimerEntity::class,
-        AdFilterListEntity::class
+        AdFilterListEntity::class,
+        ConnectionEventEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class NetGateDatabase : RoomDatabase() {
@@ -25,6 +26,7 @@ abstract class NetGateDatabase : RoomDatabase() {
     abstract fun websiteRuleDao(): WebsiteRuleDao
     abstract fun appTimerDao(): AppTimerDao
     abstract fun adFilterListDao(): AdFilterListDao
+    abstract fun connectionHistoryDao(): ConnectionHistoryDao
 
     companion object {
         @Volatile
@@ -124,6 +126,46 @@ abstract class NetGateDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `connection_events` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `domain` TEXT NOT NULL,
+                        `remoteIp` TEXT NOT NULL,
+                        `remotePort` INTEGER NOT NULL,
+                        `protocol` TEXT NOT NULL,
+                        `appPackage` TEXT NOT NULL,
+                        `appName` TEXT NOT NULL,
+                        `countryCode` TEXT NOT NULL,
+                        `countryName` TEXT NOT NULL,
+                        `regionName` TEXT NOT NULL,
+                        `ispOrOrg` TEXT NOT NULL,
+                        `bytesSent` INTEGER NOT NULL,
+                        `bytesReceived` INTEGER NOT NULL,
+                        `actionStatus` TEXT NOT NULL,
+                        `riskLevel` TEXT NOT NULL,
+                        `riskReason` TEXT NOT NULL,
+                        `hitCount` INTEGER NOT NULL,
+                        `firstSeenAt` INTEGER NOT NULL,
+                        `lastSeenAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_connection_events_domain_remoteIp_appPackage_actionStatus` " +
+                        "ON `connection_events` (`domain`, `remoteIp`, `appPackage`, `actionStatus`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_connection_events_lastSeenAt` ON `connection_events` (`lastSeenAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_connection_events_countryCode` ON `connection_events` (`countryCode`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NetGateDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -136,7 +178,8 @@ abstract class NetGateDatabase : RoomDatabase() {
                         MIGRATION_2_3,
                         MIGRATION_3_4,
                         MIGRATION_4_5,
-                        MIGRATION_5_6
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
                     )
                     .build()
                     .also { INSTANCE = it }

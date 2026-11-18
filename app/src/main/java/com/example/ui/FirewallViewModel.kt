@@ -30,16 +30,24 @@ import com.example.data.model.AppFilterMode
 import com.example.data.model.AppUsageBreakdownItem
 import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
+import com.example.data.model.ConnectionRiskLevel
+import com.example.data.model.CountryTrafficSummary
 import com.example.data.model.DailyTrafficHistoryPoint
+import com.example.data.model.DataUsageSubTab
 import com.example.data.model.DataUsageSummary
+import com.example.data.model.DeviceSecurityAuditReport
 import com.example.data.model.DnsLeakTestState
 import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
+import com.example.data.model.LiveNetworkTelemetry
 import com.example.data.model.ManagedApp
+import com.example.data.model.SiteConnectionRecord
+import com.example.data.model.SiteTrafficFilter
 import com.example.data.model.SniProxyPreset
+import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimerTargetNetwork
 import com.example.data.model.UpstreamDnsServer
@@ -54,7 +62,10 @@ import com.example.data.network.SpeedTestRunner
 import com.example.data.network.SpeedTestState
 import com.example.data.repository.FirewallRepository
 import com.example.service.AdBlockFilterEngine
+import com.example.service.ConnectionMonitorHub
 import com.example.service.NetGateVpnService
+import com.example.service.NetworkMonitorService
+import com.example.service.SystemNetworkMonitor
 import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -73,6 +84,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class DataUsageUiState(
+    val selectedSubTab: DataUsageSubTab = DataUsageSubTab.OVERVIEW,
     val hasUsageAccess: Boolean = false,
     val isSyncing: Boolean = false,
     val timeRange: UsageTimeRange = UsageTimeRange.LAST_7D,
@@ -82,8 +94,28 @@ data class DataUsageUiState(
     val appItems: List<AppUsageBreakdownItem> = emptyList(),
     val dailyHistory: List<DailyTrafficHistoryPoint> = emptyList(),
     val historicalTotals: HistoricalUsageTotals = HistoricalUsageTotals(),
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    val liveConnections: List<SiteConnectionRecord> = emptyList(),
+    val historicalConnections: List<SiteConnectionRecord> = emptyList(),
+    val displayedConnections: List<SiteConnectionRecord> = emptyList(),
+    val countrySummaries: List<CountryTrafficSummary> = emptyList(),
+    val siteFilter: SiteTrafficFilter = SiteTrafficFilter.ALL,
+    val siteSearchQuery: String = "",
+    val selectedCountryFilter: String? = null,
+    val showLiveSitesFeed: Boolean = true,
+    val securityAuditReport: DeviceSecurityAuditReport = DeviceSecurityAuditReport()
+) {
+    val activeFeedTotalCount: Int
+        get() = if (showLiveSitesFeed) liveConnections.size else historicalConnections.size
+
+    val flaggedSitesCount: Int
+        get() = (liveConnections + historicalConnections)
+            .distinctBy { "${it.domain}|${it.remoteIp}|${it.actionStatus}" }
+            .count {
+                it.riskLevel == ConnectionRiskLevel.SUSPICIOUS ||
+                    it.riskLevel == ConnectionRiskLevel.CRITICAL
+            }
+}
 
 data class WebsiteBlockerUiState(
     val filterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
@@ -140,6 +172,7 @@ data class FirewallUiState(
     val speedTestState: SpeedTestState = SpeedTestState(),
     val dataUsageState: DataUsageUiState = DataUsageUiState(),
     val websiteBlockerState: WebsiteBlockerUiState = WebsiteBlockerUiState(),
+    val liveTelemetry: LiveNetworkTelemetry = LiveNetworkTelemetry(),
     val nowMillis: Long = System.currentTimeMillis()
 ) {
     val effectiveNetworkType: ActiveNetworkType
@@ -176,6 +209,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         websiteRuleDao = database.websiteRuleDao(),
         appTimerDao = database.appTimerDao(),
         adFilterListDao = database.adFilterListDao(),
+        connectionHistoryDao = database.connectionHistoryDao(),
         preferences = preferences
     )
 
@@ -200,12 +234,18 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private var speedTestJob: Job? = null
     private val connectionDetailsFlow = MutableStateFlow(repository.detectConnectionDetails())
 
+    private val dataUsageSubTabFlow = MutableStateFlow(DataUsageSubTab.OVERVIEW)
     private val hasUsageAccessFlow = MutableStateFlow(repository.hasUsageStatsPermission())
     private val isSyncingUsageFlow = MutableStateFlow(false)
     private val usageTimeRangeFlow = MutableStateFlow(UsageTimeRange.LAST_7D)
     private val usageChartModeFlow = MutableStateFlow(UsageChartMode.TOTAL)
     private val usageFilterFlow = MutableStateFlow(UsageFilterCategory.ALL)
     private val usageErrorFlow = MutableStateFlow<String?>(null)
+    private val siteFilterFlow = MutableStateFlow(SiteTrafficFilter.ALL)
+    private val siteSearchQueryFlow = MutableStateFlow("")
+    private val selectedCountryFilterFlow = MutableStateFlow<String?>(null)
+    private val showLiveSitesFeedFlow = MutableStateFlow(true)
+    private val securityAuditReportFlow = MutableStateFlow(DeviceSecurityAuditReport())
     private val isSyncingAdListsFlow = MutableStateFlow(false)
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -239,6 +279,19 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         refreshInstalledApps()
         registerNetworkMonitor()
         observeActiveTimerTicker()
+        observeLiveNetworkTelemetry()
+    }
+
+    private fun observeLiveNetworkTelemetry() {
+        viewModelScope.launch(Dispatchers.Default) {
+            SystemNetworkMonitor.sampleNow(getApplication())
+            while (isActive) {
+                delay(1000L)
+                if (!SystemNetworkMonitor.isServiceActive) {
+                    SystemNetworkMonitor.sampleNow(getApplication())
+                }
+            }
+        }
     }
 
     private fun observeActiveTimerTicker() {
@@ -361,12 +414,32 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         UsageRepoSnapshot(summary, rawRows, dailyHistory, historicalTotals)
     }
 
+    private val siteControlsFlow = combine(
+        dataUsageSubTabFlow,
+        siteFilterFlow,
+        siteSearchQueryFlow,
+        selectedCountryFilterFlow,
+        showLiveSitesFeedFlow
+    ) { subTab, siteFilter, siteQuery, countryFilter, showLive ->
+        SiteControlsSnapshot(subTab, siteFilter, siteQuery, countryFilter, showLive)
+    }
+
+    private val siteMonitorFlow = combine(
+        ConnectionMonitorHub.liveConnectionsFlow,
+        repository.connectionHistoryFlow,
+        siteControlsFlow,
+        securityAuditReportFlow
+    ) { live, history, controls, auditReport ->
+        SiteMonitorSnapshot(live, history, controls, auditReport)
+    }
+
     private val usageStateFlow = combine(
         usageControlsFlow,
         usageStatsRepoFlow,
         installedAppsFlow,
-        usageErrorFlow
-    ) { controls, repoStats, installedApps, errMsg ->
+        usageErrorFlow,
+        siteMonitorFlow
+    ) { controls, repoStats, installedApps, errMsg, siteMonitor ->
         val appMetaMap = installedApps.associateBy { it.packageName }
         val allItems = repoStats.rawRows.map { row ->
             val meta = appMetaMap[row.packageName]
@@ -389,7 +462,55 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             UsageFilterCategory.BLOCKED -> allItems.filter { it.isBlocked }
             UsageFilterCategory.ALLOWED -> allItems.filter { !it.isBlocked }
         }
+
+        val siteCtrls = siteMonitor.controls
+        val activeSource = if (siteCtrls.showLive) siteMonitor.live else siteMonitor.history
+        val countrySummaries = activeSource
+            .groupBy { it.countryCode }
+            .map { (code, list) ->
+                val first = list.first()
+                CountryTrafficSummary(
+                    countryCode = code,
+                    countryName = first.countryName.ifBlank { code },
+                    regionSample = list.firstOrNull { it.regionName.isNotBlank() }?.regionName.orEmpty(),
+                    bytesSent = list.sumOf { it.bytesSent },
+                    bytesReceived = list.sumOf { it.bytesReceived },
+                    sitesCount = list.distinctBy { it.domain }.size,
+                    hitsCount = list.sumOf { it.hitCount },
+                    suspiciousCount = list.count {
+                        it.riskLevel == ConnectionRiskLevel.SUSPICIOUS ||
+                            it.riskLevel == ConnectionRiskLevel.CRITICAL
+                    }
+                )
+            }
+            .sortedWith(
+                compareByDescending<CountryTrafficSummary> { it.totalBytes }
+                    .thenByDescending { it.hitsCount }
+            )
+
+        val q = siteCtrls.siteQuery.trim().lowercase()
+        val filteredSites = activeSource.filter { item ->
+            val matchesCountry = siteCtrls.countryFilter == null || item.countryCode == siteCtrls.countryFilter
+            val matchesFilter = when (siteCtrls.siteFilter) {
+                SiteTrafficFilter.ALL -> true
+                SiteTrafficFilter.SENDING -> item.bytesSent > 0L
+                SiteTrafficFilter.RECEIVING -> item.bytesReceived > 0L
+                SiteTrafficFilter.BLOCKED -> item.actionStatus == "BLOCKED"
+                SiteTrafficFilter.FLAGGED -> item.riskLevel == ConnectionRiskLevel.SUSPICIOUS ||
+                    item.riskLevel == ConnectionRiskLevel.CRITICAL
+            }
+            val matchesQuery = q.isEmpty() ||
+                item.domain.lowercase().contains(q) ||
+                item.remoteIp.lowercase().contains(q) ||
+                item.countryName.lowercase().contains(q) ||
+                item.regionName.lowercase().contains(q) ||
+                item.appName.lowercase().contains(q) ||
+                item.ispOrOrg.lowercase().contains(q)
+            matchesCountry && matchesFilter && matchesQuery
+        }
+
         DataUsageUiState(
+            selectedSubTab = siteCtrls.subTab,
             hasUsageAccess = controls.hasAccess,
             isSyncing = controls.syncing,
             timeRange = controls.timeRange,
@@ -399,7 +520,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             appItems = filteredItems,
             dailyHistory = repoStats.dailyHistory,
             historicalTotals = repoStats.historicalTotals,
-            errorMessage = errMsg
+            errorMessage = errMsg,
+            liveConnections = siteMonitor.live,
+            historicalConnections = siteMonitor.history,
+            displayedConnections = filteredSites,
+            countrySummaries = countrySummaries,
+            siteFilter = siteCtrls.siteFilter,
+            siteSearchQuery = siteCtrls.siteQuery,
+            selectedCountryFilter = siteCtrls.countryFilter,
+            showLiveSitesFeed = siteCtrls.showLive,
+            securityAuditReport = siteMonitor.auditReport
         )
     }
 
@@ -419,12 +549,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         combine(
             currentDestinationFlow,
             usageStateFlow,
-            websiteAndAdRepoFlow
-        ) { dest, usage, webAndAd ->
-            Triple(dest, usage, webAndAd)
+            websiteAndAdRepoFlow,
+            SystemNetworkMonitor.telemetryFlow
+        ) { dest, usage, webAndAd, liveTelemetry ->
+            TailSnapshot(dest, usage, webAndAd, liveTelemetry)
         }
-    ) { base, interaction, connDetails, sheets, (destination, dataUsage, webAndAd) ->
-        val (websiteRules, adLists, isSyncingAds) = webAndAd
+    ) { base, interaction, connDetails, sheets, tail ->
+        val destination = tail.destination
+        val dataUsage = tail.dataUsage
+        val (websiteRules, adLists, isSyncingAds) = tail.webAndAd
+        val liveTelemetry = tail.liveTelemetry
         val ruleMap = base.rules.associateBy { it.packageName }
         val timerMap = base.timers.associateBy { it.packageName }
 
@@ -526,6 +660,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             speedTestState = sheets.speedTestState,
             dataUsageState = dataUsage,
             websiteBlockerState = websiteState,
+            liveTelemetry = liveTelemetry,
             nowMillis = base.nowMillis
         )
     }.stateIn(
@@ -558,9 +693,113 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             exitSelectionMode()
         }
         when (destination) {
-            AppDestination.DATA_USAGE -> refreshDataUsage()
+            AppDestination.DATA_USAGE -> {
+                refreshDataUsage()
+                if (dataUsageSubTabFlow.value == DataUsageSubTab.SECURITY_AUDIT &&
+                    securityAuditReportFlow.value.lastScannedAt == 0L
+                ) {
+                    runDeviceSecurityAudit()
+                }
+            }
             AppDestination.SPEED_TEST, AppDestination.DNS -> refreshConnectionDetails()
             else -> Unit
+        }
+    }
+
+    fun selectDataUsageSubTab(tab: DataUsageSubTab) {
+        dataUsageSubTabFlow.value = tab
+        if (tab == DataUsageSubTab.SECURITY_AUDIT && securityAuditReportFlow.value.lastScannedAt == 0L) {
+            runDeviceSecurityAudit()
+        }
+    }
+
+    fun setSiteTrafficFilter(filter: SiteTrafficFilter) {
+        siteFilterFlow.value = filter
+    }
+
+    fun setSiteSearchQuery(query: String) {
+        siteSearchQueryFlow.value = query
+    }
+
+    fun toggleCountryFilter(countryCode: String) {
+        selectedCountryFilterFlow.value = if (selectedCountryFilterFlow.value == countryCode) {
+            null
+        } else {
+            countryCode
+        }
+    }
+
+    fun setShowLiveSitesFeed(showLive: Boolean) {
+        showLiveSitesFeedFlow.value = showLive
+    }
+
+    fun clearConnectionHistory() {
+        viewModelScope.launch {
+            repository.clearConnectionHistory()
+            _snackbarMessages.tryEmit("Cleared site & region connection history")
+        }
+    }
+
+    fun runDeviceSecurityAudit() {
+        if (securityAuditReportFlow.value.isScanning) return
+        viewModelScope.launch {
+            securityAuditReportFlow.value = securityAuditReportFlow.value.copy(isScanning = true)
+            val recent = (ConnectionMonitorHub.liveConnectionsFlow.value + uiState.value.dataUsageState.historicalConnections)
+                .distinctBy { "${it.domain}|${it.remoteIp}|${it.actionStatus}" }
+            val report = repository.runDeviceSecurityAudit(recent)
+            securityAuditReportFlow.value = report
+        }
+    }
+
+    fun openFlaggedSitesFromAudit() {
+        val current = uiState.value.dataUsageState
+        val liveHasFlagged = current.liveConnections.any {
+            it.riskLevel == ConnectionRiskLevel.SUSPICIOUS || it.riskLevel == ConnectionRiskLevel.CRITICAL
+        }
+        showLiveSitesFeedFlow.value = liveHasFlagged || current.historicalConnections.isEmpty()
+        siteFilterFlow.value = SiteTrafficFilter.FLAGGED
+        selectedCountryFilterFlow.value = null
+        dataUsageSubTabFlow.value = DataUsageSubTab.SITES_REGIONS
+    }
+
+    fun quickBlockSiteFromMonitor(domain: String) {
+        viewModelScope.launch {
+            val result = repository.addWebsiteRule(domain, isWhitelist = false)
+            result.onSuccess { normalized ->
+                if (uiState.value.preferences.websiteFilterMode == WebsiteFilterMode.OFF) {
+                    preferences.setWebsiteFilterMode(WebsiteFilterMode.BLOCKLIST)
+                }
+                val firewallOn = uiState.value.preferences.isFirewallEnabled
+                _snackbarMessages.tryEmit(
+                    if (firewallOn) {
+                        "Blocked $normalized in Website Blocklist"
+                    } else {
+                        "Added $normalized to Blocklist — enable Firewall to enforce"
+                    }
+                )
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Unable to block $domain")
+            }
+        }
+    }
+
+    fun quickAllowSiteFromMonitor(domain: String) {
+        viewModelScope.launch {
+            val result = repository.addWebsiteRule(domain, isWhitelist = true)
+            result.onSuccess { normalized ->
+                _snackbarMessages.tryEmit("Added $normalized to Website Whitelist")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Unable to whitelist $domain")
+            }
+        }
+    }
+
+    fun setDeepMonitorEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setDeepMonitorEnabled(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "Deep Site & Region Monitor enabled" else "Deep Site & Region Monitor paused"
+            )
         }
     }
 
@@ -1166,6 +1405,44 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         _snackbarMessages.tryEmit("Cleared DNS query log")
     }
 
+    fun setStatusBarSpeedEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setStatusBarSpeedEnabled(enabled)
+            if (enabled) {
+                NetworkMonitorService.start(getApplication())
+                _snackbarMessages.tryEmit("Status bar live speed icon enabled")
+            } else {
+                NetworkMonitorService.stop(getApplication())
+                _snackbarMessages.tryEmit("Status bar live speed icon turned off")
+            }
+        }
+    }
+
+    fun onStatusBarSpeedPermissionDenied() {
+        viewModelScope.launch {
+            preferences.setStatusBarSpeedEnabled(false)
+            _snackbarMessages.tryEmit("Notification permission is required to show speed in the status bar")
+        }
+    }
+
+    fun setStatusBarSpeedStyle(style: StatusBarSpeedStyle) {
+        viewModelScope.launch {
+            preferences.setStatusBarSpeedStyle(style)
+            _snackbarMessages.tryEmit("Status bar style: ${style.title}")
+        }
+    }
+
+    fun setShowStatusBarDailyUsage(show: Boolean) {
+        viewModelScope.launch {
+            preferences.setShowStatusBarDailyUsage(show)
+        }
+    }
+
+    fun resetLiveSessionStats() {
+        SystemNetworkMonitor.resetSession(getApplication())
+        _snackbarMessages.tryEmit("Reset live session speed & byte counters")
+    }
+
     private fun formatCompactCount(count: Int): String {
         return when {
             count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
@@ -1215,6 +1492,28 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val rawRows: List<com.example.data.local.AppTrafficWithRuleTuple>,
         val dailyHistory: List<DailyTrafficHistoryPoint>,
         val historicalTotals: HistoricalUsageTotals
+    )
+
+    private data class TailSnapshot(
+        val destination: AppDestination,
+        val dataUsage: DataUsageUiState,
+        val webAndAd: Triple<List<WebsiteRuleItem>, List<AdFilterListItem>, Boolean>,
+        val liveTelemetry: LiveNetworkTelemetry
+    )
+
+    private data class SiteControlsSnapshot(
+        val subTab: DataUsageSubTab,
+        val siteFilter: SiteTrafficFilter,
+        val siteQuery: String,
+        val countryFilter: String?,
+        val showLive: Boolean
+    )
+
+    private data class SiteMonitorSnapshot(
+        val live: List<SiteConnectionRecord>,
+        val history: List<SiteConnectionRecord>,
+        val controls: SiteControlsSnapshot,
+        val auditReport: DeviceSecurityAuditReport
     )
 }
 

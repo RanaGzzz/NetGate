@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -33,11 +34,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -54,13 +58,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppUsageBreakdownItem
+import com.example.data.model.DataUsageSubTab
+import com.example.data.model.LiveNetworkTelemetry
+import com.example.data.model.SecurityAuditAction
+import com.example.data.model.SiteTrafficFilter
+import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.UsageChartMode
 import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
@@ -68,7 +76,10 @@ import com.example.data.model.formatDataBytes
 import com.example.ui.components.BlockedVsAllowedBarChart
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.HistoricalTrafficChartCard
+import com.example.ui.components.SecurityAuditContent
 import com.example.ui.components.SentReceivedSummaryCard
+import com.example.ui.components.SitesAndRegionsContent
+import com.example.ui.components.SystemNetworkMonitorCard
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
@@ -78,17 +89,45 @@ import com.example.ui.theme.WifiAccent
 @Composable
 fun DataUsageContent(
     state: DataUsageUiState,
+    liveTelemetry: LiveNetworkTelemetry,
+    isFirewallActive: Boolean,
+    isDeepMonitorEnabled: Boolean,
+    isHttpsProxyActive: Boolean,
+    isStatusBarSpeedEnabled: Boolean,
+    statusBarSpeedStyle: StatusBarSpeedStyle,
+    showStatusBarDailyUsage: Boolean,
     loadIcon: suspend (String) -> ImageBitmap?,
+    onSelectSubTab: (DataUsageSubTab) -> Unit,
     onTimeRangeChange: (UsageTimeRange) -> Unit,
     onChartModeChange: (UsageChartMode) -> Unit,
     onFilterCategoryChange: (UsageFilterCategory) -> Unit,
     onRefreshUsage: () -> Unit,
     onClearHistory: () -> Unit,
     onInspectApp: (String) -> Unit,
+    onToggleStatusBarSpeed: (Boolean) -> Unit,
+    onSelectStatusBarStyle: (StatusBarSpeedStyle) -> Unit,
+    onToggleShowDailyUsage: (Boolean) -> Unit,
+    onResetLiveSession: () -> Unit,
+    onRequestEnableFirewall: () -> Unit,
+    onToggleDeepMonitor: (Boolean) -> Unit,
+    onSetShowLiveSitesFeed: (Boolean) -> Unit,
+    onSiteFilterChange: (SiteTrafficFilter) -> Unit,
+    onSiteSearchQueryChange: (String) -> Unit,
+    onToggleCountryFilter: (String) -> Unit,
+    onClearConnectionHistory: () -> Unit,
+    onQuickBlockSite: (String) -> Unit,
+    onQuickAllowSite: (String) -> Unit,
+    onRunSecurityAudit: () -> Unit,
+    onOpenFlaggedSitesFromAudit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val maxAppBytes = (state.appItems.maxOfOrNull { it.totalBytes } ?: 1L).coerceAtLeast(1L)
+    val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    BackHandler(enabled = state.selectedSubTab != DataUsageSubTab.OVERVIEW) {
+        onSelectSubTab(DataUsageSubTab.OVERVIEW)
+    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -97,7 +136,64 @@ fun DataUsageContent(
     ) {
         val isWide = maxWidth >= 800.dp
 
-        if (isWide) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            DataUsageSubTabBar(
+                selectedSubTab = state.selectedSubTab,
+                sitesCount = state.liveConnections.size.coerceAtLeast(state.historicalConnections.size),
+                flaggedCount = state.flaggedSitesCount,
+                onSelectSubTab = onSelectSubTab,
+                modifier = Modifier
+                    .padding(horizontal = if (isWide) 20.dp else 16.dp, vertical = 4.dp)
+            )
+
+            when (state.selectedSubTab) {
+                DataUsageSubTab.SITES_REGIONS -> {
+                    SitesAndRegionsContent(
+                        state = state,
+                        isFirewallActive = isFirewallActive,
+                        isDeepMonitorEnabled = isDeepMonitorEnabled,
+                        isHttpsProxyActive = isHttpsProxyActive,
+                        loadIcon = loadIcon,
+                        onRequestEnableFirewall = onRequestEnableFirewall,
+                        onToggleDeepMonitor = onToggleDeepMonitor,
+                        onSetShowLiveFeed = onSetShowLiveSitesFeed,
+                        onSiteFilterChange = onSiteFilterChange,
+                        onSearchQueryChange = onSiteSearchQueryChange,
+                        onToggleCountryFilter = onToggleCountryFilter,
+                        onClearHistory = onClearConnectionHistory,
+                        onQuickBlockSite = onQuickBlockSite,
+                        onQuickAllowSite = onQuickAllowSite,
+                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                DataUsageSubTab.SECURITY_AUDIT -> {
+                    SecurityAuditContent(
+                        report = state.securityAuditReport,
+                        flaggedSitesCount = state.flaggedSitesCount,
+                        onRunAudit = onRunSecurityAudit,
+                        onSecurityAction = { action ->
+                            when (action) {
+                                SecurityAuditAction.OPEN_ACCESSIBILITY_SETTINGS ->
+                                    openSafeSettings(context, Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                SecurityAuditAction.OPEN_DEVICE_ADMIN_SETTINGS ->
+                                    openSafeSettings(context, Settings.ACTION_SECURITY_SETTINGS)
+                                SecurityAuditAction.OPEN_DEVELOPER_SETTINGS ->
+                                    openSafeSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                                SecurityAuditAction.OPEN_USAGE_ACCESS ->
+                                    openUsageAccessSettings(context)
+                                SecurityAuditAction.FILTER_FLAGGED_SITES ->
+                                    onOpenFlaggedSitesFromAudit()
+                            }
+                        },
+                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                DataUsageSubTab.OVERVIEW -> {
+                    if (isWide) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -111,6 +207,19 @@ fun DataUsageContent(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
+                    item(key = "live_system_monitor") {
+                        SystemNetworkMonitorCard(
+                            telemetry = liveTelemetry,
+                            isStatusBarSpeedEnabled = isStatusBarSpeedEnabled,
+                            statusBarSpeedStyle = statusBarSpeedStyle,
+                            showStatusBarDailyUsage = showStatusBarDailyUsage,
+                            onToggleStatusBarSpeed = onToggleStatusBarSpeed,
+                            onSelectStatusBarStyle = onSelectStatusBarStyle,
+                            onToggleShowDailyUsage = onToggleShowDailyUsage,
+                            onResetSessionStats = onResetLiveSession,
+                            onOpenSitesAndSecurity = { onSelectSubTab(DataUsageSubTab.SITES_REGIONS) }
+                        )
+                    }
                     item(key = "time_range") {
                         TimeRangeBar(
                             selectedRange = state.timeRange,
@@ -192,7 +301,6 @@ fun DataUsageContent(
                 }
             }
         } else {
-            val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     modifier = Modifier
@@ -207,6 +315,19 @@ fun DataUsageContent(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item(key = "live_system_monitor") {
+                        SystemNetworkMonitorCard(
+                            telemetry = liveTelemetry,
+                            isStatusBarSpeedEnabled = isStatusBarSpeedEnabled,
+                            statusBarSpeedStyle = statusBarSpeedStyle,
+                            showStatusBarDailyUsage = showStatusBarDailyUsage,
+                            onToggleStatusBarSpeed = onToggleStatusBarSpeed,
+                            onSelectStatusBarStyle = onSelectStatusBarStyle,
+                            onToggleShowDailyUsage = onToggleShowDailyUsage,
+                            onResetSessionStats = onResetLiveSession,
+                            onOpenSitesAndSecurity = { onSelectSubTab(DataUsageSubTab.SITES_REGIONS) }
+                        )
+                    }
                     item(key = "time_range") {
                         TimeRangeBar(
                             selectedRange = state.timeRange,
@@ -303,6 +424,115 @@ fun DataUsageContent(
 
                     item(key = "bottom_spacer") {
                         Spacer(modifier = Modifier.height(16.dp))
+                    }
+                }
+            }
+        }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DataUsageSubTabBar(
+    selectedSubTab: DataUsageSubTab,
+    sitesCount: Int,
+    flaggedCount: Int,
+    onSelectSubTab: (DataUsageSubTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDark = LocalIsDarkTheme.current
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        DataUsageSubTab.entries.forEach { tab ->
+            val selected = selectedSubTab == tab
+            val icon = when (tab) {
+                DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart
+                DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public
+                DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security
+            }
+            val badgeText = when (tab) {
+                DataUsageSubTab.OVERVIEW -> null
+                DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
+                DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
+            }
+            val badgeColor = if (tab == DataUsageSubTab.SECURITY_AUDIT && flaggedCount > 0) {
+                BlockedRed
+            } else {
+                MaterialTheme.colorScheme.primary
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                } else if (isDark) {
+                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.65f)
+                } else {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (selected) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.68f)
+                    } else {
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    }
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { onSelectSubTab(tab) }
+                    .testTag("data_usage_subtab_${tab.name.lowercase()}")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = tab.label,
+                        tint = if (selected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = tab.label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (badgeText != null) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = badgeColor.copy(alpha = 0.20f)
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = badgeColor,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -794,6 +1024,22 @@ private fun EmptyUsageListCard(hasUsageAccess: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+private fun openSafeSettings(context: Context, action: String) {
+    val candidates = listOf(
+        Intent(action),
+        Intent(Settings.ACTION_SETTINGS)
+    )
+    for (intent in candidates) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent.resolveActivity(context.packageManager) != null) {
+            runCatching {
+                context.startActivity(intent)
+                return
+            }
         }
     }
 }

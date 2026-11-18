@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.SniProxyPreset
+import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.ThemeMode
 import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.WebsiteFilterMode
@@ -51,6 +52,10 @@ class FirewallPreferences(private val context: Context) {
         val SNI_PROXY_PRESET = stringPreferencesKey("sni_proxy_preset")
         val CUSTOM_SNI_PROXY_HOST = stringPreferencesKey("custom_sni_proxy_host")
         val CUSTOM_SNI_PROXY_PORT = intPreferencesKey("custom_sni_proxy_port")
+        val IS_STATUS_BAR_SPEED_ENABLED = booleanPreferencesKey("is_status_bar_speed_enabled")
+        val STATUS_BAR_SPEED_STYLE = stringPreferencesKey("status_bar_speed_style")
+        val SHOW_STATUS_BAR_DAILY_USAGE = booleanPreferencesKey("show_status_bar_daily_usage")
+        val IS_DEEP_MONITOR_ENABLED = booleanPreferencesKey("is_deep_monitor_enabled")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -68,6 +73,9 @@ class FirewallPreferences(private val context: Context) {
         val sniPresetName = prefs[Keys.SNI_PROXY_PRESET] ?: SniProxyPreset.STANDARD_DIRECT.name
         val sniPreset = SniProxyPreset.entries.firstOrNull { it.name == sniPresetName }
             ?: SniProxyPreset.STANDARD_DIRECT
+        val statusBarStyleName = prefs[Keys.STATUS_BAR_SPEED_STYLE] ?: StatusBarSpeedStyle.DOWNLOAD_UPLOAD.name
+        val statusBarStyle = StatusBarSpeedStyle.entries.firstOrNull { it.name == statusBarStyleName }
+            ?: StatusBarSpeedStyle.DOWNLOAD_UPLOAD
 
         FirewallPreferencesState(
             isFirewallEnabled = prefs[Keys.IS_FIREWALL_ENABLED] ?: false,
@@ -94,7 +102,11 @@ class FirewallPreferences(private val context: Context) {
             isYoutubeAdBlockEnabled = prefs[Keys.IS_YOUTUBE_AD_BLOCK_ENABLED] ?: false,
             sniProxyPreset = sniPreset,
             customSniProxyHost = prefs[Keys.CUSTOM_SNI_PROXY_HOST] ?: "",
-            customSniProxyPort = (prefs[Keys.CUSTOM_SNI_PROXY_PORT] ?: 8080).coerceIn(1, 65535)
+            customSniProxyPort = (prefs[Keys.CUSTOM_SNI_PROXY_PORT] ?: 8080).coerceIn(1, 65535),
+            isStatusBarSpeedEnabled = prefs[Keys.IS_STATUS_BAR_SPEED_ENABLED] ?: false,
+            statusBarSpeedStyle = statusBarStyle,
+            showStatusBarDailyUsage = prefs[Keys.SHOW_STATUS_BAR_DAILY_USAGE] ?: true,
+            isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true
         )
     }
 
@@ -227,5 +239,21 @@ class FirewallPreferences(private val context: Context) {
             prefs[Keys.SNI_PROXY_PRESET] = SniProxyPreset.CUSTOM_UPSTREAM_SNI.name
             prefs[Keys.IS_HTTPS_PROXY_ENABLED] = true
         }
+    }
+
+    suspend fun setStatusBarSpeedEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.IS_STATUS_BAR_SPEED_ENABLED] = enabled }
+    }
+
+    suspend fun setStatusBarSpeedStyle(style: StatusBarSpeedStyle) {
+        context.firewallDataStore.edit { it[Keys.STATUS_BAR_SPEED_STYLE] = style.name }
+    }
+
+    suspend fun setShowStatusBarDailyUsage(show: Boolean) {
+        context.firewallDataStore.edit { it[Keys.SHOW_STATUS_BAR_DAILY_USAGE] = show }
+    }
+
+    suspend fun setDeepMonitorEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.IS_DEEP_MONITOR_ENABLED] = enabled }
     }
 }

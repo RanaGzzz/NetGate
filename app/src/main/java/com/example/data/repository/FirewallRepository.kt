@@ -29,6 +29,7 @@ import com.example.data.local.AppTrafficHistoryEntity
 import com.example.data.local.AppTrafficUsageDao
 import com.example.data.local.AppTrafficUsageEntity
 import com.example.data.local.AppTrafficWithRuleTuple
+import com.example.data.local.ConnectionHistoryDao
 import com.example.data.local.FirewallPreferences
 import com.example.data.local.WebsiteRuleDao
 import com.example.data.local.WebsiteRuleEntity
@@ -40,15 +41,19 @@ import com.example.data.model.BatchAction
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DailyTrafficHistoryPoint
 import com.example.data.model.DataUsageSummary
+import com.example.data.model.DeviceSecurityAuditReport
 import com.example.data.model.DnsLeakTestState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
+import com.example.data.model.SiteConnectionRecord
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.network.DnsLeakTester
 import com.example.service.AdBlockFilterEngine
 import com.example.service.AppTimerScheduler
+import com.example.service.ConnectionMonitorHub
 import com.example.service.DnsPacketFilter
+import com.example.service.SecurityAuditEngine
 import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -68,6 +73,7 @@ class FirewallRepository(
     private val websiteRuleDao: WebsiteRuleDao,
     private val appTimerDao: AppTimerDao,
     private val adFilterListDao: AdFilterListDao,
+    private val connectionHistoryDao: ConnectionHistoryDao,
     val preferences: FirewallPreferences
 ) {
     val rulesFlow: Flow<List<AppNetworkRuleEntity>> = ruleDao.observeAllRules()
@@ -156,6 +162,11 @@ class FirewallRepository(
                     daysTrackedCount = tuple.daysTrackedCount
                 )
             }
+    val connectionHistoryFlow: Flow<List<SiteConnectionRecord>> =
+        connectionHistoryDao.observeRecentConnections(limit = 250)
+            .map { entities -> entities.map(ConnectionMonitorHub::entityToModel) }
+    val flaggedConnectionsCountFlow: Flow<Int> =
+        connectionHistoryDao.observeFlaggedConnectionsCount()
 
     suspend fun getAllRulesOnce(): List<AppNetworkRuleEntity> = withContext(Dispatchers.IO) {
         ruleDao.getAllRulesOnce()
@@ -720,6 +731,21 @@ class FirewallRepository(
 
     suspend fun clearTrafficHistory() {
         trafficUsageDao.clearHistory()
+    }
+
+    suspend fun clearConnectionHistory() = withContext(Dispatchers.IO) {
+        connectionHistoryDao.clearAll()
+        ConnectionMonitorHub.clearLiveFeed()
+    }
+
+    suspend fun runDeviceSecurityAudit(
+        recentConnections: List<SiteConnectionRecord>
+    ): DeviceSecurityAuditReport = withContext(Dispatchers.IO) {
+        SecurityAuditEngine.runDeviceSecurityAudit(context, recentConnections)
+    }
+
+    suspend fun setDeepMonitorEnabled(enabled: Boolean) {
+        preferences.setDeepMonitorEnabled(enabled)
     }
 
     suspend fun syncNetworkTrafficUsageToRoom(

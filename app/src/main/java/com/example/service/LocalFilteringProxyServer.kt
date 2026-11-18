@@ -30,7 +30,16 @@ class LocalFilteringProxyServer(
     private val evaluateRequest: (host: String, pathAndQuery: String?) -> ProxyFilterDecision,
     private val resolveTargetHost: (host: String) -> String = { it },
     private val upstreamProxyProvider: () -> Pair<String, Int>? = { null },
-    private val onRequestLogged: (host: String, decision: ProxyFilterDecision) -> Unit
+    private val onRequestLogged: (host: String, decision: ProxyFilterDecision) -> Unit,
+    private val onTrafficRelayed: (
+        host: String,
+        port: Int,
+        protocol: String,
+        remoteIp: String?,
+        bytesSent: Long,
+        bytesReceived: Long,
+        decision: ProxyFilterDecision
+    ) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
@@ -141,6 +150,7 @@ class LocalFilteringProxyServer(
         val initialDecision = evaluateRequest(host, null)
         if (!initialDecision.allow) {
             onRequestLogged(host, initialDecision)
+            onTrafficRelayed(host, targetPort, "HTTPS", null, authority.length.toLong(), 0L, initialDecision)
             writeForbiddenResponse(clientOut, initialDecision.reason)
             runCatching { client.close() }
             return
@@ -184,6 +194,10 @@ class LocalFilteringProxyServer(
             clientOut.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: NetGate-SNI-Proxy\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
             clientOut.flush()
 
+            val remoteIp = upstream.inetAddress?.hostAddress
+            var activeHost = host
+            var initialBytesSent = 0L
+
             // Peek first TLS ClientHello packet to verify SNI matches allowed rules
             clientIn.mark(4096)
             val peekBuf = ByteArray(2048)
@@ -194,19 +208,33 @@ class LocalFilteringProxyServer(
                     val sniDecision = evaluateRequest(sniHost, null)
                     if (!sniDecision.allow) {
                         onRequestLogged(sniHost, sniDecision)
+                        onTrafficRelayed(sniHost, targetPort, "HTTPS", remoteIp, peekLen.toLong(), 0L, sniDecision)
                         runCatching { upstream.close() }
                         runCatching { client.close() }
                         return
                     }
+                    activeHost = sniHost
                 }
-                onRequestLogged(host, initialDecision)
+                onRequestLogged(activeHost, initialDecision)
                 upstream.getOutputStream().write(peekBuf, 0, peekLen)
                 upstream.getOutputStream().flush()
+                initialBytesSent = peekLen.toLong()
             } else {
                 onRequestLogged(host, initialDecision)
             }
 
-            relayBidirectional(client, clientIn, clientOut, upstream)
+            relayBidirectional(
+                client = client,
+                clientIn = clientIn,
+                clientOut = clientOut,
+                upstream = upstream,
+                host = activeHost,
+                port = targetPort,
+                protocol = "HTTPS",
+                remoteIp = remoteIp,
+                initialBytesSent = initialBytesSent,
+                decision = initialDecision
+            )
         } catch (_: Exception) {
             runCatching { upstream.close() }
             runCatching { client.close() }
@@ -261,6 +289,7 @@ class LocalFilteringProxyServer(
         val decision = evaluateRequest(host, pathAndQuery)
         onRequestLogged(host, decision)
         if (!decision.allow) {
+            onTrafficRelayed(host, targetPort, "HTTP", null, cleanedTarget.length.toLong(), 0L, decision)
             writeForbiddenResponse(clientOut, decision.reason)
             runCatching { client.close() }
             return
@@ -292,11 +321,23 @@ class LocalFilteringProxyServer(
             }
             rebuiltHeaders.append("\r\n")
 
+            val headerOutBytes = rebuiltHeaders.toString().toByteArray(Charsets.ISO_8859_1)
             val upstreamOut = upstream.getOutputStream()
-            upstreamOut.write(rebuiltHeaders.toString().toByteArray(Charsets.ISO_8859_1))
+            upstreamOut.write(headerOutBytes)
             upstreamOut.flush()
 
-            relayBidirectional(client, clientIn, clientOut, upstream)
+            relayBidirectional(
+                client = client,
+                clientIn = clientIn,
+                clientOut = clientOut,
+                upstream = upstream,
+                host = host,
+                port = targetPort,
+                protocol = "HTTP",
+                remoteIp = upstream.inetAddress?.hostAddress,
+                initialBytesSent = headerOutBytes.size.toLong(),
+                decision = decision
+            )
         } catch (_: Exception) {
             runCatching { upstream.close() }
             runCatching { client.close() }
@@ -307,26 +348,67 @@ class LocalFilteringProxyServer(
         client: Socket,
         clientIn: InputStream,
         clientOut: OutputStream,
-        upstream: Socket
+        upstream: Socket,
+        host: String,
+        port: Int,
+        protocol: String,
+        remoteIp: String?,
+        initialBytesSent: Long,
+        decision: ProxyFilterDecision
     ) {
         val upstreamIn = upstream.getInputStream()
         val upstreamOut = upstream.getOutputStream()
+        val sentCounter = java.util.concurrent.atomic.AtomicLong(initialBytesSent)
+        val recvCounter = java.util.concurrent.atomic.AtomicLong(0L)
+
+        // Emit initial connection registration immediately for live UI visibility
+        if (initialBytesSent > 0L) {
+            val initialFlush = sentCounter.getAndSet(0L)
+            if (initialFlush > 0L) {
+                onTrafficRelayed(host, port, protocol, remoteIp, initialFlush, 0L, decision)
+            }
+        }
 
         val c2u = workerExecutor?.submit {
-            copyStream(clientIn, upstreamOut)
+            copyStreamWithProgress(clientIn, upstreamOut) { chunkBytes ->
+                val pending = sentCounter.addAndGet(chunkBytes)
+                if (pending >= 32_768L) {
+                    val flushed = sentCounter.getAndSet(0L)
+                    if (flushed > 0L) {
+                        onTrafficRelayed(host, port, protocol, remoteIp, flushed, 0L, decision)
+                    }
+                }
+            }
             runCatching { upstream.shutdownOutput() }
         }
         try {
-            copyStream(upstreamIn, clientOut)
+            copyStreamWithProgress(upstreamIn, clientOut) { chunkBytes ->
+                val pending = recvCounter.addAndGet(chunkBytes)
+                if (pending >= 32_768L) {
+                    val flushed = recvCounter.getAndSet(0L)
+                    if (flushed > 0L) {
+                        onTrafficRelayed(host, port, protocol, remoteIp, 0L, flushed, decision)
+                    }
+                }
+            }
             runCatching { client.shutdownOutput() }
         } finally {
             runCatching { c2u?.get() }
+            val remSent = sentCounter.getAndSet(0L)
+            val remRecv = recvCounter.getAndSet(0L)
+            if (remSent > 0L || remRecv > 0L) {
+                onTrafficRelayed(host, port, protocol, remoteIp, remSent, remRecv, decision)
+            }
             runCatching { upstream.close() }
             runCatching { client.close() }
         }
     }
 
-    private fun copyStream(input: InputStream, output: OutputStream) {
+    private fun copyStreamWithProgress(
+        input: InputStream,
+        output: OutputStream,
+        onBytes: (Long) -> Unit
+    ) {
         val buf = ByteArray(16_384)
         try {
             while (running.get()) {
@@ -334,6 +416,9 @@ class LocalFilteringProxyServer(
                 if (read < 0) break
                 output.write(buf, 0, read)
                 output.flush()
+                if (read > 0) {
+                    onBytes(read.toLong())
+                }
             }
         } catch (_: Exception) {
             // Stream closed normally

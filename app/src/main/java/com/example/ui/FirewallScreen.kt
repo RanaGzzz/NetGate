@@ -106,6 +106,7 @@ import com.example.ui.theme.LocalIsDarkTheme
 fun FirewallScreen(
     viewModel: FirewallViewModel,
     onRequestEnableFirewall: () -> Unit,
+    onRequestToggleStatusBarSpeed: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -242,7 +243,12 @@ fun FirewallScreen(
                             IconButton(
                                 onClick = {
                                     when (uiState.currentDestination) {
-                                        AppDestination.DATA_USAGE -> viewModel.refreshDataUsage()
+                                        AppDestination.DATA_USAGE -> {
+                                            viewModel.refreshDataUsage()
+                                            if (uiState.dataUsageState.selectedSubTab == com.example.data.model.DataUsageSubTab.SECURITY_AUDIT) {
+                                                viewModel.runDeviceSecurityAudit()
+                                            }
+                                        }
                                         AppDestination.SPEED_TEST, AppDestination.DNS ->
                                             viewModel.refreshConnectionDetails()
                                         AppDestination.FIREWALL, AppDestination.WEBSITES ->
@@ -355,13 +361,36 @@ fun FirewallScreen(
                         if (uiState.currentDestination == AppDestination.DATA_USAGE) {
                             DataUsageContent(
                                 state = uiState.dataUsageState,
+                                liveTelemetry = uiState.liveTelemetry,
+                                isFirewallActive = isFirewallActive,
+                                isDeepMonitorEnabled = uiState.preferences.isDeepMonitorEnabled,
+                                isHttpsProxyActive = uiState.vpnRuntimeState.isHttpsProxyActive,
+                                isStatusBarSpeedEnabled = uiState.preferences.isStatusBarSpeedEnabled,
+                                statusBarSpeedStyle = uiState.preferences.statusBarSpeedStyle,
+                                showStatusBarDailyUsage = uiState.preferences.showStatusBarDailyUsage,
                                 loadIcon = viewModel::getAppIconBitmap,
+                                onSelectSubTab = viewModel::selectDataUsageSubTab,
                                 onTimeRangeChange = viewModel::setUsageTimeRange,
                                 onChartModeChange = viewModel::setUsageChartMode,
                                 onFilterCategoryChange = viewModel::setUsageFilterCategory,
                                 onRefreshUsage = viewModel::refreshDataUsage,
                                 onClearHistory = viewModel::clearTrafficHistory,
-                                onInspectApp = viewModel::openAppDetails
+                                onInspectApp = viewModel::openAppDetails,
+                                onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
+                                onSelectStatusBarStyle = viewModel::setStatusBarSpeedStyle,
+                                onToggleShowDailyUsage = viewModel::setShowStatusBarDailyUsage,
+                                onResetLiveSession = viewModel::resetLiveSessionStats,
+                                onRequestEnableFirewall = onRequestEnableFirewall,
+                                onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
+                                onSetShowLiveSitesFeed = viewModel::setShowLiveSitesFeed,
+                                onSiteFilterChange = viewModel::setSiteTrafficFilter,
+                                onSiteSearchQueryChange = viewModel::setSiteSearchQuery,
+                                onToggleCountryFilter = viewModel::toggleCountryFilter,
+                                onClearConnectionHistory = viewModel::clearConnectionHistory,
+                                onQuickBlockSite = viewModel::quickBlockSiteFromMonitor,
+                                onQuickAllowSite = viewModel::quickAllowSiteFromMonitor,
+                                onRunSecurityAudit = viewModel::runDeviceSecurityAudit,
+                                onOpenFlaggedSitesFromAudit = viewModel::openFlaggedSitesFromAudit
                             )
                         } else if (uiState.currentDestination == AppDestination.WEBSITES) {
                             WebsiteBlockerContent(
@@ -447,13 +476,15 @@ fun FirewallScreen(
                                     activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
                                     isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
                                     blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
+                                    liveTelemetry = uiState.liveTelemetry,
                                     onToggleFirewall = { enable ->
                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                     },
                                     onOpenConnectionInfo = viewModel::openConnectionInfo,
                                     onOpenDnsProtection = viewModel::openDnsProtection,
                                     onOpenSpeedTest = viewModel::openSpeedTest,
-                                    onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) }
+                                    onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                    onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) }
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
                                 SearchAndFiltersBlock(
@@ -500,13 +531,15 @@ fun FirewallScreen(
                                                 activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
                                                 isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
                                                 blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
+                                                liveTelemetry = uiState.liveTelemetry,
                                                 onToggleFirewall = { enable ->
                                                     if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                                 },
                                                 onOpenConnectionInfo = viewModel::openConnectionInfo,
                                                 onOpenDnsProtection = viewModel::openDnsProtection,
                                                 onOpenSpeedTest = viewModel::openSpeedTest,
-                                                onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) }
+                                                onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                                onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) }
                                             )
                                             Spacer(modifier = Modifier.height(14.dp))
                                             SearchAndFiltersBlock(
@@ -601,6 +634,8 @@ fun FirewallScreen(
             onToggleDynamicColor = viewModel::setUseDynamicColor,
             onToggleShowSystemApps = viewModel::setShowSystemApps,
             onToggleShowOfflineApps = viewModel::setShowOfflineApps,
+            onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
+            onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
             onClearAllRules = viewModel::clearAllRules,
             onDismiss = viewModel::closeSettings
         )

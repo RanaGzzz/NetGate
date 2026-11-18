@@ -10,9 +10,12 @@
     <string name="open_system_app_info">Open System App Info</string>
     <string name="nav_firewall">Firewall</string>
     <string name="nav_data_usage">Data Usage</string>
-    <string name="data_usage_title">Data Usage</string>
-    <string name="data_usage_subtitle">Blocked vs. Allowed Apps</string>
+    <string name="data_usage_title">Network &amp; Usage</string>
+    <string name="data_usage_subtitle">Live Monitor, Sites, Regions &amp; Audit</string>
     <string name="grant_usage_access">Grant Usage Access</string>
+    <string name="speed_monitor_channel_name">Live Network Speed Icon</string>
+    <string name="speed_monitor_channel_description">Shows real-time upload/download speed and daily usage in the status bar</string>
+    <string name="speed_monitor_stop">Stop Monitor</string>
     <string name="nav_websites">Ad &amp; Web</string>
     <string name="websites_title">Ad &amp; Website Blocker</string>
     <string name="websites_subtitle">System Ad Filter, DNS Log &amp; Lockdown</string>

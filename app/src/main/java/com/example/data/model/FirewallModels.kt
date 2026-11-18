@@ -335,6 +335,61 @@ enum class SniProxyPreset(
     )
 }
 
+enum class StatusBarSpeedStyle(
+    val title: String,
+    val subtitle: String
+) {
+    DOWNLOAD_UPLOAD(
+        title = "↓ DL + ↑ UL",
+        subtitle = "Stacked download & upload speed in status bar"
+    ),
+    COMBINED(
+        title = "Total Speed",
+        subtitle = "Combined incoming + outgoing speed"
+    ),
+    DOWNLOAD_ONLY(
+        title = "↓ Download",
+        subtitle = "Incoming download speed only"
+    )
+}
+
+data class ThroughputSample(
+    val timestampMs: Long,
+    val rxBytesPerSec: Long,
+    val txBytesPerSec: Long
+)
+
+data class LiveNetworkTelemetry(
+    val downloadBytesPerSec: Long = 0L,
+    val uploadBytesPerSec: Long = 0L,
+    val peakDownloadBytesPerSec: Long = 0L,
+    val peakUploadBytesPerSec: Long = 0L,
+    val sessionRxBytes: Long = 0L,
+    val sessionTxBytes: Long = 0L,
+    val todayWifiRxBytes: Long = 0L,
+    val todayWifiTxBytes: Long = 0L,
+    val todayMobileRxBytes: Long = 0L,
+    val todayMobileTxBytes: Long = 0L,
+    val activeNetworkType: ActiveNetworkType = ActiveNetworkType.NONE,
+    val activeInterfaceName: String? = null,
+    val historySamples: List<ThroughputSample> = emptyList(),
+    val isMonitorServiceRunning: Boolean = false,
+    val isTrafficStatsSupported: Boolean = true
+) {
+    val totalBytesPerSec: Long get() = downloadBytesPerSec + uploadBytesPerSec
+    val sessionTotalBytes: Long get() = sessionRxBytes + sessionTxBytes
+    val todayTotalRxBytes: Long get() = todayWifiRxBytes + todayMobileRxBytes
+    val todayTotalTxBytes: Long get() = todayWifiTxBytes + todayMobileTxBytes
+    val todayWifiBytes: Long get() = todayWifiRxBytes + todayWifiTxBytes
+    val todayMobileBytes: Long get() = todayMobileRxBytes + todayMobileTxBytes
+    val todayTotalBytes: Long get() = todayTotalRxBytes + todayTotalTxBytes
+}
+
+data class CompactSpeedBadge(
+    val valueText: String,
+    val unitText: String
+)
+
 data class FirewallPreferencesState(
     val isFirewallEnabled: Boolean = false,
     val showOfflineApps: Boolean = false,
@@ -360,7 +415,11 @@ data class FirewallPreferencesState(
     val isYoutubeAdBlockEnabled: Boolean = false,
     val sniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
     val customSniProxyHost: String = "",
-    val customSniProxyPort: Int = 8080
+    val customSniProxyPort: Int = 8080,
+    val isStatusBarSpeedEnabled: Boolean = false,
+    val statusBarSpeedStyle: StatusBarSpeedStyle = StatusBarSpeedStyle.DOWNLOAD_UPLOAD,
+    val showStatusBarDailyUsage: Boolean = true,
+    val isDeepMonitorEnabled: Boolean = true
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
@@ -572,3 +631,197 @@ fun formatCountdownTimer(remainingMillis: Long): String {
         String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
     }
 }
+
+fun formatSpeedBytesPerSec(bytesPerSec: Long): String {
+    if (bytesPerSec <= 0L) return "0 B/s"
+    val kb = 1024.0
+    val mb = kb * 1024.0
+    val gb = mb * 1024.0
+    return when {
+        bytesPerSec >= gb -> String.format(java.util.Locale.US, "%.2f GB/s", bytesPerSec / gb)
+        bytesPerSec >= 10.0 * mb -> String.format(java.util.Locale.US, "%.1f MB/s", bytesPerSec / mb)
+        bytesPerSec >= mb -> String.format(java.util.Locale.US, "%.2f MB/s", bytesPerSec / mb)
+        bytesPerSec >= 10.0 * kb -> String.format(java.util.Locale.US, "%.0f KB/s", bytesPerSec / kb)
+        bytesPerSec >= kb -> String.format(java.util.Locale.US, "%.1f KB/s", bytesPerSec / kb)
+        else -> "$bytesPerSec B/s"
+    }
+}
+
+fun formatCompactStatusBarSpeed(bytesPerSec: Long): CompactSpeedBadge {
+    if (bytesPerSec <= 0L) return CompactSpeedBadge("0", "B/s")
+    val kb = 1024.0
+    val mb = kb * 1024.0
+    val gb = mb * 1024.0
+    return when {
+        bytesPerSec >= gb -> CompactSpeedBadge(
+            String.format(java.util.Locale.US, "%.1f", bytesPerSec / gb),
+            "G/s"
+        )
+        bytesPerSec >= 100.0 * mb -> CompactSpeedBadge(
+            String.format(java.util.Locale.US, "%.0f", bytesPerSec / mb),
+            "M/s"
+        )
+        bytesPerSec >= mb -> CompactSpeedBadge(
+            String.format(java.util.Locale.US, "%.1f", bytesPerSec / mb),
+            "M/s"
+        )
+        bytesPerSec >= 10.0 * kb -> CompactSpeedBadge(
+            String.format(java.util.Locale.US, "%.0f", bytesPerSec / kb),
+            "K/s"
+        )
+        bytesPerSec >= kb -> CompactSpeedBadge(
+            String.format(java.util.Locale.US, "%.1f", bytesPerSec / kb),
+            "K/s"
+        )
+        else -> CompactSpeedBadge(bytesPerSec.toString(), "B/s")
+    }
+}
+
+fun formatSingleLineCompactSpeed(bytesPerSec: Long): String {
+    if (bytesPerSec <= 0L) return "0B"
+    val kb = 1024.0
+    val mb = kb * 1024.0
+    val gb = mb * 1024.0
+    return when {
+        bytesPerSec >= gb -> String.format(java.util.Locale.US, "%.1fG", bytesPerSec / gb)
+        bytesPerSec >= 100.0 * mb -> String.format(java.util.Locale.US, "%.0fM", bytesPerSec / mb)
+        bytesPerSec >= mb -> String.format(java.util.Locale.US, "%.1fM", bytesPerSec / mb)
+        bytesPerSec >= 10.0 * kb -> String.format(java.util.Locale.US, "%.0fK", bytesPerSec / kb)
+        bytesPerSec >= kb -> String.format(java.util.Locale.US, "%.1fK", bytesPerSec / kb)
+        else -> "${bytesPerSec}B"
+    }
+}
+
+enum class DataUsageSubTab(val label: String) {
+    OVERVIEW("Live & Usage"),
+    SITES_REGIONS("Sites & Regions"),
+    SECURITY_AUDIT("Security Audit")
+}
+
+enum class SiteTrafficFilter(val label: String) {
+    ALL("All Sites"),
+    SENDING("Sending ↑"),
+    RECEIVING("Receiving ↓"),
+    BLOCKED("Blocked"),
+    FLAGGED("Suspicious")
+}
+
+enum class ConnectionRiskLevel(val label: String) {
+    SAFE("Verified"),
+    NOTICE("Notice"),
+    SUSPICIOUS("Suspicious"),
+    CRITICAL("High Risk")
+}
+
+data class SiteConnectionRecord(
+    val id: Long = 0L,
+    val domain: String,
+    val remoteIp: String,
+    val remotePort: Int,
+    val protocol: String,
+    val appPackage: String,
+    val appName: String,
+    val countryCode: String,
+    val countryName: String,
+    val regionName: String,
+    val ispOrOrg: String,
+    val bytesSent: Long,
+    val bytesReceived: Long,
+    val actionStatus: String,
+    val riskLevel: ConnectionRiskLevel,
+    val riskReason: String,
+    val hitCount: Int,
+    val firstSeenAt: Long,
+    val lastSeenAt: Long
+) {
+    val totalBytes: Long get() = bytesSent + bytesReceived
+    val countryFlag: String get() = countryCodeToFlagEmoji(countryCode)
+    val locationLabel: String
+        get() = when {
+            regionName.isNotBlank() && countryName.isNotBlank() -> "$regionName, $countryName"
+            countryName.isNotBlank() -> countryName
+            else -> "Resolving region…"
+        }
+}
+
+data class CountryTrafficSummary(
+    val countryCode: String,
+    val countryName: String,
+    val regionSample: String,
+    val bytesSent: Long,
+    val bytesReceived: Long,
+    val sitesCount: Int,
+    val hitsCount: Int,
+    val suspiciousCount: Int
+) {
+    val totalBytes: Long get() = bytesSent + bytesReceived
+    val countryFlag: String get() = countryCodeToFlagEmoji(countryCode)
+}
+
+enum class SecurityAuditStatus {
+    SECURE,
+    NOTICE,
+    WARNING
+}
+
+enum class SecurityAuditAction {
+    OPEN_ACCESSIBILITY_SETTINGS,
+    OPEN_DEVICE_ADMIN_SETTINGS,
+    OPEN_DEVELOPER_SETTINGS,
+    OPEN_USAGE_ACCESS,
+    FILTER_FLAGGED_SITES
+}
+
+data class SecurityAuditCheckItem(
+    val id: String,
+    val title: String,
+    val summary: String,
+    val detail: String,
+    val status: SecurityAuditStatus,
+    val actionLabel: String? = null,
+    val actionType: SecurityAuditAction? = null
+)
+
+data class ActiveSocketInfo(
+    val protocol: String,
+    val localAddress: String,
+    val localPort: Int,
+    val remoteAddress: String,
+    val remotePort: Int,
+    val stateLabel: String,
+    val uid: Int,
+    val appPackage: String,
+    val appName: String,
+    val countryCode: String,
+    val countryName: String,
+    val isListening: Boolean,
+    val isSuspicious: Boolean,
+    val reason: String
+) {
+    val countryFlag: String get() = countryCodeToFlagEmoji(countryCode)
+}
+
+data class DeviceSecurityAuditReport(
+    val isScanning: Boolean = false,
+    val securityScore: Int = 100,
+    val verdictLabel: String = "Ready to Scan",
+    val overallStatus: SecurityAuditStatus = SecurityAuditStatus.SECURE,
+    val summaryText: String = "Scan active accessibility hooks, device admins, listening ports, high-risk app permissions, and suspicious site endpoints.",
+    val checks: List<SecurityAuditCheckItem> = emptyList(),
+    val activeSockets: List<ActiveSocketInfo> = emptyList(),
+    val flaggedConnectionsCount: Int = 0,
+    val lastScannedAt: Long = 0L
+)
+
+fun countryCodeToFlagEmoji(code: String): String {
+    val clean = code.trim().uppercase()
+    if (clean == "LAN") return "\uD83C\uDFE0" // House emoji
+    if (clean.length != 2 || !clean[0].isLetter() || !clean[1].isLetter()) {
+        return "\uD83C\uDF10" // Globe emoji
+    }
+    val first = Character.codePointAt(clean, 0) - 'A'.code + 0x1F1E6
+    val second = Character.codePointAt(clean, 1) - 'A'.code + 0x1F1E6
+    return String(Character.toChars(first)) + String(Character.toChars(second))
+}
+
+

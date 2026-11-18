@@ -21,7 +21,9 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +52,8 @@ fun FirewallSettingsSheet(
     onToggleDynamicColor: (Boolean) -> Unit,
     onToggleShowSystemApps: (Boolean) -> Unit,
     onToggleShowOfflineApps: (Boolean) -> Unit,
+    onToggleStatusBarSpeed: (Boolean) -> Unit,
+    onToggleDeepMonitor: (Boolean) -> Unit,
     onClearAllRules: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -170,6 +174,28 @@ fun FirewallSettingsSheet(
                 checked = preferences.showOfflineApps,
                 onCheckedChange = onToggleShowOfflineApps,
                 testTag = "settings_show_offline_apps_switch"
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            SettingsSwitchRow(
+                title = "Status Bar Speed Icon",
+                subtitle = "Pin live upload/download speed & daily usage in status bar",
+                checked = preferences.isStatusBarSpeedEnabled,
+                icon = Icons.Rounded.NotificationsActive,
+                onCheckedChange = onToggleStatusBarSpeed,
+                testTag = "settings_status_bar_speed_switch"
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            SettingsSwitchRow(
+                title = "Deep Site & Region Monitor",
+                subtitle = "Log contacted domains, GeoIP countries, Rx/Tx bytes & threat score in Room",
+                checked = preferences.isDeepMonitorEnabled,
+                icon = Icons.Rounded.Public,
+                onCheckedChange = onToggleDeepMonitor,
+                testTag = "settings_deep_monitor_switch"
             )
 
             Spacer(modifier = Modifier.height(12.dp))

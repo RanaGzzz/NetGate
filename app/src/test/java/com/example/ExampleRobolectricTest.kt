@@ -50,6 +50,7 @@ class ExampleRobolectricTest {
             websiteRuleDao = database.websiteRuleDao(),
             appTimerDao = database.appTimerDao(),
             adFilterListDao = database.adFilterListDao(),
+            connectionHistoryDao = database.connectionHistoryDao(),
             preferences = FirewallPreferences(context)
         )
     }
@@ -794,5 +795,326 @@ class ExampleRobolectricTest {
         state = prefs.preferencesFlow.first()
         assertEquals(com.example.data.model.SniProxyPreset.CUSTOM_UPSTREAM_SNI, state.sniProxyPreset)
         assertEquals("proxy.corp.local" to 3128, state.resolvedUpstreamSniProxy())
+    }
+
+    @Test
+    fun `speed formatters produce crisp human readable and status bar labels`() {
+        assertEquals("0 B/s", com.example.data.model.formatSpeedBytesPerSec(0L))
+        assertEquals("512 B/s", com.example.data.model.formatSpeedBytesPerSec(512L))
+        assertEquals("1.5 KB/s", com.example.data.model.formatSpeedBytesPerSec(1536L))
+        assertEquals("420 KB/s", com.example.data.model.formatSpeedBytesPerSec(420L * 1024L))
+        assertEquals("2.50 MB/s", com.example.data.model.formatSpeedBytesPerSec((2.5 * 1024.0 * 1024.0).toLong()))
+
+        val badge = com.example.data.model.formatCompactStatusBarSpeed(2L * 1024L * 1024L)
+        assertEquals("2.0", badge.valueText)
+        assertEquals("M/s", badge.unitText)
+
+        assertEquals("0B", com.example.data.model.formatSingleLineCompactSpeed(0L))
+        assertEquals("512K", com.example.data.model.formatSingleLineCompactSpeed(512L * 1024L))
+        assertEquals("1.5M", com.example.data.model.formatSingleLineCompactSpeed((1.5 * 1024.0 * 1024.0).toLong()))
+    }
+
+    @Test
+    fun `traffic rate calculator computes incoming outgoing rates wifi mobile split and handles unsupported`() {
+        val calc = com.example.service.TrafficRateCalculator(maxHistorySamples = 10)
+        val day1 = 2026_100L
+
+        // Initial baseline reading establishes 0 rate
+        val t0 = calc.update(
+            rxBytes = 10_000_000L,
+            txBytes = 2_000_000L,
+            networkType = ActiveNetworkType.WIFI,
+            interfaceName = "wlan0",
+            timestampMs = 1_000L,
+            dayKey = day1,
+            isServiceRunning = true
+        )
+        assertEquals(0L, t0.downloadBytesPerSec)
+        assertEquals(0L, t0.uploadBytesPerSec)
+        assertTrue(t0.isTrafficStatsSupported)
+
+        // +1 MB Rx and +256 KB Tx over 1000 ms on Wi-Fi
+        val t1 = calc.update(
+            rxBytes = 11_048_576L,
+            txBytes = 2_262_144L,
+            networkType = ActiveNetworkType.WIFI,
+            interfaceName = "wlan0",
+            timestampMs = 2_000L,
+            dayKey = day1,
+            isServiceRunning = true
+        )
+        assertEquals(1_048_576L, t1.downloadBytesPerSec)
+        assertEquals(262_144L, t1.uploadBytesPerSec)
+        assertEquals(1_048_576L, t1.todayWifiRxBytes)
+        assertEquals(262_144L, t1.todayWifiTxBytes)
+        assertEquals(0L, t1.todayMobileRxBytes)
+
+        // Interface switch to cellular rmnet_data0 rebases cleanly without spike
+        val t2 = calc.update(
+            rxBytes = 500_000L,
+            txBytes = 100_000L,
+            networkType = ActiveNetworkType.MOBILE_DATA,
+            interfaceName = "rmnet_data0",
+            timestampMs = 3_000L,
+            dayKey = day1,
+            isServiceRunning = true
+        )
+        assertEquals(0L, t2.downloadBytesPerSec)
+        assertEquals(0L, t2.uploadBytesPerSec)
+
+        // +500 KB Rx on Mobile Data over 1000 ms
+        val t3 = calc.update(
+            rxBytes = 1_012_000L,
+            txBytes = 164_000L,
+            networkType = ActiveNetworkType.MOBILE_DATA,
+            interfaceName = "rmnet_data0",
+            timestampMs = 4_000L,
+            dayKey = day1,
+            isServiceRunning = true
+        )
+        assertEquals(512_000L, t3.downloadBytesPerSec)
+        assertEquals(64_000L, t3.uploadBytesPerSec)
+        assertEquals(512_000L, t3.todayMobileRxBytes)
+        assertEquals(64_000L, t3.todayMobileTxBytes)
+        assertEquals(1_048_576L, t3.peakDownloadBytesPerSec)
+
+        // UNSUPPORTED (-1) reading degrades gracefully
+        val unsupported = calc.update(
+            rxBytes = android.net.TrafficStats.UNSUPPORTED.toLong(),
+            txBytes = android.net.TrafficStats.UNSUPPORTED.toLong(),
+            networkType = ActiveNetworkType.NONE,
+            interfaceName = null,
+            timestampMs = 5_000L,
+            dayKey = day1,
+            isServiceRunning = false
+        )
+        assertFalse(unsupported.isTrafficStatsSupported)
+        assertEquals(0L, unsupported.downloadBytesPerSec)
+    }
+
+    @Test
+    fun `status bar icon renderer creates non empty transparent alpha bitmaps for all styles`() {
+        val telemetry = com.example.data.model.LiveNetworkTelemetry(
+            downloadBytesPerSec = 2_400_000L,
+            uploadBytesPerSec = 450_000L,
+            activeNetworkType = ActiveNetworkType.WIFI
+        )
+        com.example.data.model.StatusBarSpeedStyle.entries.forEach { style ->
+            val bitmap = com.example.service.StatusBarIconRenderer.renderSpeedBitmap(telemetry, style)
+            assertEquals(72, bitmap.width)
+            assertEquals(72, bitmap.height)
+            val icon = com.example.service.StatusBarIconRenderer.createSpeedIcon(telemetry, style)
+            assertNotNull(icon)
+        }
+    }
+
+    @Test
+    fun `status bar monitor preferences persist correctly`() = runTest {
+        val prefs = FirewallPreferences(context)
+        prefs.setStatusBarSpeedEnabled(true)
+        prefs.setStatusBarSpeedStyle(com.example.data.model.StatusBarSpeedStyle.COMBINED)
+        prefs.setShowStatusBarDailyUsage(false)
+
+        val state = prefs.preferencesFlow.first()
+        assertTrue(state.isStatusBarSpeedEnabled)
+        assertEquals(com.example.data.model.StatusBarSpeedStyle.COMBINED, state.statusBarSpeedStyle)
+        assertFalse(state.showStatusBarDailyUsage)
+    }
+
+    @Test
+    fun `dns packet filter extracts ipv4 and ipv6 resolved answer ips`() {
+        val out = java.io.ByteArrayOutputStream()
+        // Header: TxID, standard response, QD=1, AN=2, NS=0, AR=0
+        out.write(byteArrayOf(0x11, 0x22, 0x81.toByte(), 0x80.toByte()))
+        out.write(byteArrayOf(0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00))
+        // Question: api.github.com Type A Class IN
+        out.write(byteArrayOf(0x03, 'a'.code.toByte(), 'p'.code.toByte(), 'i'.code.toByte()))
+        out.write(byteArrayOf(0x06, 'g'.code.toByte(), 'i'.code.toByte(), 't'.code.toByte(), 'h'.code.toByte(), 'u'.code.toByte(), 'b'.code.toByte()))
+        out.write(byteArrayOf(0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(), 0x00))
+        out.write(byteArrayOf(0x00, 0x01, 0x00, 0x01))
+        // Answer 1: Type A -> 140.82.121.6
+        out.write(byteArrayOf(0xC0.toByte(), 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04))
+        out.write(byteArrayOf(140.toByte(), 82, 121, 6))
+        // Answer 2: Type AAAA -> 2001:db8::1
+        out.write(byteArrayOf(0xC0.toByte(), 0x0C, 0x00, 0x1C, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x10))
+        out.write(byteArrayOf(0x20, 0x01, 0x0D, 0xB8.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
+
+        val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(out.toByteArray())
+        assertEquals(2, ips.size)
+        assertEquals("140.82.121.6", ips[0])
+        assertTrue(ips[1].startsWith("2001:db8:"))
+    }
+
+    @Test
+    fun `geoip resolver handles lan known infra cctld hints and json parsing`() {
+        val lan = com.example.service.GeoIpResolver.resolveImmediate("192.168.1.50")
+        assertEquals("LAN", lan.countryCode)
+        assertTrue(lan.isPrivateOrLan)
+
+        val quad9 = com.example.service.GeoIpResolver.resolveImmediate("9.9.9.9")
+        assertEquals("CH", quad9.countryCode)
+        assertEquals("Switzerland", quad9.countryName)
+
+        val deHint = com.example.service.GeoIpResolver.resolveImmediate("198.51.100.10", "example.de")
+        assertEquals("DE", deHint.countryCode)
+
+        val json = """
+            {
+              "success": true,
+              "country_code": "DE",
+              "country": "Germany",
+              "region": "Hesse",
+              "city": "Frankfurt",
+              "connection": { "org": "Hetzner Online GmbH" }
+            }
+        """.trimIndent()
+        val parsed = com.example.service.GeoIpResolver.parseGeoJson("198.51.100.10", json)
+        assertNotNull(parsed)
+        assertEquals("DE", parsed!!.countryCode)
+        assertEquals("Germany", parsed.countryName)
+        assertEquals("Frankfurt, Hesse", parsed.regionName)
+        assertEquals("Hetzner Online GmbH", parsed.ispOrOrg)
+    }
+
+    @Test
+    fun `security audit engine scores connection risks and parses proc net tcp sockets`() {
+        val (criticalRisk, _) = com.example.service.SecurityAuditEngine.assessConnectionRisk(
+            domain = "185.220.101.5",
+            remoteIp = "185.220.101.5",
+            remotePort = 4444,
+            protocol = "TCP",
+            bytesSent = 1024L,
+            bytesReceived = 256L,
+            actionStatus = "ALLOWED",
+            countryCode = "DE"
+        )
+        assertEquals(com.example.data.model.ConnectionRiskLevel.CRITICAL, criticalRisk)
+
+        val (rawIpRisk, _) = com.example.service.SecurityAuditEngine.assessConnectionRisk(
+            domain = "45.33.32.156",
+            remoteIp = "45.33.32.156",
+            remotePort = 443,
+            protocol = "HTTPS",
+            bytesSent = 512L,
+            bytesReceived = 1024L,
+            actionStatus = "ALLOWED",
+            countryCode = "US"
+        )
+        assertEquals(com.example.data.model.ConnectionRiskLevel.SUSPICIOUS, rawIpRisk)
+
+        val (exfilRisk, _) = com.example.service.SecurityAuditEngine.assessConnectionRisk(
+            domain = "upload.example.com",
+            remoteIp = "93.184.216.34",
+            remotePort = 443,
+            protocol = "HTTPS",
+            bytesSent = 5_000_000L,
+            bytesReceived = 10_000L,
+            actionStatus = "ALLOWED",
+            countryCode = "US"
+        )
+        assertEquals(com.example.data.model.ConnectionRiskLevel.SUSPICIOUS, exfilRisk)
+
+        val (safeRisk, _) = com.example.service.SecurityAuditEngine.assessConnectionRisk(
+            domain = "api.github.com",
+            remoteIp = "140.82.121.6",
+            remotePort = 443,
+            protocol = "HTTPS",
+            bytesSent = 2_000L,
+            bytesReceived = 25_000L,
+            actionStatus = "ALLOWED",
+            countryCode = "US"
+        )
+        assertEquals(com.example.data.model.ConnectionRiskLevel.SAFE, safeRisk)
+
+        // Synthetic /proc/net/tcp rows (little-endian hex: 0100007F = 127.0.0.1, 01010101 = 1.1.1.1)
+        val procTcp = """
+              sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+               0: 00000000:115C 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10123 0 12345
+               1: 0100007F:9000 01010101:01BB 01 00000000:00000000 00:00000000 00000000 10124 0 12346
+        """.trimIndent()
+        val parsed = com.example.service.SecurityAuditEngine.parseProcNetSockets(procTcp, "TCP", false)
+        assertEquals(2, parsed.size)
+        assertTrue(parsed[0].isListening)
+        assertEquals(4444, parsed[0].localPort)
+        assertEquals("0.0.0.0", parsed[0].localAddress)
+        assertEquals("1.1.1.1", parsed[1].remoteAddress)
+        assertEquals(443, parsed[1].remotePort)
+        assertEquals(10124, parsed[1].uid)
+    }
+
+    @Test
+    fun `connection history dao merges byte counters and backfills geoip cleanly`() = runTest {
+        val dao = database.connectionHistoryDao()
+        val now = 1_700_000_000_000L
+
+        dao.recordOrMergeConnection(
+            com.example.data.local.ConnectionEventEntity(
+                domain = "cdn.example.com",
+                remoteIp = "203.0.113.50",
+                remotePort = 443,
+                protocol = "HTTPS",
+                appPackage = "com.browser.app",
+                appName = "Browser",
+                countryCode = "??",
+                countryName = "Resolving…",
+                regionName = "",
+                ispOrOrg = "",
+                bytesSent = 1_200L,
+                bytesReceived = 24_000L,
+                actionStatus = "ALLOWED",
+                riskLevel = "SAFE",
+                riskReason = "Encrypted endpoint",
+                hitCount = 1,
+                firstSeenAt = now,
+                lastSeenAt = now
+            )
+        )
+        dao.recordOrMergeConnection(
+            com.example.data.local.ConnectionEventEntity(
+                domain = "cdn.example.com",
+                remoteIp = "203.0.113.50",
+                remotePort = 443,
+                protocol = "HTTPS",
+                appPackage = "com.browser.app",
+                appName = "Browser",
+                countryCode = "??",
+                countryName = "Resolving…",
+                regionName = "",
+                ispOrOrg = "",
+                bytesSent = 800L,
+                bytesReceived = 16_000L,
+                actionStatus = "ALLOWED",
+                riskLevel = "SAFE",
+                riskReason = "Encrypted endpoint",
+                hitCount = 1,
+                firstSeenAt = now + 500L,
+                lastSeenAt = now + 500L
+            )
+        )
+
+        dao.backfillGeoForIp(
+            remoteIp = "203.0.113.50",
+            countryCode = "JP",
+            countryName = "Japan",
+            regionName = "Tokyo",
+            ispOrOrg = "Example ISP"
+        )
+
+        val rows = dao.observeRecentConnections().first()
+        assertEquals(1, rows.size)
+        assertEquals(2_000L, rows[0].bytesSent)
+        assertEquals(40_000L, rows[0].bytesReceived)
+        assertEquals(2, rows[0].hitCount)
+        assertEquals("JP", rows[0].countryCode)
+        assertEquals("Japan", rows[0].countryName)
+
+        assertEquals("\uD83C\uDDFA\uD83C\uDDF8", com.example.data.model.countryCodeToFlagEmoji("US"))
+        assertEquals("\uD83C\uDFE0", com.example.data.model.countryCodeToFlagEmoji("LAN"))
+        assertEquals("\uD83C\uDF10", com.example.data.model.countryCodeToFlagEmoji("??"))
+
+        val prefs = FirewallPreferences(context)
+        assertTrue(prefs.preferencesFlow.first().isDeepMonitorEnabled)
+        prefs.setDeepMonitorEnabled(false)
+        assertFalse(prefs.preferencesFlow.first().isDeepMonitorEnabled)
     }
 }
