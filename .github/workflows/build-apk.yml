@@ -27,6 +27,19 @@ jobs:
         run: |
           touch .env
 
+      - name: Generate debug signing keystore
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -keypass android \
+            -alias android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Build Debug APK
         run: gradle assembleDebug
 
