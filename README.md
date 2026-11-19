@@ -2,8 +2,6 @@
 
 **A root-free Android firewall, website blocker, and network monitor.**
 
-[![Build NetGate APK](https://github.com/RanaGzzz/NetGate/actions/workflows/build-apk.yml/badge.svg?branch=main)](https://github.com/RanaGzzz/NetGate/actions/workflows/build-apk.yml)
-
 NetGate uses Android's local `VpnService` to manage per-app network access and filter websites. It also tracks network usage, runs connection speed tests, and helps configure Private DNS.
 
 ## Features
@@ -23,21 +21,13 @@ Add screenshots to `docs/screenshots/`, then replace these placeholders with ima
 |---|---|---|
 | *Screenshot placeholder — `docs/screenshots/firewall.png`* | *Screenshot placeholder — `docs/screenshots/websites.png`* | *Screenshot placeholder — `docs/screenshots/usage.png`* |
 
-## Build and download
+## Download APK
 
-### GitHub Actions
+Download `app-debug.apk` from the [NetGate Releases page](https://github.com/RanaGzzz/NetGate/releases). Open a release and select **app-debug.apk** under **Assets**.
 
-The [Build NetGate APK workflow](https://github.com/RanaGzzz/NetGate/actions/workflows/build-apk.yml) runs on pushes to `main` or `master`. You can also start it manually from the workflow page using **Run workflow**.
+The APK is a debug build for testing, not a Play Store release.
 
-The workflow sets up JDK 21 and Gradle 9.3.1, creates a temporary debug signing key, builds the APK, and uploads it as an artifact.
-
-1. Open the workflow page and select a successful run.
-2. In the run summary, download the **NetGate-debug-apk** artifact.
-3. Extract the downloaded ZIP to get `app-debug.apk`.
-
-These are debug builds for testing, not Play Store releases. CI generates a temporary signing key for each run, so an APK may not install as an update over one signed by a previous run.
-
-### Build locally
+## Build locally
 
 Install Git, JDK 21, Gradle 9.3.1, and the Android SDK platform used by this project (API 36, extension 1). The repository does not include a Gradle wrapper.
 
