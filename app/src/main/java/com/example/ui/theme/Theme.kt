@@ -15,6 +15,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.data.model.BlurEngineStyle
 import com.example.data.model.ThemeMode
 
 val LocalIsDarkTheme = staticCompositionLocalOf { true }
@@ -93,6 +94,8 @@ val AppShapes = Shapes(
 fun NetGateTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     dynamicColor: Boolean = true,
+    blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
+    blurAnimationEnabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -111,7 +114,13 @@ fun NetGateTheme(
         else -> LightColorScheme
     }
 
-    CompositionLocalProvider(LocalIsDarkTheme provides darkTheme) {
+    CompositionLocalProvider(
+        LocalIsDarkTheme provides darkTheme,
+        LocalBlurEngineConfig provides BlurEngineConfig(
+            style = blurEngineStyle,
+            animateMotion = blurAnimationEnabled
+        )
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = AppTypography,

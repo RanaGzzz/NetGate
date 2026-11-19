@@ -39,6 +39,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppDestination
+import com.example.data.model.BlurEngineStyle
+import com.example.ui.theme.LocalBlurEngineConfig
 import com.example.ui.theme.LocalIsDarkTheme
 
 @Composable
@@ -53,18 +55,30 @@ fun FloatingFrostedNavBar(
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
+    val blurConfig = LocalBlurEngineConfig.current
     val pillShape = RoundedCornerShape(36.dp)
 
-    val containerColor = if (isDark) {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f)
-    } else {
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.84f)
+    val navAlpha = when (blurConfig.style) {
+        BlurEngineStyle.OFF -> if (isDark) 0.94f else 0.96f
+        BlurEngineStyle.SOFT_GLASS -> if (isDark) 0.84f else 0.88f
+        BlurEngineStyle.ACRYLIC_PRO -> if (isDark) 0.74f else 0.80f
+        BlurEngineStyle.ULTRA_FROST -> if (isDark) 0.62f else 0.70f
     }
+
+    val containerColor by animateColorAsState(
+        targetValue = if (isDark) {
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = navAlpha)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = navAlpha)
+        },
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "floatingNavContainerColor"
+    )
 
     val outerBorderBrush = if (isDark) {
         Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.28f),
+                Color.White.copy(alpha = 0.30f),
                 Color.White.copy(alpha = 0.08f)
             )
         )
@@ -80,14 +94,14 @@ fun FloatingFrostedNavBar(
     val glassSheenBrush = Brush.verticalGradient(
         colors = if (isDark) {
             listOf(
-                Color.White.copy(alpha = 0.12f),
+                Color.White.copy(alpha = 0.14f),
                 Color.White.copy(alpha = 0.03f),
                 Color.Transparent
             )
         } else {
             listOf(
-                Color.White.copy(alpha = 0.65f),
-                Color.White.copy(alpha = 0.20f),
+                Color.White.copy(alpha = 0.68f),
+                Color.White.copy(alpha = 0.22f),
                 Color.Transparent
             )
         }

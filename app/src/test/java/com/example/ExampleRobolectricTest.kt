@@ -1272,4 +1272,29 @@ class ExampleRobolectricTest {
         assertNull(inspector.parseIpPacket(ByteArray(10), 10))
         assertNull(inspector.parseIpPacket(ByteArray(24).apply { this[0] = 0x35.toByte() }, 24))
     }
+
+    @Test
+    fun `blur engine style and ambient animation preferences persist correctly`() = runTest {
+        val prefs = FirewallPreferences(context)
+        val initial = prefs.preferencesFlow.first()
+        assertEquals(com.example.data.model.BlurEngineStyle.ACRYLIC_PRO, initial.blurEngineStyle)
+        assertTrue(initial.isBlurAnimationEnabled)
+
+        prefs.setBlurEngineStyle(com.example.data.model.BlurEngineStyle.ULTRA_FROST)
+        prefs.setBlurAnimationEnabled(false)
+        var updated = prefs.preferencesFlow.first()
+        assertEquals(com.example.data.model.BlurEngineStyle.ULTRA_FROST, updated.blurEngineStyle)
+        assertFalse(updated.isBlurAnimationEnabled)
+
+        prefs.setBlurEngineStyle(com.example.data.model.BlurEngineStyle.SOFT_GLASS)
+        prefs.setBlurAnimationEnabled(true)
+        updated = prefs.preferencesFlow.first()
+        assertEquals(com.example.data.model.BlurEngineStyle.SOFT_GLASS, updated.blurEngineStyle)
+        assertTrue(updated.isBlurAnimationEnabled)
+
+        prefs.setBlurEngineStyle(com.example.data.model.BlurEngineStyle.OFF)
+        updated = prefs.preferencesFlow.first()
+        assertEquals(com.example.data.model.BlurEngineStyle.OFF, updated.blurEngineStyle)
+        assertEquals(0f, updated.blurEngineStyle.backdropRadiusDp, 0.001f)
+    }
 }

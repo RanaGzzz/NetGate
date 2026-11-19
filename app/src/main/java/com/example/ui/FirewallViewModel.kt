@@ -29,6 +29,7 @@ import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
 import com.example.data.model.AppUsageBreakdownItem
 import com.example.data.model.BatchAction
+import com.example.data.model.BlurEngineStyle
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.ConnectionRiskLevel
 import com.example.data.model.CountryTrafficSummary
@@ -1223,6 +1224,19 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun setUseDynamicColor(enabled: Boolean) {
         viewModelScope.launch { preferences.setUseDynamicColor(enabled) }
+    }
+
+    fun setBlurEngineStyle(style: BlurEngineStyle) {
+        viewModelScope.launch {
+            preferences.setBlurEngineStyle(style)
+            _snackbarMessages.tryEmit("Blur Engine effect: ${style.title}")
+        }
+    }
+
+    fun setBlurAnimationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setBlurAnimationEnabled(enabled)
+        }
     }
 
     fun clearAllRules() {

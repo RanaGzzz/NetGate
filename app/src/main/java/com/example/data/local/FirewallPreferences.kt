@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.data.model.BlurEngineStyle
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.SniProxyPreset
 import com.example.data.model.StatusBarSpeedStyle
@@ -56,6 +57,8 @@ class FirewallPreferences(private val context: Context) {
         val STATUS_BAR_SPEED_STYLE = stringPreferencesKey("status_bar_speed_style")
         val SHOW_STATUS_BAR_DAILY_USAGE = booleanPreferencesKey("show_status_bar_daily_usage")
         val IS_DEEP_MONITOR_ENABLED = booleanPreferencesKey("is_deep_monitor_enabled")
+        val BLUR_ENGINE_STYLE = stringPreferencesKey("blur_engine_style")
+        val IS_BLUR_ANIMATION_ENABLED = booleanPreferencesKey("is_blur_animation_enabled")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -76,6 +79,9 @@ class FirewallPreferences(private val context: Context) {
         val statusBarStyleName = prefs[Keys.STATUS_BAR_SPEED_STYLE] ?: StatusBarSpeedStyle.DOWNLOAD_UPLOAD.name
         val statusBarStyle = StatusBarSpeedStyle.entries.firstOrNull { it.name == statusBarStyleName }
             ?: StatusBarSpeedStyle.DOWNLOAD_UPLOAD
+        val blurStyleName = prefs[Keys.BLUR_ENGINE_STYLE] ?: BlurEngineStyle.ACRYLIC_PRO.name
+        val blurStyle = BlurEngineStyle.entries.firstOrNull { it.name == blurStyleName }
+            ?: BlurEngineStyle.ACRYLIC_PRO
 
         FirewallPreferencesState(
             isFirewallEnabled = prefs[Keys.IS_FIREWALL_ENABLED] ?: false,
@@ -106,7 +112,9 @@ class FirewallPreferences(private val context: Context) {
             isStatusBarSpeedEnabled = prefs[Keys.IS_STATUS_BAR_SPEED_ENABLED] ?: false,
             statusBarSpeedStyle = statusBarStyle,
             showStatusBarDailyUsage = prefs[Keys.SHOW_STATUS_BAR_DAILY_USAGE] ?: true,
-            isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true
+            isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true,
+            blurEngineStyle = blurStyle,
+            isBlurAnimationEnabled = prefs[Keys.IS_BLUR_ANIMATION_ENABLED] ?: true
         )
     }
 
@@ -255,5 +263,13 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setDeepMonitorEnabled(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.IS_DEEP_MONITOR_ENABLED] = enabled }
+    }
+
+    suspend fun setBlurEngineStyle(style: BlurEngineStyle) {
+        context.firewallDataStore.edit { it[Keys.BLUR_ENGINE_STYLE] = style.name }
+    }
+
+    suspend fun setBlurAnimationEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.IS_BLUR_ANIMATION_ENABLED] = enabled }
     }
 }

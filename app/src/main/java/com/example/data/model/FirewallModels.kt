@@ -29,6 +29,53 @@ enum class ThemeMode(val label: String) {
     DARK("Night")
 }
 
+enum class BlurEngineStyle(
+    val title: String,
+    val subtitle: String,
+    val backdropRadiusDp: Float,
+    val modalBlurDp: Float,
+    val tintAlphaDark: Float,
+    val tintAlphaLight: Float,
+    val saturationBoost: Float
+) {
+    OFF(
+        title = "Off",
+        subtitle = "Crisp translucent surfaces without hardware blur",
+        backdropRadiusDp = 0f,
+        modalBlurDp = 0f,
+        tintAlphaDark = 0.88f,
+        tintAlphaLight = 0.92f,
+        saturationBoost = 1.0f
+    ),
+    SOFT_GLASS(
+        title = "Soft Glass",
+        subtitle = "Subtle frosted depth with smooth spring transitions",
+        backdropRadiusDp = 42f,
+        modalBlurDp = 6f,
+        tintAlphaDark = 0.68f,
+        tintAlphaLight = 0.78f,
+        saturationBoost = 1.08f
+    ),
+    ACRYLIC_PRO(
+        title = "Acrylic",
+        subtitle = "RenderEffect blur, chromatic tint & crystalline rim",
+        backdropRadiusDp = 68f,
+        modalBlurDp = 12f,
+        tintAlphaDark = 0.56f,
+        tintAlphaLight = 0.68f,
+        saturationBoost = 1.18f
+    ),
+    ULTRA_FROST(
+        title = "Ultra Frost",
+        subtitle = "Deep multi-layer diffusion & vivid ambient mesh",
+        backdropRadiusDp = 92f,
+        modalBlurDp = 18f,
+        tintAlphaDark = 0.44f,
+        tintAlphaLight = 0.58f,
+        saturationBoost = 1.28f
+    )
+}
+
 enum class DnsProviderPreset(
     val title: String,
     val subtitle: String,
@@ -444,7 +491,9 @@ data class FirewallPreferencesState(
     val isStatusBarSpeedEnabled: Boolean = false,
     val statusBarSpeedStyle: StatusBarSpeedStyle = StatusBarSpeedStyle.DOWNLOAD_UPLOAD,
     val showStatusBarDailyUsage: Boolean = true,
-    val isDeepMonitorEnabled: Boolean = true
+    val isDeepMonitorEnabled: Boolean = true,
+    val blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
+    val isBlurAnimationEnabled: Boolean = true
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {

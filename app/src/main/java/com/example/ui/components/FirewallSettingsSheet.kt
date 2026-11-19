@@ -16,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.ButtonDefaults
@@ -40,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.data.model.BlurEngineStyle
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.ThemeMode
 import com.example.ui.theme.EmeraldPrimary
@@ -50,6 +54,9 @@ fun FirewallSettingsSheet(
     preferences: FirewallPreferencesState,
     onThemeModeChange: (ThemeMode) -> Unit,
     onToggleDynamicColor: (Boolean) -> Unit,
+    onBlurStyleChange: (BlurEngineStyle) -> Unit,
+    onToggleBlurAnimation: (Boolean) -> Unit,
+    onReplayStartupAnimation: () -> Unit = {},
     onToggleShowSystemApps: (Boolean) -> Unit,
     onToggleShowOfflineApps: (Boolean) -> Unit,
     onToggleStatusBarSpeed: (Boolean) -> Unit,
@@ -154,6 +161,137 @@ fun FirewallSettingsSheet(
                     onCheckedChange = onToggleDynamicColor,
                     testTag = "settings_material_you_switch"
                 )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Blur Engine Effect Presets
+            FrostedSurface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("blur_engine_settings_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.BlurOn,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Blur Engine Effect",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        FrostedSurface(
+                            shape = RoundedCornerShape(50),
+                            tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            borderAccent = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("blur_engine_preview_pill")
+                        ) {
+                            Text(
+                                text = preferences.blurEngineStyle.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = preferences.blurEngineStyle.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        BlurEngineStyle.entries.chunked(2).forEach { rowStyles ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowStyles.forEach { style ->
+                                    val selected = preferences.blurEngineStyle == style
+                                    FilledTonalButton(
+                                        onClick = { onBlurStyleChange(style) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (selected) {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
+                                            },
+                                            contentColor = if (selected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .testTag("blur_style_${style.name.lowercase()}")
+                                    ) {
+                                        Text(
+                                            text = style.title,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            SettingsSwitchRow(
+                title = "Ambient Motion & Depth Blur",
+                subtitle = "Spring-animated backdrop drift & modal blur depth",
+                checked = preferences.isBlurAnimationEnabled,
+                icon = Icons.Rounded.AutoAwesome,
+                onCheckedChange = onToggleBlurAnimation,
+                testTag = "settings_blur_animation_switch"
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            FilledTonalButton(
+                onClick = onReplayStartupAnimation,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("replay_startup_animation_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Preview Startup Animation")
             }
 
             Spacer(modifier = Modifier.height(10.dp))

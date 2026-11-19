@@ -99,6 +99,7 @@ import com.example.ui.components.FloatingFrostedNavBar
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.SpeedTestContent
+import com.example.ui.theme.BlurEngine.blurEngineModalDepth
 import com.example.ui.theme.LocalIsDarkTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,6 +108,7 @@ fun FirewallScreen(
     viewModel: FirewallViewModel,
     onRequestEnableFirewall: () -> Unit,
     onRequestToggleStatusBarSpeed: (Boolean) -> Unit,
+    onReplayStartupAnimation: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -148,8 +150,14 @@ fun FirewallScreen(
             val isWideLayout = maxWidth >= 800.dp
             val navBarBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
+            val hasOpenSheet = uiState.isSettingsOpen ||
+                uiState.isConnectionInfoOpen ||
+                uiState.inspectedApp != null
+
             Scaffold(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blurEngineModalDepth(active = hasOpenSheet),
                 containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets.safeDrawing.only(
                     WindowInsetsSides.Top + WindowInsetsSides.Horizontal
@@ -638,6 +646,12 @@ fun FirewallScreen(
             preferences = uiState.preferences,
             onThemeModeChange = viewModel::setThemeMode,
             onToggleDynamicColor = viewModel::setUseDynamicColor,
+            onBlurStyleChange = viewModel::setBlurEngineStyle,
+            onToggleBlurAnimation = viewModel::setBlurAnimationEnabled,
+            onReplayStartupAnimation = {
+                viewModel.closeSettings()
+                onReplayStartupAnimation()
+            },
             onToggleShowSystemApps = viewModel::setShowSystemApps,
             onToggleShowOfflineApps = viewModel::setShowOfflineApps,
             onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,

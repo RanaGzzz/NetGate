@@ -12,10 +12,21 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,6 +36,7 @@ import com.example.service.NetworkMonitorService
 import com.example.service.SystemNetworkMonitor
 import com.example.ui.FirewallScreen
 import com.example.ui.FirewallViewModel
+import com.example.ui.components.StartupSplashOverlay
 import com.example.ui.theme.NetGateTheme
 
 class MainActivity : ComponentActivity() {
@@ -49,7 +61,9 @@ class MainActivity : ComponentActivity() {
 
             NetGateTheme(
                 themeMode = uiState.preferences.themeMode,
-                dynamicColor = uiState.preferences.useDynamicColor
+                dynamicColor = uiState.preferences.useDynamicColor,
+                blurEngineStyle = uiState.preferences.blurEngineStyle,
+                blurAnimationEnabled = uiState.preferences.isBlurAnimationEnabled
             ) {
                 val vpnConsentLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
@@ -142,11 +156,39 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                FirewallScreen(
-                    viewModel = viewModel,
-                    onRequestEnableFirewall = requestEnableFirewall,
-                    onRequestToggleStatusBarSpeed = requestToggleStatusBarSpeed
+                var showStartupAnimation by rememberSaveable { mutableStateOf(true) }
+                var startupReplayNonce by remember { mutableIntStateOf(0) }
+                val contentScale by animateFloatAsState(
+                    targetValue = if (showStartupAnimation) 0.965f else 1f,
+                    animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+                    label = "startupContentRevealScale"
                 )
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    FirewallScreen(
+                        viewModel = viewModel,
+                        onRequestEnableFirewall = requestEnableFirewall,
+                        onRequestToggleStatusBarSpeed = requestToggleStatusBarSpeed,
+                        onReplayStartupAnimation = {
+                            startupReplayNonce += 1
+                            showStartupAnimation = true
+                        },
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = contentScale
+                            scaleY = contentScale
+                        }
+                    )
+
+                    if (showStartupAnimation) {
+                        key(startupReplayNonce) {
+                            StartupSplashOverlay(
+                                isFirewallActive = uiState.preferences.isFirewallEnabled &&
+                                    uiState.vpnRuntimeState.isServiceRunning,
+                                onDismissed = { showStartupAnimation = false }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
