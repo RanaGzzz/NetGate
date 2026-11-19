@@ -23,33 +23,56 @@ Add screenshots to `docs/screenshots/`, then replace these placeholders with ima
 |---|---|---|
 | *Screenshot placeholder — `docs/screenshots/firewall.png`* | *Screenshot placeholder — `docs/screenshots/websites.png`* | *Screenshot placeholder — `docs/screenshots/usage.png`* |
 
-## Download the APK
+## Build and download
 
-The GitHub Actions workflow builds a debug APK when code is pushed to `main` or `master`, and can also be started manually.
+### GitHub Actions
 
-1. Open the [Build NetGate APK workflow](https://github.com/RanaGzzz/NetGate/actions/workflows/build-apk.yml).
-2. Select a successful run and download the **NetGate-debug-apk** artifact.
-3. Unzip the downloaded artifact to get `app-debug.apk`.
+The [Build NetGate APK workflow](https://github.com/RanaGzzz/NetGate/actions/workflows/build-apk.yml) runs on pushes to `main` or `master`. You can also start it manually from the workflow page using **Run workflow**.
+
+The workflow sets up JDK 21 and Gradle 9.3.1, creates a temporary debug signing key, builds the APK, and uploads it as an artifact.
+
+1. Open the workflow page and select a successful run.
+2. In the run summary, download the **NetGate-debug-apk** artifact.
+3. Extract the downloaded ZIP to get `app-debug.apk`.
 
 These are debug builds for testing, not Play Store releases. CI generates a temporary signing key for each run, so an APK may not install as an update over one signed by a previous run.
 
-## Build locally
+### Build locally
 
-You need JDK 21, Gradle 9.3.1, and the Android SDK platform used by this project (API 36, extension 1). The repository does not include a Gradle wrapper.
+Install Git, JDK 21, Gradle 9.3.1, and the Android SDK platform used by this project (API 36, extension 1). The repository does not include a Gradle wrapper.
 
-Generate the debug keystore expected by the app's debug signing configuration (once per checkout):
+Clone the repository and enter its directory:
+
+```shell
+git clone https://github.com/RanaGzzz/NetGate.git
+cd NetGate
+```
+
+If you don't already have a local `.env`, create one from the example. Add any required local secrets there; do not commit `.env`.
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+On macOS or Linux, use `test -f .env || cp .env.example .env`.
+
+Create the debug signing key once per checkout. Keep this key for subsequent local builds if you want to install new builds over earlier ones.
 
 ```shell
 keytool -genkeypair -v -keystore debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 ```
 
-Then build the APK:
+Build the debug APK:
 
 ```shell
 gradle assembleDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. To install it on a connected Android device with `adb` available, run:
+
+```shell
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## How it works
 
