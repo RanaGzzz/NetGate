@@ -449,7 +449,8 @@ fun FirewallScreen(
                                 state = uiState.speedTestState,
                                 activeNetworkLabel = activeNetLabel,
                                 onStartTest = viewModel::startSpeedTest,
-                                onStopTest = viewModel::stopSpeedTest
+                                onStopTest = viewModel::stopSpeedTest,
+                                onRunVideoTest = viewModel::startVideoPlaybackTest
                             )
                         } else if (uiState.currentDestination == AppDestination.DNS) {
                             DnsProtectionContent(

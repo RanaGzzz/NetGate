@@ -1186,6 +1186,34 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun startVideoPlaybackTest() {
+        refreshConnectionDetails()
+        val netType = connectionDetailsFlow.value.activeNetworkType
+        val netLabel = when (netType) {
+            ActiveNetworkType.WIFI -> "Wi-Fi"
+            ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
+            ActiveNetworkType.OTHER -> "Ethernet / Other"
+            ActiveNetworkType.NONE -> "Offline"
+        }
+
+        if (netType == ActiveNetworkType.NONE) {
+            speedTestStateFlow.value = speedTestStateFlow.value.copy(
+                phase = SpeedTestPhase.ERROR,
+                testedNetworkLabel = netLabel,
+                errorMessage = "No active internet connection. Turn on Wi-Fi or Mobile Data first."
+            )
+            return
+        }
+
+        val snapshot = speedTestStateFlow.value
+        speedTestJob?.cancel()
+        speedTestJob = viewModelScope.launch {
+            speedTestRunner.runVideoPlaybackTest(netLabel, snapshot).collect { state ->
+                speedTestStateFlow.value = state
+            }
+        }
+    }
+
     fun stopSpeedTest() {
         speedTestJob?.cancel()
         speedTestJob = null
