@@ -19,11 +19,13 @@ NetGate uses Android's local `VpnService` and an on-device local HTTPS/SNI proxy
 
 ## Screenshots
 
-Add screenshots to `docs/screenshots/`, then replace these placeholders with image links.
+| Firewall | Ad & website blocker |
+|---|---|
+| ![NetGate firewall](docs/screenshots/firewall.png) | ![NetGate website blocker](docs/screenshots/websites.png) |
 
-| Firewall | Ad & website blocker | Network & security monitor |
-|---|---|---|
-| *Screenshot placeholder — `docs/screenshots/firewall.png`* | *Screenshot placeholder — `docs/screenshots/websites.png`* | *Screenshot placeholder — `docs/screenshots/usage.png`* |
+| Network monitor | DNS & security |
+|---|---|
+| ![NetGate network usage](docs/screenshots/usage.png) | ![NetGate DNS and security](docs/screenshots/dns.png) |
 
 ## Download APK
 
