@@ -86,6 +86,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -394,22 +397,62 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
     }
 
-    private val rulesAndTimersFlow = combine(
+    private val computedAppsFlow = combine(
+        installedAppsFlow,
         repository.rulesFlow,
         repository.appTimersFlow,
-        nowMillisFlow
-    ) { rules, timers, nowMs ->
-        Triple(rules, timers, nowMs)
-    }
+        repository.preferencesFlow.map { it.showOfflineApps to it.showSystemApps }.distinctUntilChanged(),
+        combine(searchQueryFlow, filterModeFlow) { query, filter -> query to filter }
+    ) { installed, rules, timers, (showOffline, showSystem), (query, filter) ->
+        val ruleMap = rules.associateBy { it.packageName }
+        val timerMap = timers.associateBy { it.packageName }
+
+        val visibleInstalled = installed.filter { app ->
+            val passInternet = showOffline || app.hasInternetPermission
+            val passSystem = showSystem || !app.isSystemApp
+            passInternet && passSystem
+        }
+
+        val managedApps = visibleInstalled.map { app ->
+            val rule = ruleMap[app.packageName]
+            ManagedApp(
+                packageName = app.packageName,
+                appName = app.appName,
+                isSystemApp = app.isSystemApp,
+                hasInternetPermission = app.hasInternetPermission,
+                blockWifi = rule?.blockWifi ?: false,
+                blockMobileData = rule?.blockMobileData ?: false,
+                activeTimer = timerMap[app.packageName]
+            )
+        }
+
+        val queryTrimmed = query.trim().lowercase()
+        val filtered = managedApps.filter { app ->
+            val matchesQuery = queryTrimmed.isEmpty() ||
+                app.appName.lowercase().contains(queryTrimmed) ||
+                app.packageName.lowercase().contains(queryTrimmed)
+
+            val matchesFilter = when (filter) {
+                AppFilterMode.ALL -> true
+                AppFilterMode.BLOCKED -> app.isAnyBlocked
+                AppFilterMode.WIFI_BLOCKED -> app.blockWifi
+                AppFilterMode.DATA_BLOCKED -> app.blockMobileData
+                AppFilterMode.ALLOWED -> !app.isAnyBlocked
+                AppFilterMode.TIMERS -> app.activeTimer != null
+            }
+            matchesQuery && matchesFilter
+        }
+        managedApps to filtered
+    }.flowOn(Dispatchers.Default)
 
     private val baseDataFlow = combine(
-        installedAppsFlow,
+        computedAppsFlow,
         isLoadingAppsFlow,
-        rulesAndTimersFlow,
+        nowMillisFlow,
         repository.preferencesFlow,
         NetGateVpnService.runtimeState
-    ) { installed, loading, (rules, timers, nowMs), prefs, vpnState ->
-        BaseSnapshot(installed, loading, rules, timers, nowMs, prefs, vpnState)
+    ) { (managedApps, filteredApps), loading, nowMs, prefs, vpnState ->
+        BaseSnapshot(managedApps, filteredApps, loading, nowMs, prefs, vpnState)
     }
 
     private val uiInteractionFlow = combine(
@@ -624,44 +667,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val liveTelemetry = tail.liveTelemetry
         val hotspotState = tail.hotspotProxyState
         val idleStatus = tail.wifiIdleStatus
-        val ruleMap = base.rules.associateBy { it.packageName }
-        val timerMap = base.timers.associateBy { it.packageName }
-
-        val visibleInstalled = base.installed.filter { app ->
-            val passInternet = base.prefs.showOfflineApps || app.hasInternetPermission
-            val passSystem = base.prefs.showSystemApps || !app.isSystemApp
-            passInternet && passSystem
-        }
-
-        val managedApps = visibleInstalled.map { app ->
-            val rule = ruleMap[app.packageName]
-            ManagedApp(
-                packageName = app.packageName,
-                appName = app.appName,
-                isSystemApp = app.isSystemApp,
-                hasInternetPermission = app.hasInternetPermission,
-                blockWifi = rule?.blockWifi ?: false,
-                blockMobileData = rule?.blockMobileData ?: false,
-                activeTimer = timerMap[app.packageName]
-            )
-        }
-
-        val queryTrimmed = interaction.query.trim().lowercase()
-        val filtered = managedApps.filter { app ->
-            val matchesQuery = queryTrimmed.isEmpty() ||
-                app.appName.lowercase().contains(queryTrimmed) ||
-                app.packageName.lowercase().contains(queryTrimmed)
-
-            val matchesFilter = when (interaction.filter) {
-                AppFilterMode.ALL -> true
-                AppFilterMode.BLOCKED -> app.isAnyBlocked
-                AppFilterMode.WIFI_BLOCKED -> app.blockWifi
-                AppFilterMode.DATA_BLOCKED -> app.blockMobileData
-                AppFilterMode.ALLOWED -> !app.isAnyBlocked
-                AppFilterMode.TIMERS -> app.activeTimer != null
-            }
-            matchesQuery && matchesFilter
-        }
+        val managedApps = base.managedApps
+        val filtered = base.filteredApps
 
         val loadedDomainsCount = if (base.vpnState.loadedAdDomainsCount > 0) {
             base.vpnState.loadedAdDomainsCount
@@ -936,6 +943,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
         isSyncingUsageFlow.value = false
     }
+
+    fun getCachedAppIconBitmap(packageName: String): ImageBitmap? = iconCache.get(packageName)
 
     suspend fun getAppIconBitmap(packageName: String): ImageBitmap? {
         iconCache.get(packageName)?.let { return it }
@@ -1741,10 +1750,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     private data class BaseSnapshot(
-        val installed: List<InstalledAppInfo>,
+        val managedApps: List<ManagedApp>,
+        val filteredApps: List<ManagedApp>,
         val loading: Boolean,
-        val rules: List<com.example.data.local.AppNetworkRuleEntity>,
-        val timers: List<AppCountdownTimer>,
         val nowMillis: Long,
         val prefs: FirewallPreferencesState,
         val vpnState: VpnRuntimeState

@@ -1,8 +1,15 @@
 package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,7 +49,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +123,12 @@ fun FirewallHeaderCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
                 .padding(18.dp)
         ) {
             Row(
@@ -121,11 +140,47 @@ fun FirewallHeaderCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
+                    val infiniteOrbit = rememberInfiniteTransition(label = "shieldReactorOrbit")
+                    val orbitSweepState = infiniteOrbit.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 3600, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "shieldOrbitSweep"
+                    )
+                    val shieldSecondary = MaterialTheme.colorScheme.secondary
+
                     Surface(
                         shape = CircleShape,
                         color = accentColor.copy(alpha = 0.20f),
                         border = BorderStroke(1.dp, accentColor.copy(alpha = 0.42f)),
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier
+                            .size(48.dp)
+                            .drawBehind {
+                                if (isFirewallActive) {
+                                    val angle = orbitSweepState.value
+                                    val pad = 4.dp.toPx()
+                                    val arcSize = Size(size.width + pad * 2f, size.height + pad * 2f)
+                                    val topLeft = Offset(-pad, -pad)
+                                    drawArc(
+                                        brush = Brush.sweepGradient(
+                                            colors = listOf(
+                                                primaryColor.copy(alpha = 0.85f),
+                                                shieldSecondary.copy(alpha = 0.45f),
+                                                Color.Transparent
+                                            )
+                                        ),
+                                        startAngle = angle,
+                                        sweepAngle = 125f,
+                                        useCenter = false,
+                                        topLeft = topLeft,
+                                        size = arcSize,
+                                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                                    )
+                                }
+                            }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(

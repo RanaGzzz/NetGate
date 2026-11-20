@@ -8,21 +8,22 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BlurEngineStyle
+import kotlin.math.roundToInt
 
 data class BlurEngineConfig(
     val style: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
@@ -32,12 +33,9 @@ data class BlurEngineConfig(
 val LocalBlurEngineConfig = staticCompositionLocalOf { BlurEngineConfig() }
 
 /**
- * Hardware-accelerated RenderEffect + spring-driven blur/tint compositor inspired by
- * MrSluffy's Blur Engine (blur-platform + blur-animation).
- *
- * On Android 12+ (API 31+), chains [AndroidRenderEffect.createBlurEffect] with a chromatic
- * saturation [AndroidRenderEffect.createColorFilterEffect] for rich Acrylic vibrancy without
- * per-frame allocations. Falls back cleanly on API 24-30.
+ * Hardware-accelerated RenderEffect + spring-driven blur/tint compositor.
+ * Caches RenderEffect instances across frames using quantized radius/saturation buckets
+ * to eliminate GPU pipeline re-uploads and frame drops during animations.
  */
 object BlurEngine {
 
@@ -45,33 +43,22 @@ object BlurEngine {
         radius: Dp,
         saturation: Float
     ): Modifier = composed {
-        val animatedRadius by animateDpAsState(
-            targetValue = radius,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessLow
-            ),
-            label = "blurEngineBackdropRadius"
-        )
-        val animatedSaturation by animateFloatAsState(
-            targetValue = saturation,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessLow
-            ),
-            label = "blurEngineSaturation"
-        )
-
-        if (animatedRadius <= 0.5.dp) {
+        if (radius <= 0.5.dp) {
             this
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val radiusPx = with(LocalDensity.current) { animatedRadius.toPx().coerceAtLeast(1f) }
+            val density = LocalDensity.current
+            val radiusPx = with(density) { radius.toPx().coerceIn(1f, 96f) }
+            val quantizedRadius = (radiusPx * 2f).roundToInt() / 2f
+            val quantizedSat = (saturation * 50f).roundToInt() / 50f
+            val cachedEffect = remember(quantizedRadius, quantizedSat) {
+                createChainedAcrylicRenderEffect(quantizedRadius, quantizedSat)
+            }
             this.graphicsLayer {
-                renderEffect = createChainedAcrylicRenderEffect(radiusPx, animatedSaturation)
+                renderEffect = cachedEffect
             }
         } else {
             this.blur(
-                radius = animatedRadius,
+                radius = radius,
                 edgeTreatment = BlurredEdgeTreatment.Unbounded
             )
         }
@@ -97,12 +84,16 @@ object BlurEngine {
             this
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val radiusPx = with(LocalDensity.current) { animatedBlur.toPx().coerceAtLeast(1f) }
-            this.graphicsLayer {
-                renderEffect = AndroidRenderEffect.createBlurEffect(
-                    radiusPx,
-                    radiusPx,
+            val quantizedRadius = (radiusPx).roundToInt().toFloat().coerceAtLeast(1f)
+            val cachedEffect = remember(quantizedRadius) {
+                AndroidRenderEffect.createBlurEffect(
+                    quantizedRadius,
+                    quantizedRadius,
                     Shader.TileMode.CLAMP
                 ).asComposeRenderEffect()
+            }
+            this.graphicsLayer {
+                renderEffect = cachedEffect
             }
         } else {
             this.blur(
@@ -116,7 +107,7 @@ object BlurEngine {
     private fun createChainedAcrylicRenderEffect(
         radiusPx: Float,
         saturation: Float
-    ) = run {
+    ): RenderEffect {
         val blurNode = AndroidRenderEffect.createBlurEffect(
             radiusPx,
             radiusPx,
@@ -126,6 +117,6 @@ object BlurEngine {
         val colorNode = AndroidRenderEffect.createColorFilterEffect(
             ColorMatrixColorFilter(matrix)
         )
-        AndroidRenderEffect.createChainEffect(blurNode, colorNode).asComposeRenderEffect()
+        return AndroidRenderEffect.createChainEffect(blurNode, colorNode).asComposeRenderEffect()
     }
 }

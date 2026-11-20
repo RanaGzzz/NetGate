@@ -2,19 +2,26 @@ package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,11 +37,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -43,6 +52,14 @@ import com.example.data.model.AppDestination
 import com.example.data.model.BlurEngineStyle
 import com.example.ui.theme.LocalBlurEngineConfig
 import com.example.ui.theme.LocalIsDarkTheme
+
+private data class NavTabSpec(
+    val destination: AppDestination,
+    val icon: ImageVector,
+    val contentDescription: String,
+    val testTag: String,
+    val onClick: () -> Unit
+)
 
 @Composable
 fun FloatingFrostedNavBar(
@@ -59,6 +76,7 @@ fun FloatingFrostedNavBar(
     val isDark = LocalIsDarkTheme.current
     val blurConfig = LocalBlurEngineConfig.current
     val pillShape = RoundedCornerShape(36.dp)
+    val indicatorShape = RoundedCornerShape(28.dp)
 
     val navAlpha = when (blurConfig.style) {
         BlurEngineStyle.OFF -> if (isDark) 0.94f else 0.96f
@@ -77,37 +95,54 @@ fun FloatingFrostedNavBar(
         label = "floatingNavContainerColor"
     )
 
-    val outerBorderBrush = if (isDark) {
-        Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.30f),
-                Color.White.copy(alpha = 0.08f)
+    val outlineColor = MaterialTheme.colorScheme.outline
+    val outerBorderBrush = remember(isDark, outlineColor) {
+        if (isDark) {
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.30f),
+                    Color.White.copy(alpha = 0.08f)
+                )
             )
-        )
-    } else {
-        Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.96f),
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.36f)
+        } else {
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.96f),
+                    outlineColor.copy(alpha = 0.36f)
+                )
             )
+        }
+    }
+
+    val glassSheenBrush = remember(isDark) {
+        Brush.verticalGradient(
+            colors = if (isDark) {
+                listOf(
+                    Color.White.copy(alpha = 0.14f),
+                    Color.White.copy(alpha = 0.03f),
+                    Color.Transparent
+                )
+            } else {
+                listOf(
+                    Color.White.copy(alpha = 0.68f),
+                    Color.White.copy(alpha = 0.22f),
+                    Color.Transparent
+                )
+            }
         )
     }
 
-    val glassSheenBrush = Brush.verticalGradient(
-        colors = if (isDark) {
-            listOf(
-                Color.White.copy(alpha = 0.14f),
-                Color.White.copy(alpha = 0.03f),
-                Color.Transparent
-            )
-        } else {
-            listOf(
-                Color.White.copy(alpha = 0.68f),
-                Color.White.copy(alpha = 0.22f),
-                Color.Transparent
-            )
-        }
+    val tabs = listOf(
+        NavTabSpec(AppDestination.FIREWALL, Icons.Rounded.Shield, "Firewall", "nav_tab_firewall", onSelectFirewall),
+        NavTabSpec(AppDestination.WEBSITES, Icons.Rounded.Public, "Website Blocker", "nav_tab_websites", onSelectWebsites),
+        NavTabSpec(AppDestination.DATA_USAGE, Icons.Rounded.BarChart, "Data Usage", "nav_tab_data_usage", onSelectDataUsage),
+        NavTabSpec(AppDestination.SPEED_TEST, Icons.Rounded.Speed, "Speed Test", "floating_nav_speed", onSelectSpeedTest),
+        NavTabSpec(AppDestination.DNS, Icons.Rounded.Dns, "1.1.1.1 DNS Protection", "floating_nav_dns", onSelectDnsProtection),
+        NavTabSpec(AppDestination.HOTSPOT, Icons.Rounded.WifiTethering, "Hotspot & Wi-Fi", "floating_nav_hotspot", onSelectHotspot)
     )
+    val selectedIndex = tabs.indexOfFirst { it.destination == currentDestination }.coerceAtLeast(0)
+    val activeAccent = MaterialTheme.colorScheme.primary
+    val activeSecondary = MaterialTheme.colorScheme.secondary
 
     Box(
         modifier = modifier
@@ -126,73 +161,74 @@ fun FloatingFrostedNavBar(
                 .fillMaxWidth()
                 .testTag("floating_frosted_nav_bar")
         ) {
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(glassSheenBrush)
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
             ) {
-                FloatingNavItem(
-                    icon = Icons.Rounded.Shield,
-                    contentDescription = "Firewall",
-                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.FIREWALL,
-                    onClick = onSelectFirewall,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("nav_tab_firewall")
+                val gap = 2.dp
+                val tabWidth = ((maxWidth - gap * (tabs.size - 1)) / tabs.size).coerceAtLeast(48.dp)
+                val targetIndicatorOffset = (tabWidth + gap) * selectedIndex
+                val indicatorOffset by animateDpAsState(
+                    targetValue = targetIndicatorOffset,
+                    animationSpec = spring(
+                        dampingRatio = 0.78f,
+                        stiffness = 440f
+                    ),
+                    label = "floatingNavGlideOffset"
+                )
+                val indicatorAlpha by animateFloatAsState(
+                    targetValue = if (isConnectionInfoOpen) 0.25f else 1f,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "floatingNavIndicatorAlpha"
                 )
 
-                FloatingNavItem(
-                    icon = Icons.Rounded.Public,
-                    contentDescription = "Website Blocker",
-                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.WEBSITES,
-                    onClick = onSelectWebsites,
+                // Gliding neon-glass active pill indicator
+                Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .testTag("nav_tab_websites")
+                        .offset(x = indicatorOffset)
+                        .width(tabWidth)
+                        .height(48.dp)
+                        .graphicsLayer { alpha = indicatorAlpha }
+                        .clip(indicatorShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    activeAccent.copy(alpha = if (isDark) 0.28f else 0.18f),
+                                    activeSecondary.copy(alpha = if (isDark) 0.18f else 0.11f)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    activeAccent.copy(alpha = if (isDark) 0.65f else 0.50f),
+                                    activeSecondary.copy(alpha = if (isDark) 0.35f else 0.25f)
+                                )
+                            ),
+                            shape = indicatorShape
+                        )
                 )
 
-                FloatingNavItem(
-                    icon = Icons.Rounded.BarChart,
-                    contentDescription = "Data Usage",
-                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.DATA_USAGE,
-                    onClick = onSelectDataUsage,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("nav_tab_data_usage")
-                )
-
-                FloatingNavItem(
-                    icon = Icons.Rounded.Speed,
-                    contentDescription = "Speed Test",
-                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.SPEED_TEST,
-                    onClick = onSelectSpeedTest,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("floating_nav_speed")
-                )
-
-                FloatingNavItem(
-                    icon = Icons.Rounded.Dns,
-                    contentDescription = "1.1.1.1 DNS Protection",
-                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.DNS,
-                    onClick = onSelectDnsProtection,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("floating_nav_dns")
-                )
-
-                FloatingNavItem(
-                    icon = androidx.compose.material.icons.Icons.Rounded.WifiTethering,
-                    contentDescription = "Hotspot & Wi-Fi",
-                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.HOTSPOT,
-                    onClick = onSelectHotspot,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("floating_nav_hotspot")
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    tabs.forEach { tab ->
+                        FloatingNavItem(
+                            icon = tab.icon,
+                            contentDescription = tab.contentDescription,
+                            selected = !isConnectionInfoOpen && currentDestination == tab.destination,
+                            onClick = tab.onClick,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag(tab.testTag)
+                        )
+                    }
+                }
             }
         }
     }
@@ -206,29 +242,9 @@ private fun FloatingNavItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = LocalIsDarkTheme.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
     val activeAccent = MaterialTheme.colorScheme.primary
-    val itemShape = RoundedCornerShape(28.dp)
-
-    val pillFill by animateColorAsState(
-        targetValue = if (selected) {
-            activeAccent.copy(alpha = if (isDark) 0.24f else 0.16f)
-        } else {
-            Color.Transparent
-        },
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "floatingNavFill"
-    )
-
-    val pillBorder by animateColorAsState(
-        targetValue = if (selected) {
-            activeAccent.copy(alpha = if (isDark) 0.55f else 0.45f)
-        } else {
-            Color.Transparent
-        },
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "floatingNavBorder"
-    )
 
     val iconTint by animateColorAsState(
         targetValue = if (selected) {
@@ -236,8 +252,20 @@ private fun FloatingNavItem(
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "floatingNavTint"
+    )
+    val iconScale by animateFloatAsState(
+        targetValue = when {
+            isPressed -> 0.88f
+            selected -> 1.14f
+            else -> 1.0f
+        },
+        animationSpec = spring(
+            dampingRatio = 0.65f,
+            stiffness = 520f
+        ),
+        label = "floatingNavIconScale"
     )
 
     Box(
@@ -245,10 +273,10 @@ private fun FloatingNavItem(
         modifier = modifier
             .minimumInteractiveComponentSize()
             .height(48.dp)
-            .clip(itemShape)
-            .background(pillFill, itemShape)
-            .border(1.dp, pillBorder, itemShape)
+            .clip(RoundedCornerShape(28.dp))
             .clickable(
+                interactionSource = interactionSource,
+                indication = null,
                 role = Role.Tab,
                 onClick = onClick
             )
@@ -257,7 +285,12 @@ private fun FloatingNavItem(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = iconTint,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier
+                .size(22.dp)
+                .graphicsLayer {
+                    scaleX = iconScale
+                    scaleY = iconScale
+                }
         )
     }
 }

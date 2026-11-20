@@ -2,13 +2,15 @@ package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,11 +37,13 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +67,7 @@ fun AppRuleRow(
     isSelected: Boolean,
     nowMillis: Long = System.currentTimeMillis(),
     loadIcon: suspend (String) -> ImageBitmap?,
+    cachedIcon: (String) -> ImageBitmap? = { null },
     onToggleWifi: () -> Unit,
     onToggleData: () -> Unit,
     onRowClick: () -> Unit,
@@ -70,8 +75,11 @@ fun AppRuleRow(
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
-    val iconBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = app.packageName) {
-        value = loadIcon(app.packageName)
+    val initialCached = remember(app.packageName) { cachedIcon(app.packageName) }
+    val iconBitmap by produceState<ImageBitmap?>(initialValue = initialCached, key1 = app.packageName) {
+        if (value == null) {
+            value = loadIcon(app.packageName)
+        }
     }
 
     val isBlockedRightNow = isFirewallActive && app.isBlockedOn(activeNetworkType)
@@ -82,21 +90,34 @@ fun AppRuleRow(
         activeTimer != null -> WarningAmber
         else -> null
     }
-    val glassTint by animateColorAsState(
-        targetValue = when {
-            isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.58f)
-            else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
-        },
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "rowGlassTint"
+    val glassTint = when {
+        isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.58f)
+        else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+    }
+
+    val rowInteraction = remember { MutableInteractionSource() }
+    val isRowPressed by rowInteraction.collectIsPressedAsState()
+    val rowScale by animateFloatAsState(
+        targetValue = if (isRowPressed) 0.982f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "appRowPressScale"
     )
 
     FrostedSurface(
         modifier = modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = rowScale
+                scaleY = rowScale
+            }
             .clip(RoundedCornerShape(20.dp))
             .combinedClickable(
+                interactionSource = rowInteraction,
+                indication = androidx.compose.material3.ripple(),
                 onClick = onRowClick,
                 onLongClick = onRowLongClick
             )
@@ -285,7 +306,7 @@ private fun NetworkRuleToggleButton(
         } else {
             allowedAccent.copy(alpha = 0.16f)
         },
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "toggleBg"
     )
     val contentColor by animateColorAsState(
@@ -294,7 +315,7 @@ private fun NetworkRuleToggleButton(
         } else {
             allowedAccent
         },
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "toggleFg"
     )
     val borderColor = if (isBlocked) {
@@ -303,13 +324,26 @@ private fun NetworkRuleToggleButton(
         allowedAccent.copy(alpha = 0.35f)
     }
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val buttonScale by animateFloatAsState(
+        targetValue = if (pressed) 0.90f else 1f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 550f),
+        label = "togglePressScale"
+    )
+
     Surface(
         onClick = onClick,
+        interactionSource = interactionSource,
         shape = RoundedCornerShape(12.dp),
         color = containerColor,
         border = BorderStroke(1.dp, borderColor),
         modifier = Modifier
             .minimumInteractiveComponentSize()
+            .graphicsLayer {
+                scaleX = buttonScale
+                scaleY = buttonScale
+            }
             .testTag(testTag)
     ) {
         Column(

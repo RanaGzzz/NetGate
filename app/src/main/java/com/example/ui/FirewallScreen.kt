@@ -1,11 +1,22 @@
 package com.example.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -184,30 +195,39 @@ fun FirewallScreen(
                             titleContentColor = MaterialTheme.colorScheme.onBackground
                         ),
                         title = {
-                            Column {
-                                Text(
-                                    text = when (uiState.currentDestination) {
-                                        AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_title)
-                                        AppDestination.WEBSITES -> stringResource(R.string.websites_title)
-                                        AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_title)
-                                        AppDestination.DNS -> stringResource(R.string.dns_title)
-                                        AppDestination.HOTSPOT -> stringResource(R.string.hotspot_title)
-                                        AppDestination.FIREWALL -> stringResource(R.string.app_name)
-                                    },
-                                    style = MaterialTheme.typography.headlineSmall
-                                )
-                                Text(
-                                    text = when (uiState.currentDestination) {
-                                        AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_subtitle)
-                                        AppDestination.WEBSITES -> stringResource(R.string.websites_subtitle)
-                                        AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_subtitle)
-                                        AppDestination.DNS -> stringResource(R.string.dns_subtitle)
-                                        AppDestination.HOTSPOT -> stringResource(R.string.hotspot_subtitle)
-                                        AppDestination.FIREWALL -> "Wi-Fi & Data Controller"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            AnimatedContent(
+                                targetState = uiState.currentDestination,
+                                transitionSpec = {
+                                    (fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 4 }) togetherWith
+                                        (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 4 })
+                                },
+                                label = "topbar_title_transition"
+                            ) { destination ->
+                                Column {
+                                    Text(
+                                        text = when (destination) {
+                                            AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_title)
+                                            AppDestination.WEBSITES -> stringResource(R.string.websites_title)
+                                            AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_title)
+                                            AppDestination.DNS -> stringResource(R.string.dns_title)
+                                            AppDestination.HOTSPOT -> stringResource(R.string.hotspot_title)
+                                            AppDestination.FIREWALL -> stringResource(R.string.app_name)
+                                        },
+                                        style = MaterialTheme.typography.headlineSmall
+                                    )
+                                    Text(
+                                        text = when (destination) {
+                                            AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_subtitle)
+                                            AppDestination.WEBSITES -> stringResource(R.string.websites_subtitle)
+                                            AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_subtitle)
+                                            AppDestination.DNS -> stringResource(R.string.dns_subtitle)
+                                            AppDestination.HOTSPOT -> stringResource(R.string.hotspot_subtitle)
+                                            AppDestination.FIREWALL -> "Wi-Fi & Data Controller"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         },
                         actions = {
@@ -396,249 +416,292 @@ fun FirewallScreen(
                     }
 
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        if (uiState.currentDestination == AppDestination.DATA_USAGE) {
-                            DataUsageContent(
-                                state = uiState.dataUsageState,
-                                liveTelemetry = uiState.liveTelemetry,
-                                isFirewallActive = isFirewallActive,
-                                isDeepMonitorEnabled = uiState.preferences.isDeepMonitorEnabled,
-                                isHttpsProxyActive = uiState.vpnRuntimeState.isHttpsProxyActive,
-                                isStatusBarSpeedEnabled = uiState.preferences.isStatusBarSpeedEnabled,
-                                statusBarSpeedStyle = uiState.preferences.statusBarSpeedStyle,
-                                showStatusBarDailyUsage = uiState.preferences.showStatusBarDailyUsage,
-                                loadIcon = viewModel::getAppIconBitmap,
-                                onSelectSubTab = viewModel::selectDataUsageSubTab,
-                                onTimeRangeChange = viewModel::setUsageTimeRange,
-                                onChartModeChange = viewModel::setUsageChartMode,
-                                onFilterCategoryChange = viewModel::setUsageFilterCategory,
-                                onRefreshUsage = viewModel::refreshDataUsage,
-                                onClearHistory = viewModel::clearTrafficHistory,
-                                onInspectApp = viewModel::openAppDetails,
-                                onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
-                                onSelectStatusBarStyle = viewModel::setStatusBarSpeedStyle,
-                                onToggleShowDailyUsage = viewModel::setShowStatusBarDailyUsage,
-                                onResetLiveSession = viewModel::resetLiveSessionStats,
-                                onRequestEnableFirewall = onRequestEnableFirewall,
-                                onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
-                                onSetShowLiveSitesFeed = viewModel::setShowLiveSitesFeed,
-                                onSiteFilterChange = viewModel::setSiteTrafficFilter,
-                                onSiteSearchQueryChange = viewModel::setSiteSearchQuery,
-                                onToggleCountryFilter = viewModel::toggleCountryFilter,
-                                onClearConnectionHistory = viewModel::clearConnectionHistory,
-                                onQuickBlockSite = viewModel::quickBlockSiteFromMonitor,
-                                onQuickAllowSite = viewModel::quickAllowSiteFromMonitor,
-                                onRunSecurityAudit = viewModel::runDeviceSecurityAudit,
-                                onOpenFlaggedSitesFromAudit = viewModel::openFlaggedSitesFromAudit
-                            )
-                        } else if (uiState.currentDestination == AppDestination.WEBSITES) {
-                            WebsiteBlockerContent(
-                                state = uiState.websiteBlockerState,
-                                allManagedApps = uiState.allManagedApps,
-                                isFirewallActive = isFirewallActive,
-                                connectionDetails = uiState.connectionDetails,
-                                loadIcon = viewModel::getAppIconBitmap,
-                                onSelectFilterMode = viewModel::setWebsiteFilterMode,
-                                onAddWebsiteRule = viewModel::addWebsiteRule,
-                                onToggleWebsiteRuleEnabled = viewModel::toggleWebsiteRuleEnabled,
-                                onDeleteWebsiteRule = viewModel::deleteWebsiteRule,
-                                onClearWebsiteRules = viewModel::clearWebsiteRules,
-                                onToggleBypassApp = viewModel::toggleWebsiteBypassApp,
-                                onClearBypassApps = viewModel::clearWebsiteBypassApps,
-                                onToggleAdBlocker = viewModel::setAdBlockerEnabled,
-                                onToggleAdFilterList = viewModel::toggleAdFilterList,
-                                onSyncAdFilterLists = viewModel::syncAdFilterLists,
-                                onToggleEssentialPassthrough = viewModel::setEssentialPassthroughEnabled,
-                                onToggleUseDohUpstream = viewModel::setUseDohUpstream,
-                                onToggleHttpsProxy = viewModel::setHttpsProxyEnabled,
-                                onSelectProxyPort = viewModel::setHttpsProxyPort,
-                                onToggleProxyStripTracking = viewModel::setProxyStripTrackingParams,
-                                onToggleSafeSearch = viewModel::setSafeSearchEnabled,
-                                onSelectYoutubeMode = viewModel::setYoutubeRestrictedMode,
-                                onToggleYoutubeAdBlock = viewModel::setYoutubeAdBlockEnabled,
-                                onSelectSniPreset = viewModel::selectSniProxyPreset,
-                                onSaveCustomSniProxy = viewModel::saveCustomSniProxy,
-                                onAddCustomAdFilterList = viewModel::addCustomAdFilterList,
-                                onDeleteCustomAdFilterList = viewModel::deleteCustomAdFilterList,
-                                onCopiedProxyEndpoint = viewModel::notifyCopiedDnsHostname,
-                                onClearDnsLogs = viewModel::clearDnsLogs,
-                                onRequestEnableFirewall = onRequestEnableFirewall,
-                                onOpenDnsProtection = viewModel::openDnsProtection
-                            )
-                        } else if (uiState.currentDestination == AppDestination.SPEED_TEST) {
-                            val activeNetLabel = when (uiState.effectiveNetworkType) {
-                                ActiveNetworkType.WIFI -> "Wi-Fi"
-                                ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
-                                ActiveNetworkType.OTHER -> "Ethernet / Other"
-                                ActiveNetworkType.NONE -> "Offline"
-                            }
-                            SpeedTestContent(
-                                state = uiState.speedTestState,
-                                activeNetworkLabel = activeNetLabel,
-                                onStartTest = viewModel::startSpeedTest,
-                                onStopTest = viewModel::stopSpeedTest,
-                                onRunVideoTest = viewModel::startVideoPlaybackTest
-                            )
-                        } else if (uiState.currentDestination == AppDestination.DNS) {
-                            DnsProtectionContent(
-                                connectionDetails = uiState.connectionDetails,
-                                preferences = uiState.preferences,
-                                isFirewallActive = isFirewallActive,
-                                vpnRuntimeState = uiState.vpnRuntimeState,
-                                probeState = uiState.dnsProbeState,
-                                leakTestState = uiState.dnsLeakTestState,
-                                dnsCheckState = uiState.dnsCheckState,
-                                onSelectUpstreamDns = viewModel::selectUpstreamDns,
-                                onSaveCustomDns = viewModel::saveCustomDnsEndpoints,
-                                onToggleDohUpstream = viewModel::setUseDohUpstream,
-                                onRunDnsCheck = viewModel::runDnsCheck,
-                                onRunDnsLeakTest = viewModel::runDnsLeakTest,
-                                onTestCloudflareDoh = viewModel::testCloudflareDoh,
-                                onRequestEnableFirewall = onRequestEnableFirewall,
-                                onCopiedHostname = viewModel::notifyCopiedDnsHostname
-                            )
-                        } else if (uiState.currentDestination == AppDestination.HOTSPOT) {
-                            HotspotAndWifiContent(
-                                preferences = uiState.preferences,
-                                hotspotState = uiState.hotspotProxyState,
-                                connectionDetails = uiState.connectionDetails,
-                                idleStatus = uiState.wifiIdleStatus,
-                                nowMillis = uiState.nowMillis,
-                                onToggleHotspotProxy = viewModel::setHotspotProxyEnabled,
-                                onSelectHotspotPort = viewModel::setHotspotProxyPort,
-                                onToggleApplyNetGateFilters = viewModel::setHotspotApplyNetGateFilters,
-                                onToggleClientBlocked = viewModel::toggleHotspotClientBlocked,
-                                onSetClientDataCap = viewModel::setHotspotClientDataCap,
-                                onSetClientLabel = viewModel::setHotspotClientLabel,
-                                onResetClientStats = viewModel::resetHotspotClientStats,
-                                onClearAllHotspotStats = viewModel::clearAllHotspotStats,
-                                onRefreshHotspot = viewModel::refreshHotspotEnvironment,
-                                onCopiedEndpoint = viewModel::notifyCopiedHotspotEndpoint,
-                                onToggleGlobalWifiLock = { locked ->
-                                    viewModel.setGlobalWifiBlocked(locked)
-                                    if (locked && VpnService.prepare(context) != null) {
-                                        onRequestEnableFirewall()
-                                    }
-                                },
-                                onScheduleWifiTimer = { minutes ->
-                                    viewModel.scheduleGlobalWifiTimer(minutes)
-                                    if (VpnService.prepare(context) != null) {
-                                        onRequestEnableFirewall()
-                                    }
-                                },
-                                onCancelWifiTimer = viewModel::cancelGlobalWifiTimer,
-                                onToggleAutoIdleLock = { enabled ->
-                                    viewModel.setAutoBlockWifiOnIdle(enabled)
-                                    if (enabled && VpnService.prepare(context) != null) {
-                                        onRequestEnableFirewall()
-                                    }
-                                },
-                                onSelectIdleMinutes = viewModel::setAutoBlockWifiIdleMinutes,
-                                onToggleOpenPanelNotify = viewModel::setAutoBlockWifiOpenPanelNotify
-                            )
-                        } else if (isWideLayout) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(20.dp)
-                            ) {
-                            Column(
-                                modifier = Modifier
-                                    .width(340.dp)
-                                    .fillMaxHeight()
-                            ) {
-                                FirewallHeaderCard(
-                                    isFirewallActive = isFirewallActive,
-                                    connectionDetails = uiState.connectionDetails,
-                                    totalAppsCount = uiState.allManagedApps.size,
-                                    wifiBlockedCount = uiState.wifiBlockedCount,
-                                    dataBlockedCount = uiState.dataBlockedCount,
-                                    activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
-                                    isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
-                                    blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
-                                    liveTelemetry = uiState.liveTelemetry,
-                                    isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
-                                    isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
-                                    onToggleFirewall = { enable ->
-                                        if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
-                                    },
-                                    onOpenConnectionInfo = viewModel::openConnectionInfo,
-                                    onOpenDnsProtection = viewModel::openDnsProtection,
-                                    onOpenSpeedTest = viewModel::openSpeedTest,
-                                    onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
-                                    onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
-                                    onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
+                        AnimatedContent(
+                            targetState = uiState.currentDestination,
+                            transitionSpec = {
+                                val forward = AppDestination.entries.indexOf(targetState) >=
+                                    AppDestination.entries.indexOf(initialState)
+                                val enter = slideInHorizontally(
+                                    animationSpec = tween(250, easing = FastOutSlowInEasing),
+                                    initialOffsetX = { fullWidth -> if (forward) fullWidth / 6 else -fullWidth / 6 }
+                                ) + fadeIn(
+                                    animationSpec = tween(210, easing = FastOutSlowInEasing)
+                                ) + scaleIn(
+                                    initialScale = 0.975f,
+                                    animationSpec = tween(250, easing = FastOutSlowInEasing)
                                 )
-                                Spacer(modifier = Modifier.height(14.dp))
-                                SearchAndFiltersBlock(
-                                    uiState = uiState,
-                                    onSearchQueryChange = viewModel::onSearchQueryChange,
-                                    onFilterModeChange = viewModel::onFilterModeChange
+                                val exit = slideOutHorizontally(
+                                    animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { fullWidth -> if (forward) -fullWidth / 7 else fullWidth / 7 }
+                                ) + fadeOut(
+                                    animationSpec = tween(160, easing = FastOutSlowInEasing)
+                                ) + scaleOut(
+                                    targetScale = 0.985f,
+                                    animationSpec = tween(200, easing = FastOutSlowInEasing)
                                 )
-                            }
+                                (enter togetherWith exit).using(SizeTransform(clip = false))
+                            },
+                            label = "destination_shared_axis",
+                            modifier = Modifier.fillMaxSize()
+                        ) { destination ->
+                            when (destination) {
+                                AppDestination.DATA_USAGE -> {
+                                    DataUsageContent(
+                                        state = uiState.dataUsageState,
+                                        liveTelemetry = uiState.liveTelemetry,
+                                        isFirewallActive = isFirewallActive,
+                                        isDeepMonitorEnabled = uiState.preferences.isDeepMonitorEnabled,
+                                        isHttpsProxyActive = uiState.vpnRuntimeState.isHttpsProxyActive,
+                                        isStatusBarSpeedEnabled = uiState.preferences.isStatusBarSpeedEnabled,
+                                        statusBarSpeedStyle = uiState.preferences.statusBarSpeedStyle,
+                                        showStatusBarDailyUsage = uiState.preferences.showStatusBarDailyUsage,
+                                        loadIcon = viewModel::getAppIconBitmap,
+                                        onSelectSubTab = viewModel::selectDataUsageSubTab,
+                                        onTimeRangeChange = viewModel::setUsageTimeRange,
+                                        onChartModeChange = viewModel::setUsageChartMode,
+                                        onFilterCategoryChange = viewModel::setUsageFilterCategory,
+                                        onRefreshUsage = viewModel::refreshDataUsage,
+                                        onClearHistory = viewModel::clearTrafficHistory,
+                                        onInspectApp = viewModel::openAppDetails,
+                                        onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
+                                        onSelectStatusBarStyle = viewModel::setStatusBarSpeedStyle,
+                                        onToggleShowDailyUsage = viewModel::setShowStatusBarDailyUsage,
+                                        onResetLiveSession = viewModel::resetLiveSessionStats,
+                                        onRequestEnableFirewall = onRequestEnableFirewall,
+                                        onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
+                                        onSetShowLiveSitesFeed = viewModel::setShowLiveSitesFeed,
+                                        onSiteFilterChange = viewModel::setSiteTrafficFilter,
+                                        onSiteSearchQueryChange = viewModel::setSiteSearchQuery,
+                                        onToggleCountryFilter = viewModel::toggleCountryFilter,
+                                        onClearConnectionHistory = viewModel::clearConnectionHistory,
+                                        onQuickBlockSite = viewModel::quickBlockSiteFromMonitor,
+                                        onQuickAllowSite = viewModel::quickAllowSiteFromMonitor,
+                                        onRunSecurityAudit = viewModel::runDeviceSecurityAudit,
+                                        onOpenFlaggedSitesFromAudit = viewModel::openFlaggedSitesFromAudit
+                                    )
+                                }
 
-                            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                AppsCollectionContent(
-                                    uiState = uiState,
-                                    isGrid = true,
-                                    viewModel = viewModel,
-                                    bottomPadding = if (uiState.isSelectionMode) 168.dp else 24.dp
-                                )
-                            }
-                        }
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .widthIn(max = 680.dp)
-                                    .align(Alignment.TopCenter)
-                            ) {
-                                AppsCollectionContent(
-                                    uiState = uiState,
-                                    isGrid = false,
-                                    viewModel = viewModel,
-                                    bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 96.dp,
-                                    headerContent = {
-                                        Column(
+                                AppDestination.WEBSITES -> {
+                                    WebsiteBlockerContent(
+                                        state = uiState.websiteBlockerState,
+                                        allManagedApps = uiState.allManagedApps,
+                                        isFirewallActive = isFirewallActive,
+                                        connectionDetails = uiState.connectionDetails,
+                                        loadIcon = viewModel::getAppIconBitmap,
+                                        onSelectFilterMode = viewModel::setWebsiteFilterMode,
+                                        onAddWebsiteRule = viewModel::addWebsiteRule,
+                                        onToggleWebsiteRuleEnabled = viewModel::toggleWebsiteRuleEnabled,
+                                        onDeleteWebsiteRule = viewModel::deleteWebsiteRule,
+                                        onClearWebsiteRules = viewModel::clearWebsiteRules,
+                                        onToggleBypassApp = viewModel::toggleWebsiteBypassApp,
+                                        onClearBypassApps = viewModel::clearWebsiteBypassApps,
+                                        onToggleAdBlocker = viewModel::setAdBlockerEnabled,
+                                        onToggleAdFilterList = viewModel::toggleAdFilterList,
+                                        onSyncAdFilterLists = viewModel::syncAdFilterLists,
+                                        onToggleEssentialPassthrough = viewModel::setEssentialPassthroughEnabled,
+                                        onToggleUseDohUpstream = viewModel::setUseDohUpstream,
+                                        onToggleHttpsProxy = viewModel::setHttpsProxyEnabled,
+                                        onSelectProxyPort = viewModel::setHttpsProxyPort,
+                                        onToggleProxyStripTracking = viewModel::setProxyStripTrackingParams,
+                                        onToggleSafeSearch = viewModel::setSafeSearchEnabled,
+                                        onSelectYoutubeMode = viewModel::setYoutubeRestrictedMode,
+                                        onToggleYoutubeAdBlock = viewModel::setYoutubeAdBlockEnabled,
+                                        onSelectSniPreset = viewModel::selectSniProxyPreset,
+                                        onSaveCustomSniProxy = viewModel::saveCustomSniProxy,
+                                        onAddCustomAdFilterList = viewModel::addCustomAdFilterList,
+                                        onDeleteCustomAdFilterList = viewModel::deleteCustomAdFilterList,
+                                        onCopiedProxyEndpoint = viewModel::notifyCopiedDnsHostname,
+                                        onClearDnsLogs = viewModel::clearDnsLogs,
+                                        onRequestEnableFirewall = onRequestEnableFirewall,
+                                        onOpenDnsProtection = viewModel::openDnsProtection
+                                    )
+                                }
+
+                                AppDestination.SPEED_TEST -> {
+                                    val activeNetLabel = when (uiState.effectiveNetworkType) {
+                                        ActiveNetworkType.WIFI -> "Wi-Fi"
+                                        ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
+                                        ActiveNetworkType.OTHER -> "Ethernet / Other"
+                                        ActiveNetworkType.NONE -> "Offline"
+                                    }
+                                    SpeedTestContent(
+                                        state = uiState.speedTestState,
+                                        activeNetworkLabel = activeNetLabel,
+                                        onStartTest = viewModel::startSpeedTest,
+                                        onStopTest = viewModel::stopSpeedTest,
+                                        onRunVideoTest = viewModel::startVideoPlaybackTest
+                                    )
+                                }
+
+                                AppDestination.DNS -> {
+                                    DnsProtectionContent(
+                                        connectionDetails = uiState.connectionDetails,
+                                        preferences = uiState.preferences,
+                                        isFirewallActive = isFirewallActive,
+                                        vpnRuntimeState = uiState.vpnRuntimeState,
+                                        probeState = uiState.dnsProbeState,
+                                        leakTestState = uiState.dnsLeakTestState,
+                                        dnsCheckState = uiState.dnsCheckState,
+                                        onSelectUpstreamDns = viewModel::selectUpstreamDns,
+                                        onSaveCustomDns = viewModel::saveCustomDnsEndpoints,
+                                        onToggleDohUpstream = viewModel::setUseDohUpstream,
+                                        onRunDnsCheck = viewModel::runDnsCheck,
+                                        onRunDnsLeakTest = viewModel::runDnsLeakTest,
+                                        onTestCloudflareDoh = viewModel::testCloudflareDoh,
+                                        onRequestEnableFirewall = onRequestEnableFirewall,
+                                        onCopiedHostname = viewModel::notifyCopiedDnsHostname
+                                    )
+                                }
+
+                                AppDestination.HOTSPOT -> {
+                                    HotspotAndWifiContent(
+                                        preferences = uiState.preferences,
+                                        hotspotState = uiState.hotspotProxyState,
+                                        connectionDetails = uiState.connectionDetails,
+                                        idleStatus = uiState.wifiIdleStatus,
+                                        nowMillis = uiState.nowMillis,
+                                        onToggleHotspotProxy = viewModel::setHotspotProxyEnabled,
+                                        onSelectHotspotPort = viewModel::setHotspotProxyPort,
+                                        onToggleApplyNetGateFilters = viewModel::setHotspotApplyNetGateFilters,
+                                        onToggleClientBlocked = viewModel::toggleHotspotClientBlocked,
+                                        onSetClientDataCap = viewModel::setHotspotClientDataCap,
+                                        onSetClientLabel = viewModel::setHotspotClientLabel,
+                                        onResetClientStats = viewModel::resetHotspotClientStats,
+                                        onClearAllHotspotStats = viewModel::clearAllHotspotStats,
+                                        onRefreshHotspot = viewModel::refreshHotspotEnvironment,
+                                        onCopiedEndpoint = viewModel::notifyCopiedHotspotEndpoint,
+                                        onToggleGlobalWifiLock = { locked ->
+                                            viewModel.setGlobalWifiBlocked(locked)
+                                            if (locked && VpnService.prepare(context) != null) {
+                                                onRequestEnableFirewall()
+                                            }
+                                        },
+                                        onScheduleWifiTimer = { minutes ->
+                                            viewModel.scheduleGlobalWifiTimer(minutes)
+                                            if (VpnService.prepare(context) != null) {
+                                                onRequestEnableFirewall()
+                                            }
+                                        },
+                                        onCancelWifiTimer = viewModel::cancelGlobalWifiTimer,
+                                        onToggleAutoIdleLock = { enabled ->
+                                            viewModel.setAutoBlockWifiOnIdle(enabled)
+                                            if (enabled && VpnService.prepare(context) != null) {
+                                                onRequestEnableFirewall()
+                                            }
+                                        },
+                                        onSelectIdleMinutes = viewModel::setAutoBlockWifiIdleMinutes,
+                                        onToggleOpenPanelNotify = viewModel::setAutoBlockWifiOpenPanelNotify
+                                    )
+                                }
+
+                                AppDestination.FIREWALL -> {
+                                    if (isWideLayout) {
+                                        Row(
                                             modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(bottom = 8.dp)
+                                                .fillMaxSize()
+                                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(20.dp)
                                         ) {
-                                            FirewallHeaderCard(
-                                                isFirewallActive = isFirewallActive,
-                                                connectionDetails = uiState.connectionDetails,
-                                                totalAppsCount = uiState.allManagedApps.size,
-                                                wifiBlockedCount = uiState.wifiBlockedCount,
-                                                dataBlockedCount = uiState.dataBlockedCount,
-                                                activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
-                                                isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
-                                                blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
-                                                liveTelemetry = uiState.liveTelemetry,
-                                                isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
-                                                isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
-                                                onToggleFirewall = { enable ->
-                                                    if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
-                                                },
-                                                onOpenConnectionInfo = viewModel::openConnectionInfo,
-                                                onOpenDnsProtection = viewModel::openDnsProtection,
-                                                onOpenSpeedTest = viewModel::openSpeedTest,
-                                                onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
-                                                onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
-                                                onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
-                                            )
-                                            Spacer(modifier = Modifier.height(14.dp))
-                                            SearchAndFiltersBlock(
-                                                uiState = uiState,
-                                                onSearchQueryChange = viewModel::onSearchQueryChange,
-                                                onFilterModeChange = viewModel::onFilterModeChange
-                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .width(340.dp)
+                                                    .fillMaxHeight()
+                                            ) {
+                                                FirewallHeaderCard(
+                                                    isFirewallActive = isFirewallActive,
+                                                    connectionDetails = uiState.connectionDetails,
+                                                    totalAppsCount = uiState.allManagedApps.size,
+                                                    wifiBlockedCount = uiState.wifiBlockedCount,
+                                                    dataBlockedCount = uiState.dataBlockedCount,
+                                                    activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
+                                                    isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
+                                                    blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
+                                                    liveTelemetry = uiState.liveTelemetry,
+                                                    isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
+                                                    isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
+                                                    onToggleFirewall = { enable ->
+                                                        if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
+                                                    },
+                                                    onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                                    onOpenDnsProtection = viewModel::openDnsProtection,
+                                                    onOpenSpeedTest = viewModel::openSpeedTest,
+                                                    onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                                    onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                                    onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
+                                                )
+                                                Spacer(modifier = Modifier.height(14.dp))
+                                                SearchAndFiltersBlock(
+                                                    uiState = uiState,
+                                                    onSearchQueryChange = viewModel::onSearchQueryChange,
+                                                    onFilterModeChange = viewModel::onFilterModeChange
+                                                )
+                                            }
+
+                                            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                                AppsCollectionContent(
+                                                    uiState = uiState,
+                                                    isGrid = true,
+                                                    viewModel = viewModel,
+                                                    bottomPadding = if (uiState.isSelectionMode) 168.dp else 24.dp
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .widthIn(max = 680.dp)
+                                                    .align(Alignment.TopCenter)
+                                            ) {
+                                                AppsCollectionContent(
+                                                    uiState = uiState,
+                                                    isGrid = false,
+                                                    viewModel = viewModel,
+                                                    bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 96.dp,
+                                                    headerContent = {
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(bottom = 8.dp)
+                                                        ) {
+                                                            FirewallHeaderCard(
+                                                                isFirewallActive = isFirewallActive,
+                                                                connectionDetails = uiState.connectionDetails,
+                                                                totalAppsCount = uiState.allManagedApps.size,
+                                                                wifiBlockedCount = uiState.wifiBlockedCount,
+                                                                dataBlockedCount = uiState.dataBlockedCount,
+                                                                activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
+                                                                isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
+                                                                blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
+                                                                liveTelemetry = uiState.liveTelemetry,
+                                                                isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
+                                                                isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
+                                                                onToggleFirewall = { enable ->
+                                                                    if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
+                                                                },
+                                                                onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                                                onOpenDnsProtection = viewModel::openDnsProtection,
+                                                                onOpenSpeedTest = viewModel::openSpeedTest,
+                                                                onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                                                onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                                                onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
+                                                            )
+                                                            Spacer(modifier = Modifier.height(14.dp))
+                                                            SearchAndFiltersBlock(
+                                                                uiState = uiState,
+                                                                onSearchQueryChange = viewModel::onSearchQueryChange,
+                                                                onFilterModeChange = viewModel::onFilterModeChange
+                                                            )
+                                                        }
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
-                                )
+                                }
                             }
                         }
-                    }
 
                     androidx.compose.animation.AnimatedVisibility(
                         visible = !isWideLayout && !uiState.isSelectionMode,
@@ -920,7 +983,8 @@ private fun AppsCollectionContent(
             ) {
                 items(
                     items = uiState.filteredApps,
-                    key = { it.packageName }
+                    key = { it.packageName },
+                    contentType = { "app_rule_row" }
                 ) { app ->
                     AppRuleRow(
                         app = app,
@@ -930,6 +994,7 @@ private fun AppsCollectionContent(
                         isSelected = app.packageName in uiState.selectedPackages,
                         nowMillis = uiState.nowMillis,
                         loadIcon = viewModel::getAppIconBitmap,
+                        cachedIcon = viewModel::getCachedAppIconBitmap,
                         onToggleWifi = { viewModel.toggleWifiBlock(app) },
                         onToggleData = { viewModel.toggleDataBlock(app) },
                         onRowClick = {
@@ -945,7 +1010,12 @@ private fun AppsCollectionContent(
                             } else {
                                 viewModel.togglePackageSelected(app.packageName)
                             }
-                        }
+                        },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = tween(180),
+                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            fadeOutSpec = tween(140)
+                        )
                     )
                 }
             }
@@ -964,13 +1034,13 @@ private fun AppsCollectionContent(
                 .testTag("apps_list")
         ) {
             if (headerContent != null) {
-                item(key = "header_controls") {
+                item(key = "header_controls", contentType = "header") {
                     headerContent()
                 }
             }
 
             if (uiState.filteredApps.isEmpty()) {
-                item(key = "empty_placeholder") {
+                item(key = "empty_placeholder", contentType = "empty") {
                     EmptyAppsPlaceholder(
                         hasFilters = uiState.searchQuery.isNotEmpty() || uiState.filterMode != AppFilterMode.ALL,
                         onResetFilters = {
@@ -985,7 +1055,8 @@ private fun AppsCollectionContent(
             } else {
                 items(
                     items = uiState.filteredApps,
-                    key = { it.packageName }
+                    key = { it.packageName },
+                    contentType = { "app_rule_row" }
                 ) { app ->
                     AppRuleRow(
                         app = app,
@@ -995,6 +1066,7 @@ private fun AppsCollectionContent(
                         isSelected = app.packageName in uiState.selectedPackages,
                         nowMillis = uiState.nowMillis,
                         loadIcon = viewModel::getAppIconBitmap,
+                        cachedIcon = viewModel::getCachedAppIconBitmap,
                         onToggleWifi = { viewModel.toggleWifiBlock(app) },
                         onToggleData = { viewModel.toggleDataBlock(app) },
                         onRowClick = {
@@ -1010,7 +1082,12 @@ private fun AppsCollectionContent(
                             } else {
                                 viewModel.togglePackageSelected(app.packageName)
                             }
-                        }
+                        },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = tween(180),
+                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            fadeOutSpec = tween(140)
+                        )
                     )
                 }
             }

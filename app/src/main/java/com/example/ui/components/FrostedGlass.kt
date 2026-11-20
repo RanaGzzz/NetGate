@@ -5,7 +5,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -20,21 +19,29 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BlurEngineStyle
-import com.example.ui.theme.BlurEngine.blurEngineBackdrop
 import com.example.ui.theme.LocalBlurEngineConfig
 import com.example.ui.theme.LocalIsDarkTheme
 import kotlin.math.cos
 import kotlin.math.sin
 
+/**
+ * Zero-recomposition futuristic ambient aurora backdrop.
+ * Animated phase and color states are read inside DrawScope so scrolling lists and
+ * child Composables never recompose during background motion.
+ */
 @Composable
 fun FrostedBackdrop(
     isFirewallActive: Boolean,
@@ -48,32 +55,32 @@ fun FrostedBackdrop(
     val secondary = MaterialTheme.colorScheme.secondary
     val tertiary = MaterialTheme.colorScheme.tertiary
 
-    val primaryGlow by animateColorAsState(
+    val primaryGlowState = animateColorAsState(
         targetValue = if (isFirewallActive) primary else secondary,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "backdropPrimaryGlow"
     )
 
-    val phase = if (blurConfig.animateMotion && blurConfig.style != BlurEngineStyle.OFF) {
-        val infiniteTransition = rememberInfiniteTransition(label = "blurEngineOrbDrift")
+    val phaseState: State<Float> = if (blurConfig.animateMotion && blurConfig.style != BlurEngineStyle.OFF) {
+        val infiniteTransition = rememberInfiniteTransition(label = "cyberAuroraDrift")
         infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2.0 * Math.PI).toFloat(),
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 16_000, easing = LinearEasing),
+                animation = tween(durationMillis = 18_000, easing = LinearEasing),
                 repeatMode = RepeatMode.Restart
             ),
             label = "orbPhase"
-        ).value
+        )
     } else {
-        0f
+        remember { mutableFloatStateOf(0f) }
     }
 
     val intensityAlpha = when (blurConfig.style) {
-        BlurEngineStyle.OFF -> 0.14f
-        BlurEngineStyle.SOFT_GLASS -> 0.24f
-        BlurEngineStyle.ACRYLIC_PRO -> 0.34f
-        BlurEngineStyle.ULTRA_FROST -> 0.44f
+        BlurEngineStyle.OFF -> 0.12f
+        BlurEngineStyle.SOFT_GLASS -> 0.22f
+        BlurEngineStyle.ACRYLIC_PRO -> 0.30f
+        BlurEngineStyle.ULTRA_FROST -> 0.38f
     }
 
     Box(
@@ -81,70 +88,116 @@ fun FrostedBackdrop(
             .fillMaxSize()
             .background(baseColor)
     ) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .blurEngineBackdrop(
-                    radius = blurConfig.style.backdropRadiusDp.dp,
-                    saturation = blurConfig.style.saturationBoost
-                )
-        ) {
-            val driftX = sin(phase.toDouble()).toFloat() * size.width * 0.055f
-            val driftY = cos(phase.toDouble()).toFloat() * size.height * 0.045f
-
-            val topLeftCenter = Offset(
-                x = size.width * 0.16f + driftX,
-                y = size.height * 0.14f + driftY
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        primaryGlow.copy(alpha = if (isDark) intensityAlpha else intensityAlpha * 0.85f),
-                        Color.Transparent
-                    ),
-                    center = topLeftCenter,
-                    radius = size.maxDimension * 0.58f
-                ),
-                radius = size.maxDimension * 0.58f,
-                center = topLeftCenter
-            )
-
-            val rightCenter = Offset(
-                x = size.width * 0.88f - driftX * 0.9f,
-                y = size.height * 0.36f + driftY * 1.1f
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        secondary.copy(alpha = if (isDark) intensityAlpha * 0.86f else intensityAlpha * 0.72f),
-                        Color.Transparent
-                    ),
-                    center = rightCenter,
-                    radius = size.maxDimension * 0.50f
-                ),
-                radius = size.maxDimension * 0.50f,
-                center = rightCenter
-            )
-
-            val bottomCenter = Offset(
-                x = size.width * 0.28f - driftY * 0.8f,
-                y = size.height * 0.84f - driftX * 0.8f
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        tertiary.copy(alpha = if (isDark) intensityAlpha * 0.88f else intensityAlpha * 0.75f),
-                        Color.Transparent
-                    ),
-                    center = bottomCenter,
-                    radius = size.maxDimension * 0.56f
-                ),
-                radius = size.maxDimension * 0.56f,
-                center = bottomCenter
-            )
-        }
+        AuroraBackdropCanvas(
+            phaseState = phaseState,
+            primaryGlowState = primaryGlowState,
+            secondary = secondary,
+            tertiary = tertiary,
+            intensityAlpha = intensityAlpha,
+            isDark = isDark,
+            showCyberRings = isFirewallActive && blurConfig.style != BlurEngineStyle.OFF
+        )
 
         content()
+    }
+}
+
+@Composable
+private fun AuroraBackdropCanvas(
+    phaseState: State<Float>,
+    primaryGlowState: State<Color>,
+    secondary: Color,
+    tertiary: Color,
+    intensityAlpha: Float,
+    isDark: Boolean,
+    showCyberRings: Boolean
+) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        // Read animated states strictly inside DrawScope — zero recomposition overhead
+        val phase = phaseState.value.toDouble()
+        val primaryGlow = primaryGlowState.value
+
+        val driftX = sin(phase).toFloat() * size.width * 0.06f
+        val driftY = cos(phase).toFloat() * size.height * 0.05f
+        val scaleBoost = if (isDark) 1.0f else 0.82f
+
+        val topLeftCenter = Offset(
+            x = size.width * 0.18f + driftX,
+            y = size.height * 0.14f + driftY
+        )
+        val topLeftAlpha = intensityAlpha * scaleBoost
+        drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.0f to primaryGlow.copy(alpha = topLeftAlpha),
+                    0.45f to primaryGlow.copy(alpha = topLeftAlpha * 0.42f),
+                    0.82f to primaryGlow.copy(alpha = topLeftAlpha * 0.08f),
+                    1.0f to Color.Transparent
+                ),
+                center = topLeftCenter,
+                radius = size.maxDimension * 0.62f
+            ),
+            radius = size.maxDimension * 0.62f,
+            center = topLeftCenter
+        )
+
+        val rightCenter = Offset(
+            x = size.width * 0.88f - driftX * 0.9f,
+            y = size.height * 0.36f + driftY * 1.1f
+        )
+        val rightAlpha = intensityAlpha * 0.82f * scaleBoost
+        drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.0f to secondary.copy(alpha = rightAlpha),
+                    0.48f to secondary.copy(alpha = rightAlpha * 0.38f),
+                    0.85f to secondary.copy(alpha = rightAlpha * 0.07f),
+                    1.0f to Color.Transparent
+                ),
+                center = rightCenter,
+                radius = size.maxDimension * 0.54f
+            ),
+            radius = size.maxDimension * 0.54f,
+            center = rightCenter
+        )
+
+        val bottomCenter = Offset(
+            x = size.width * 0.28f - driftY * 0.8f,
+            y = size.height * 0.84f - driftX * 0.8f
+        )
+        val bottomAlpha = intensityAlpha * 0.84f * scaleBoost
+        drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.0f to tertiary.copy(alpha = bottomAlpha),
+                    0.46f to tertiary.copy(alpha = bottomAlpha * 0.40f),
+                    0.84f to tertiary.copy(alpha = bottomAlpha * 0.08f),
+                    1.0f to Color.Transparent
+                ),
+                center = bottomCenter,
+                radius = size.maxDimension * 0.58f
+            ),
+            radius = size.maxDimension * 0.58f,
+            center = bottomCenter
+        )
+
+        if (showCyberRings) {
+            val ringCenter = Offset(size.width * 0.86f, size.height * 0.11f)
+            val pulse = ((sin(phase * 2.0) + 1.0) * 0.5).toFloat()
+            val ringRadius = size.minDimension * (0.20f + 0.08f * pulse)
+            drawCircle(
+                color = primaryGlow.copy(alpha = (0.09f - 0.05f * pulse).coerceAtLeast(0.01f)),
+                radius = ringRadius,
+                center = ringCenter,
+                style = Stroke(width = 1.2.dp.toPx())
+            )
+            drawCircle(
+                color = secondary.copy(alpha = 0.045f),
+                radius = size.minDimension * 0.34f,
+                center = ringCenter,
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
     }
 }
 
@@ -164,22 +217,12 @@ fun FrostedSurface(
     } else {
         blurConfig.style.tintAlphaLight
     }
-    val animatedAlpha by animateFloatAsState(
-        targetValue = targetAlpha,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "frostedSurfaceAlpha"
-    )
 
-    val targetFill = tintColor ?: if (isDark) {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = animatedAlpha)
+    val glassFill = tintColor ?: if (isDark) {
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = targetAlpha)
     } else {
-        MaterialTheme.colorScheme.surface.copy(alpha = animatedAlpha)
+        MaterialTheme.colorScheme.surface.copy(alpha = targetAlpha)
     }
-    val glassFill by animateColorAsState(
-        targetValue = targetFill,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "frostedSurfaceTint"
-    )
 
     val sheenStrength = when (blurConfig.style) {
         BlurEngineStyle.OFF -> 0.25f
@@ -188,44 +231,49 @@ fun FrostedSurface(
         BlurEngineStyle.ULTRA_FROST -> 1.25f
     }
 
-    val borderBrush = if (borderAccent != null) {
-        Brush.linearGradient(
-            colors = listOf(
-                borderAccent.copy(alpha = (0.72f * sheenStrength).coerceIn(0.25f, 0.92f)),
-                borderAccent.copy(alpha = 0.22f)
+    val outlineColor = MaterialTheme.colorScheme.outline
+    val borderBrush = remember(isDark, borderAccent, sheenStrength, outlineColor) {
+        if (borderAccent != null) {
+            Brush.linearGradient(
+                colors = listOf(
+                    borderAccent.copy(alpha = (0.72f * sheenStrength).coerceIn(0.25f, 0.92f)),
+                    borderAccent.copy(alpha = 0.22f)
+                )
             )
-        )
-    } else if (isDark) {
-        Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = (0.28f * sheenStrength).coerceIn(0.10f, 0.42f)),
-                Color.White.copy(alpha = 0.06f)
-            )
-        )
-    } else {
-        Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.96f),
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.34f)
-            )
-        )
-    }
-
-    val sheenBrush = Brush.verticalGradient(
-        colors = if (isDark) {
-            listOf(
-                Color.White.copy(alpha = (0.12f * sheenStrength).coerceIn(0.03f, 0.18f)),
-                Color.White.copy(alpha = 0.02f),
-                Color.Transparent
+        } else if (isDark) {
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = (0.28f * sheenStrength).coerceIn(0.10f, 0.42f)),
+                    Color.White.copy(alpha = 0.06f)
+                )
             )
         } else {
-            listOf(
-                Color.White.copy(alpha = (0.52f * sheenStrength).coerceIn(0.18f, 0.72f)),
-                Color.White.copy(alpha = 0.14f),
-                Color.Transparent
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.96f),
+                    outlineColor.copy(alpha = 0.34f)
+                )
             )
         }
-    )
+    }
+
+    val sheenBrush = remember(isDark, sheenStrength) {
+        Brush.verticalGradient(
+            colors = if (isDark) {
+                listOf(
+                    Color.White.copy(alpha = (0.12f * sheenStrength).coerceIn(0.03f, 0.18f)),
+                    Color.White.copy(alpha = 0.02f),
+                    Color.Transparent
+                )
+            } else {
+                listOf(
+                    Color.White.copy(alpha = (0.52f * sheenStrength).coerceIn(0.18f, 0.72f)),
+                    Color.White.copy(alpha = 0.14f),
+                    Color.Transparent
+                )
+            }
+        )
+    }
 
     Surface(
         modifier = modifier,
