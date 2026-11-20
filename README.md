@@ -1,4 +1,4 @@
-https://github.com/RanaGzzz/NetGate/blob/main/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png# NetGate
+# NetGate
 
 **A root-free Android firewall, system-wide ad blocker, DNS filter, and live network monitor.**
 
