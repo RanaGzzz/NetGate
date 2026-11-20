@@ -48,9 +48,11 @@ import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import android.net.VpnService
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -76,6 +78,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -98,6 +101,7 @@ import com.example.ui.components.FirewallSettingsSheet
 import com.example.ui.components.FloatingFrostedNavBar
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
+import com.example.ui.components.HotspotAndWifiContent
 import com.example.ui.components.SpeedTestContent
 import com.example.ui.theme.BlurEngine.blurEngineModalDepth
 import com.example.ui.theme.LocalIsDarkTheme
@@ -113,6 +117,7 @@ fun FirewallScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     LaunchedEffect(viewModel) {
         viewModel.snackbarMessages.collect { message ->
@@ -135,6 +140,8 @@ fun FirewallScreen(
         viewModel.refreshConnectionDetails()
         if (uiState.currentDestination == AppDestination.DATA_USAGE) {
             viewModel.refreshDataUsage()
+        } else if (uiState.currentDestination == AppDestination.HOTSPOT) {
+            viewModel.refreshHotspotEnvironment()
         }
     }
 
@@ -184,6 +191,7 @@ fun FirewallScreen(
                                         AppDestination.WEBSITES -> stringResource(R.string.websites_title)
                                         AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_title)
                                         AppDestination.DNS -> stringResource(R.string.dns_title)
+                                        AppDestination.HOTSPOT -> stringResource(R.string.hotspot_title)
                                         AppDestination.FIREWALL -> stringResource(R.string.app_name)
                                     },
                                     style = MaterialTheme.typography.headlineSmall
@@ -194,6 +202,7 @@ fun FirewallScreen(
                                         AppDestination.WEBSITES -> stringResource(R.string.websites_subtitle)
                                         AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_subtitle)
                                         AppDestination.DNS -> stringResource(R.string.dns_subtitle)
+                                        AppDestination.HOTSPOT -> stringResource(R.string.hotspot_subtitle)
                                         AppDestination.FIREWALL -> "Wi-Fi & Data Controller"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
@@ -263,6 +272,10 @@ fun FirewallScreen(
                                             viewModel.refreshConnectionDetails()
                                             viewModel.runDnsCheck()
                                         }
+                                        AppDestination.HOTSPOT -> {
+                                            viewModel.refreshConnectionDetails()
+                                            viewModel.refreshHotspotEnvironment()
+                                        }
                                         AppDestination.FIREWALL, AppDestination.WEBSITES ->
                                             viewModel.refreshInstalledApps()
                                     }
@@ -274,6 +287,7 @@ fun FirewallScreen(
                                     contentDescription = when (uiState.currentDestination) {
                                         AppDestination.DATA_USAGE -> "Sync data usage"
                                         AppDestination.SPEED_TEST, AppDestination.DNS -> "Refresh connection status"
+                                        AppDestination.HOTSPOT -> "Refresh hotspot status"
                                         AppDestination.FIREWALL, AppDestination.WEBSITES -> "Refresh installed apps"
                                     }
                                 )
@@ -365,6 +379,18 @@ fun FirewallScreen(
                                 },
                                 label = { Text(stringResource(R.string.nav_dns)) },
                                 modifier = Modifier.testTag("nav_rail_dns")
+                            )
+                            NavigationRailItem(
+                                selected = uiState.currentDestination == AppDestination.HOTSPOT,
+                                onClick = { viewModel.selectDestination(AppDestination.HOTSPOT) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.WifiTethering,
+                                        contentDescription = stringResource(R.string.nav_hotspot)
+                                    )
+                                },
+                                label = { Text(stringResource(R.string.nav_hotspot)) },
+                                modifier = Modifier.testTag("nav_rail_hotspot")
                             )
                         }
                     }
@@ -470,6 +496,45 @@ fun FirewallScreen(
                                 onRequestEnableFirewall = onRequestEnableFirewall,
                                 onCopiedHostname = viewModel::notifyCopiedDnsHostname
                             )
+                        } else if (uiState.currentDestination == AppDestination.HOTSPOT) {
+                            HotspotAndWifiContent(
+                                preferences = uiState.preferences,
+                                hotspotState = uiState.hotspotProxyState,
+                                connectionDetails = uiState.connectionDetails,
+                                idleStatus = uiState.wifiIdleStatus,
+                                nowMillis = uiState.nowMillis,
+                                onToggleHotspotProxy = viewModel::setHotspotProxyEnabled,
+                                onSelectHotspotPort = viewModel::setHotspotProxyPort,
+                                onToggleApplyNetGateFilters = viewModel::setHotspotApplyNetGateFilters,
+                                onToggleClientBlocked = viewModel::toggleHotspotClientBlocked,
+                                onSetClientDataCap = viewModel::setHotspotClientDataCap,
+                                onSetClientLabel = viewModel::setHotspotClientLabel,
+                                onResetClientStats = viewModel::resetHotspotClientStats,
+                                onClearAllHotspotStats = viewModel::clearAllHotspotStats,
+                                onRefreshHotspot = viewModel::refreshHotspotEnvironment,
+                                onCopiedEndpoint = viewModel::notifyCopiedHotspotEndpoint,
+                                onToggleGlobalWifiLock = { locked ->
+                                    viewModel.setGlobalWifiBlocked(locked)
+                                    if (locked && VpnService.prepare(context) != null) {
+                                        onRequestEnableFirewall()
+                                    }
+                                },
+                                onScheduleWifiTimer = { minutes ->
+                                    viewModel.scheduleGlobalWifiTimer(minutes)
+                                    if (VpnService.prepare(context) != null) {
+                                        onRequestEnableFirewall()
+                                    }
+                                },
+                                onCancelWifiTimer = viewModel::cancelGlobalWifiTimer,
+                                onToggleAutoIdleLock = { enabled ->
+                                    viewModel.setAutoBlockWifiOnIdle(enabled)
+                                    if (enabled && VpnService.prepare(context) != null) {
+                                        onRequestEnableFirewall()
+                                    }
+                                },
+                                onSelectIdleMinutes = viewModel::setAutoBlockWifiIdleMinutes,
+                                onToggleOpenPanelNotify = viewModel::setAutoBlockWifiOpenPanelNotify
+                            )
                         } else if (isWideLayout) {
                             Row(
                                 modifier = Modifier
@@ -492,6 +557,8 @@ fun FirewallScreen(
                                     isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
                                     blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
                                     liveTelemetry = uiState.liveTelemetry,
+                                    isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
+                                    isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
                                     onToggleFirewall = { enable ->
                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                     },
@@ -499,7 +566,8 @@ fun FirewallScreen(
                                     onOpenDnsProtection = viewModel::openDnsProtection,
                                     onOpenSpeedTest = viewModel::openSpeedTest,
                                     onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
-                                    onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) }
+                                    onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                    onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
                                 SearchAndFiltersBlock(
@@ -547,6 +615,8 @@ fun FirewallScreen(
                                                 isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
                                                 blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
                                                 liveTelemetry = uiState.liveTelemetry,
+                                                isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
+                                                isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
                                                 onToggleFirewall = { enable ->
                                                     if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                                 },
@@ -554,7 +624,8 @@ fun FirewallScreen(
                                                 onOpenDnsProtection = viewModel::openDnsProtection,
                                                 onOpenSpeedTest = viewModel::openSpeedTest,
                                                 onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
-                                                onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) }
+                                                onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                                onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
                                             )
                                             Spacer(modifier = Modifier.height(14.dp))
                                             SearchAndFiltersBlock(
@@ -582,7 +653,8 @@ fun FirewallScreen(
                             onSelectWebsites = { viewModel.selectDestination(AppDestination.WEBSITES) },
                             onSelectDataUsage = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
                             onSelectSpeedTest = { viewModel.selectDestination(AppDestination.SPEED_TEST) },
-                            onSelectDnsProtection = { viewModel.selectDestination(AppDestination.DNS) }
+                            onSelectDnsProtection = { viewModel.selectDestination(AppDestination.DNS) },
+                            onSelectHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) }
                         )
                     }
 

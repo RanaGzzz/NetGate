@@ -493,7 +493,19 @@ data class FirewallPreferencesState(
     val showStatusBarDailyUsage: Boolean = true,
     val isDeepMonitorEnabled: Boolean = true,
     val blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
-    val isBlurAnimationEnabled: Boolean = true
+    val isBlurAnimationEnabled: Boolean = true,
+    val hotspotProxyEnabled: Boolean = false,
+    val hotspotProxyPort: Int = 8890,
+    val hotspotApplyNetGateFilters: Boolean = true,
+    val hotspotBlockedClientIps: Set<String> = emptySet(),
+    val hotspotClientCaps: Map<String, Long> = emptyMap(),
+    val hotspotClientLabels: Map<String, String> = emptyMap(),
+    val globalWifiBlocked: Boolean = false,
+    val globalWifiTimerExpiresAtMillis: Long = 0L,
+    val globalWifiTimerDurationMillis: Long = 0L,
+    val autoBlockWifiOnIdleEnabled: Boolean = false,
+    val autoBlockWifiIdleMinutes: Int = 10,
+    val autoBlockWifiOpenPanelNotify: Boolean = true
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
@@ -530,7 +542,61 @@ enum class AppDestination(val label: String) {
     WEBSITES("Websites"),
     DATA_USAGE("Data Usage"),
     SPEED_TEST("Speed Test"),
-    DNS("1.1.1.1 DNS")
+    DNS("1.1.1.1 DNS"),
+    HOTSPOT("Hotspot & Wi-Fi")
+}
+
+data class HotspotClientInfo(
+    val clientIp: String,
+    val label: String = "",
+    val isManuallyBlocked: Boolean = false,
+    val dataCapBytes: Long = 0L,
+    val bytesSent: Long = 0L,
+    val bytesReceived: Long = 0L,
+    val requestCount: Int = 0,
+    val blockedCount: Int = 0,
+    val lastHost: String = "",
+    val firstSeenAt: Long = 0L,
+    val lastSeenAt: Long = 0L
+) {
+    val totalBytes: Long get() = bytesSent + bytesReceived
+    val isCapExceeded: Boolean get() = dataCapBytes > 0L && totalBytes >= dataCapBytes
+    val isEffectivelyBlocked: Boolean get() = isManuallyBlocked || isCapExceeded
+    val displayName: String get() = label.takeIf { it.isNotBlank() } ?: "Device $clientIp"
+}
+
+data class HotspotProxyRuntimeState(
+    val isProxyRunning: Boolean = false,
+    val isHotspotInterfaceActive: Boolean = false,
+    val detectedHotspotIp: String? = null,
+    val detectedHotspotInterface: String? = null,
+    val isExternalVpnActive: Boolean = false,
+    val isNetGateVpnActive: Boolean = false,
+    val activePort: Int = 8890,
+    val totalRelayedSentBytes: Long = 0L,
+    val totalRelayedRecvBytes: Long = 0L,
+    val osTetheringBytes: Long = -1L,
+    val clients: List<HotspotClientInfo> = emptyList(),
+    val errorMessage: String? = null
+) {
+    val totalRelayedBytes: Long get() = totalRelayedSentBytes + totalRelayedRecvBytes
+    val suggestedProxyHost: String get() = detectedHotspotIp ?: "192.168.43.1"
+    val shareModeLabel: String
+        get() = when {
+            !isProxyRunning -> "Stopped"
+            isExternalVpnActive && !isNetGateVpnActive -> "Sharing External VPN"
+            isNetGateVpnActive -> "Sharing NetGate Filter"
+            else -> "Direct Hotspot Proxy"
+        }
+}
+
+data class WifiIdleStatus(
+    val isTracking: Boolean = false,
+    val idleElapsedMillis: Long = 0L,
+    val thresholdMillis: Long = 10 * 60_000L
+) {
+    val progressFraction: Float
+        get() = if (thresholdMillis <= 0L) 0f else (idleElapsedMillis.toFloat() / thresholdMillis.toFloat()).coerceIn(0f, 1f)
 }
 
 enum class WebsiteFilterMode(val title: String, val subtitle: String) {

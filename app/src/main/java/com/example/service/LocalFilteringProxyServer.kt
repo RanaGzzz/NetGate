@@ -25,13 +25,22 @@ data class ProxyFilterDecision(
  */
 class LocalFilteringProxyServer(
     private val port: Int,
+    private val bindHost: String = "127.0.0.1",
     private val stripTrackingParams: Boolean,
     private val protectSocket: (Socket) -> Boolean,
     private val isClientBlocked: (Socket) -> Boolean = { false },
+    private val clientBlockReason: (clientIp: String) -> String? = { null },
     private val evaluateRequest: (host: String, pathAndQuery: String?) -> ProxyFilterDecision,
     private val resolveTargetHost: (host: String) -> String = { it },
     private val upstreamProxyProvider: () -> Pair<String, Int>? = { null },
     private val onRequestLogged: (host: String, decision: ProxyFilterDecision) -> Unit,
+    private val onClientTraffic: (
+        clientIp: String,
+        host: String,
+        bytesSent: Long,
+        bytesReceived: Long,
+        allowed: Boolean
+    ) -> Unit = { _, _, _, _, _ -> },
     private val onTrafficRelayed: (
         host: String,
         port: Int,
@@ -52,7 +61,7 @@ class LocalFilteringProxyServer(
     fun start(): Boolean {
         if (!running.compareAndSet(false, true)) return true
         return try {
-            val server = ServerSocket(port, 64, InetAddress.getByName("127.0.0.1")).apply {
+            val server = ServerSocket(port, 64, InetAddress.getByName(bindHost)).apply {
                 reuseAddress = true
             }
             serverSocket = server
@@ -111,12 +120,18 @@ class LocalFilteringProxyServer(
             val method = parts[0].uppercase()
             val target = parts[1]
             val version = parts[2]
+            val clientIp = client.inetAddress?.hostAddress.orEmpty()
 
-            if (isClientBlocked(client)) {
+            val ipBlockReason = if (clientIp.isNotEmpty()) clientBlockReason(clientIp) else null
+            if (isClientBlocked(client) || ipBlockReason != null) {
                 val blockedHost = parseAuthority(target, if (method == "CONNECT") 443 else 80).first
                     .ifBlank { target }
-                val decision = ProxyFilterDecision(allow = false, reason = "App Firewall", isAdBlock = false)
+                val reason = ipBlockReason ?: "App Firewall"
+                val decision = ProxyFilterDecision(allow = false, reason = reason, isAdBlock = false)
                 onRequestLogged(blockedHost, decision)
+                if (clientIp.isNotEmpty()) {
+                    onClientTraffic(clientIp, blockedHost, 0L, 0L, false)
+                }
                 writeForbiddenResponse(clientOut, decision.reason)
                 runCatching { client.close() }
                 return
@@ -125,6 +140,7 @@ class LocalFilteringProxyServer(
             if (method == "CONNECT") {
                 handleHttpsConnectTunnel(
                     client = client,
+                    clientIp = clientIp,
                     clientIn = clientIn,
                     clientOut = clientOut,
                     authority = target
@@ -132,6 +148,7 @@ class LocalFilteringProxyServer(
             } else {
                 handlePlainHttpRequest(
                     client = client,
+                    clientIp = clientIp,
                     clientIn = clientIn,
                     clientOut = clientOut,
                     method = method,
@@ -147,6 +164,7 @@ class LocalFilteringProxyServer(
 
     private fun handleHttpsConnectTunnel(
         client: Socket,
+        clientIp: String,
         clientIn: BufferedInputStream,
         clientOut: OutputStream,
         authority: String
@@ -162,6 +180,9 @@ class LocalFilteringProxyServer(
         if (!initialDecision.allow) {
             onRequestLogged(host, initialDecision)
             onTrafficRelayed(host, targetPort, "HTTPS", null, authority.length.toLong(), 0L, initialDecision)
+            if (clientIp.isNotEmpty()) {
+                onClientTraffic(clientIp, host, authority.length.toLong(), 0L, false)
+            }
             writeForbiddenResponse(clientOut, initialDecision.reason)
             runCatching { client.close() }
             return
@@ -236,6 +257,7 @@ class LocalFilteringProxyServer(
 
             relayBidirectional(
                 client = client,
+                clientIp = clientIp,
                 clientIn = clientIn,
                 clientOut = clientOut,
                 upstream = upstream,
@@ -254,6 +276,7 @@ class LocalFilteringProxyServer(
 
     private fun handlePlainHttpRequest(
         client: Socket,
+        clientIp: String,
         clientIn: BufferedInputStream,
         clientOut: OutputStream,
         method: String,
@@ -301,6 +324,9 @@ class LocalFilteringProxyServer(
         onRequestLogged(host, decision)
         if (!decision.allow) {
             onTrafficRelayed(host, targetPort, "HTTP", null, cleanedTarget.length.toLong(), 0L, decision)
+            if (clientIp.isNotEmpty()) {
+                onClientTraffic(clientIp, host, cleanedTarget.length.toLong(), 0L, false)
+            }
             writeForbiddenResponse(clientOut, decision.reason)
             runCatching { client.close() }
             return
@@ -339,6 +365,7 @@ class LocalFilteringProxyServer(
 
             relayBidirectional(
                 client = client,
+                clientIp = clientIp,
                 clientIn = clientIn,
                 clientOut = clientOut,
                 upstream = upstream,
@@ -357,6 +384,7 @@ class LocalFilteringProxyServer(
 
     private fun relayBidirectional(
         client: Socket,
+        clientIp: String,
         clientIn: InputStream,
         clientOut: OutputStream,
         upstream: Socket,
@@ -377,6 +405,9 @@ class LocalFilteringProxyServer(
             val initialFlush = sentCounter.getAndSet(0L)
             if (initialFlush > 0L) {
                 onTrafficRelayed(host, port, protocol, remoteIp, initialFlush, 0L, decision)
+                if (clientIp.isNotEmpty()) {
+                    onClientTraffic(clientIp, host, initialFlush, 0L, true)
+                }
             }
         }
 
@@ -387,6 +418,9 @@ class LocalFilteringProxyServer(
                     val flushed = sentCounter.getAndSet(0L)
                     if (flushed > 0L) {
                         onTrafficRelayed(host, port, protocol, remoteIp, flushed, 0L, decision)
+                        if (clientIp.isNotEmpty()) {
+                            onClientTraffic(clientIp, host, flushed, 0L, true)
+                        }
                     }
                 }
             }
@@ -399,6 +433,9 @@ class LocalFilteringProxyServer(
                     val flushed = recvCounter.getAndSet(0L)
                     if (flushed > 0L) {
                         onTrafficRelayed(host, port, protocol, remoteIp, 0L, flushed, decision)
+                        if (clientIp.isNotEmpty()) {
+                            onClientTraffic(clientIp, host, 0L, flushed, true)
+                        }
                     }
                 }
             }
@@ -409,6 +446,9 @@ class LocalFilteringProxyServer(
             val remRecv = recvCounter.getAndSet(0L)
             if (remSent > 0L || remRecv > 0L) {
                 onTrafficRelayed(host, port, protocol, remoteIp, remSent, remRecv, decision)
+                if (clientIp.isNotEmpty()) {
+                    onClientTraffic(clientIp, host, remSent, remRecv, true)
+                }
             }
             runCatching { upstream.close() }
             runCatching { client.close() }

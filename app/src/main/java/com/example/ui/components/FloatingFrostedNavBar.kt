@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -52,6 +53,7 @@ fun FloatingFrostedNavBar(
     onSelectDataUsage: () -> Unit,
     onSelectSpeedTest: () -> Unit,
     onSelectDnsProtection: () -> Unit,
+    onSelectHotspot: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -111,7 +113,7 @@ fun FloatingFrostedNavBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
@@ -120,7 +122,7 @@ fun FloatingFrostedNavBar(
             shadowElevation = 14.dp,
             border = BorderStroke(1.dp, outerBorderBrush),
             modifier = Modifier
-                .widthIn(max = 460.dp)
+                .widthIn(max = 520.dp)
                 .fillMaxWidth()
                 .testTag("floating_frosted_nav_bar")
         ) {
@@ -129,7 +131,7 @@ fun FloatingFrostedNavBar(
                     .fillMaxWidth()
                     .background(glassSheenBrush)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FloatingNavItem(
@@ -180,6 +182,16 @@ fun FloatingFrostedNavBar(
                     modifier = Modifier
                         .weight(1f)
                         .testTag("floating_nav_dns")
+                )
+
+                FloatingNavItem(
+                    icon = androidx.compose.material.icons.Icons.Rounded.WifiTethering,
+                    contentDescription = "Hotspot & Wi-Fi",
+                    selected = !isConnectionInfoOpen && currentDestination == AppDestination.HOTSPOT,
+                    onClick = onSelectHotspot,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("floating_nav_hotspot")
                 )
             }
         }

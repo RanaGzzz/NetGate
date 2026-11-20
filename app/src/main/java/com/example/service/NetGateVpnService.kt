@@ -81,6 +81,7 @@ data class VpnRuntimeState(
     val isYoutubeAdBlockActive: Boolean = false,
     val activeSniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
     val safeRewriteCount: Long = 0L,
+    val isGlobalWifiBlocked: Boolean = false,
     val recentBlockedDomains: List<String> = emptyList(),
     val recentDnsLogs: List<DnsQueryLogEntry> = emptyList()
 )
@@ -95,6 +96,7 @@ class NetGateVpnService : VpnService() {
     private var drainJob: Job? = null
     private var rulesJob: Job? = null
     private var timerJob: Job? = null
+    private var wifiAutomationJob: Job? = null
 
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallbackRegistered = false
@@ -171,6 +173,12 @@ class NetGateVpnService : VpnService() {
     private var latestBlockedUids: Set<Int> = emptySet()
 
     @Volatile
+    private var latestGlobalWifiBlocked: Boolean = false
+
+    @Volatile
+    private var latestFullPreferences: FirewallPreferencesState = FirewallPreferencesState()
+
+    @Volatile
     private var currentNetworkType: ActiveNetworkType = ActiveNetworkType.NONE
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
@@ -222,6 +230,7 @@ class NetGateVpnService : VpnService() {
         registerPhysicalNetworkCallback()
         observeRules()
         observeTimers()
+        observeWifiAutomation()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -265,6 +274,7 @@ class NetGateVpnService : VpnService() {
         unregisterPhysicalNetworkCallback()
         rulesJob?.cancel()
         timerJob?.cancel()
+        wifiAutomationJob?.cancel()
         drainJob?.cancel()
         stopProxyServerLocked()
         closeVpnInterface()
@@ -287,6 +297,29 @@ class NetGateVpnService : VpnService() {
         }
     }
 
+    private fun observeWifiAutomation() {
+        wifiAutomationJob = serviceScope.launch {
+            while (isActive) {
+                delay(2000L)
+                val prefs = latestFullPreferences
+                if (prefs.globalWifiTimerExpiresAtMillis > 0L &&
+                    System.currentTimeMillis() >= prefs.globalWifiTimerExpiresAtMillis
+                ) {
+                    WifiAutomationManager.processDueWifiTimer(applicationContext)
+                }
+                if (prefs.autoBlockWifiOnIdleEnabled && !SystemNetworkMonitor.isServiceActive) {
+                    val telemetry = SystemNetworkMonitor.sampleNow(applicationContext)
+                    WifiAutomationManager.evaluateIdleSample(
+                        context = applicationContext,
+                        activeNetworkType = telemetry.activeNetworkType,
+                        totalBytesPerSec = telemetry.totalBytesPerSec,
+                        prefs = prefs
+                    )
+                }
+            }
+        }
+    }
+
     private fun observeRules() {
         val db = NetGateDatabase.getInstance(applicationContext)
         rulesJob = serviceScope.launch {
@@ -302,6 +335,7 @@ class NetGateVpnService : VpnService() {
                 RulesSnapshot(appRules, websiteRules, adFilterLists, prefs)
             }.collectLatest { snapshot ->
                 val prefs = snapshot.prefs
+                latestFullPreferences = prefs
                 latestRules = snapshot.appRules
                 latestWebsiteRules = snapshot.websiteRules
                 latestWebsiteFilterMode = prefs.websiteFilterMode
@@ -322,6 +356,7 @@ class NetGateVpnService : VpnService() {
                 latestCustomSniProxyHost = prefs.customSniProxyHost.trim()
                 latestCustomSniProxyPort = prefs.customSniProxyPort.coerceIn(1, 65535)
                 latestIsDeepMonitorEnabled = prefs.isDeepMonitorEnabled
+                latestGlobalWifiBlocked = prefs.globalWifiBlocked
 
                 val desiredAdSig = if (!prefs.isAdBlockerEnabled && !prefs.isYoutubeAdBlockEnabled) {
                     "OFF"
@@ -502,13 +537,16 @@ class NetGateVpnService : VpnService() {
             ActiveNetworkType.NONE -> emptyList()
         }.filter { it != packageName }.distinct().sorted()
 
-        val needsDnsProxy = websiteMode != WebsiteFilterMode.OFF ||
-            adBlockEnabled ||
-            httpsProxyEnabled ||
-            safeSearchEnabled ||
-            youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
-            youtubeAdBlockEnabled ||
-            (latestIsDeepMonitorEnabled && targetBlockedPackages.isEmpty())
+        val globalWifiLockNow = (netType == ActiveNetworkType.WIFI && latestGlobalWifiBlocked)
+        val needsDnsProxy = !globalWifiLockNow && (
+            websiteMode != WebsiteFilterMode.OFF ||
+                adBlockEnabled ||
+                httpsProxyEnabled ||
+                safeSearchEnabled ||
+                youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
+                youtubeAdBlockEnabled ||
+                (latestIsDeepMonitorEnabled && targetBlockedPackages.isEmpty())
+            )
 
         latestBlockedUids = targetBlockedPackages.mapNotNull { resolvePackageUid(it) }.toSet()
 
@@ -532,8 +570,9 @@ class NetGateVpnService : VpnService() {
             youtubeRestrictedMode = youtubeRestrictedMode,
             youtubeAdBlockEnabled = youtubeAdBlockEnabled,
             sniProxyPreset = latestSniProxyPreset,
-            blockedPackages = if (!needsDnsProxy) installedBlocked else emptyList(),
-            bypassPackages = effectiveBypass
+            blockedPackages = if (!needsDnsProxy && !globalWifiLockNow) installedBlocked else emptyList(),
+            bypassPackages = effectiveBypass,
+            globalWifiLock = globalWifiLockNow
         )
 
         // If TUN configuration hasn't changed (e.g. only rule lists or upstream DNS changed), keep existing TUN running.
@@ -555,7 +594,7 @@ class NetGateVpnService : VpnService() {
         activeTunnelSignature = null
 
         val shouldRunTunnel = netType != ActiveNetworkType.NONE &&
-            (needsDnsProxy || installedBlocked.isNotEmpty())
+            (globalWifiLockNow || needsDnsProxy || installedBlocked.isNotEmpty())
 
         if (!shouldRunTunnel) {
             stopProxyServerLocked()
@@ -570,7 +609,48 @@ class NetGateVpnService : VpnService() {
             return
         }
 
-        if (!needsDnsProxy) {
+        if (globalWifiLockNow) {
+            stopProxyServerLocked()
+            // Global Wi-Fi Lock: route all other device apps into blackhole TUN on Wi-Fi
+            val builder = Builder()
+                .setSession(getString(R.string.app_name))
+                .setMtu(1500)
+                .addAddress("10.1.10.1", 32)
+                .addRoute("0.0.0.0", 0)
+                .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
+                .addRoute("::", 0)
+
+            runCatching { builder.addDisallowedApplication(packageName) }
+
+            val established = runCatching { builder.establish() }.getOrNull()
+            if (established == null) {
+                publishRuntimeState(
+                    isTunnelActive = false,
+                    netType = netType,
+                    blockedCount = 0,
+                    websiteMode = websiteMode,
+                    adBlockEnabled = adBlockEnabled
+                )
+                updateNotification(0, netType, websiteMode, adBlockEnabled)
+                return
+            }
+
+            vpnInterface = established
+            activeTunnelSignature = desiredSignature
+            syncUnderlyingNetworks(netType)
+            drainJob = serviceScope.launch(Dispatchers.IO) {
+                drainPackets(established, emptyList())
+            }
+
+            publishRuntimeState(
+                isTunnelActive = true,
+                netType = netType,
+                blockedCount = installedBlocked.size,
+                websiteMode = websiteMode,
+                adBlockEnabled = adBlockEnabled
+            )
+            updateNotification(installedBlocked.size, netType, websiteMode, adBlockEnabled)
+        } else if (!needsDnsProxy) {
             stopProxyServerLocked()
             // Pure per-app sinkhole mode: route all traffic of blocked apps into local TUN and drop/reject packets.
             val builder = Builder()
@@ -1387,6 +1467,7 @@ class NetGateVpnService : VpnService() {
             isYoutubeAdBlockActive = latestIsYoutubeAdBlockEnabled,
             activeSniProxyPreset = latestSniProxyPreset,
             safeRewriteCount = safeRewriteCount.get(),
+            isGlobalWifiBlocked = (netType == ActiveNetworkType.WIFI && latestGlobalWifiBlocked),
             recentBlockedDomains = recentSnapshot,
             recentDnsLogs = logSnapshot
         )
@@ -1487,12 +1568,14 @@ class NetGateVpnService : VpnService() {
             if (latestYoutubeRestrictedMode != YouTubeRestrictedMode.OFF) append(" + YT Kids")
             if (proxyActive) append(" + SNI Proxy")
         }
-        val contentText = when (websiteMode) {
-            WebsiteFilterMode.WHITELIST_ONLY ->
+        val contentText = when {
+            networkType == ActiveNetworkType.WIFI && latestGlobalWifiBlocked ->
+                "Wi-Fi Global Lock Active • All app Wi-Fi traffic paused"
+            websiteMode == WebsiteFilterMode.WHITELIST_ONLY ->
                 "$netLabel • Strict Whitelist Lockdown$adSuffix"
-            WebsiteFilterMode.BLOCKLIST ->
+            websiteMode == WebsiteFilterMode.BLOCKLIST ->
                 "$netLabel • Website Blocklist$adSuffix${if (blockedCount > 0) " + $blockedCount blocked app(s)" else ""}"
-            WebsiteFilterMode.OFF -> when {
+            else -> when {
                 proxyActive && blockedCount > 0 ->
                     "$netLabel • SNI Proxy$adSuffix + $blockedCount blocked app${if (blockedCount == 1) "" else "s"}"
                 proxyActive ->
@@ -1537,7 +1620,8 @@ class NetGateVpnService : VpnService() {
         val youtubeAdBlockEnabled: Boolean,
         val sniProxyPreset: SniProxyPreset,
         val blockedPackages: List<String>,
-        val bypassPackages: Set<String>
+        val bypassPackages: Set<String>,
+        val globalWifiLock: Boolean = false
     )
 
     companion object {

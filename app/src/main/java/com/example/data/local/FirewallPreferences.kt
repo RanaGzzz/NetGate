@@ -59,6 +59,18 @@ class FirewallPreferences(private val context: Context) {
         val IS_DEEP_MONITOR_ENABLED = booleanPreferencesKey("is_deep_monitor_enabled")
         val BLUR_ENGINE_STYLE = stringPreferencesKey("blur_engine_style")
         val IS_BLUR_ANIMATION_ENABLED = booleanPreferencesKey("is_blur_animation_enabled")
+        val HOTSPOT_PROXY_ENABLED = booleanPreferencesKey("hotspot_proxy_enabled")
+        val HOTSPOT_PROXY_PORT = intPreferencesKey("hotspot_proxy_port")
+        val HOTSPOT_APPLY_NETGATE_FILTERS = booleanPreferencesKey("hotspot_apply_netgate_filters")
+        val HOTSPOT_BLOCKED_CLIENT_IPS = stringSetPreferencesKey("hotspot_blocked_client_ips")
+        val HOTSPOT_CLIENT_CAPS_SET = stringSetPreferencesKey("hotspot_client_caps_set")
+        val HOTSPOT_CLIENT_LABELS_SET = stringSetPreferencesKey("hotspot_client_labels_set")
+        val GLOBAL_WIFI_BLOCKED = booleanPreferencesKey("global_wifi_blocked")
+        val GLOBAL_WIFI_TIMER_EXPIRES_AT = longPreferencesKey("global_wifi_timer_expires_at")
+        val GLOBAL_WIFI_TIMER_DURATION_MS = longPreferencesKey("global_wifi_timer_duration_ms")
+        val AUTO_BLOCK_WIFI_ON_IDLE = booleanPreferencesKey("auto_block_wifi_on_idle")
+        val AUTO_BLOCK_WIFI_IDLE_MINUTES = intPreferencesKey("auto_block_wifi_idle_minutes")
+        val AUTO_BLOCK_WIFI_PANEL_NOTIFY = booleanPreferencesKey("auto_block_wifi_panel_notify")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -114,7 +126,19 @@ class FirewallPreferences(private val context: Context) {
             showStatusBarDailyUsage = prefs[Keys.SHOW_STATUS_BAR_DAILY_USAGE] ?: true,
             isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true,
             blurEngineStyle = blurStyle,
-            isBlurAnimationEnabled = prefs[Keys.IS_BLUR_ANIMATION_ENABLED] ?: true
+            isBlurAnimationEnabled = prefs[Keys.IS_BLUR_ANIMATION_ENABLED] ?: true,
+            hotspotProxyEnabled = prefs[Keys.HOTSPOT_PROXY_ENABLED] ?: false,
+            hotspotProxyPort = (prefs[Keys.HOTSPOT_PROXY_PORT] ?: 8890).coerceIn(1024, 65535),
+            hotspotApplyNetGateFilters = prefs[Keys.HOTSPOT_APPLY_NETGATE_FILTERS] ?: true,
+            hotspotBlockedClientIps = prefs[Keys.HOTSPOT_BLOCKED_CLIENT_IPS] ?: emptySet(),
+            hotspotClientCaps = parseClientCaps(prefs[Keys.HOTSPOT_CLIENT_CAPS_SET]),
+            hotspotClientLabels = parseClientLabels(prefs[Keys.HOTSPOT_CLIENT_LABELS_SET]),
+            globalWifiBlocked = prefs[Keys.GLOBAL_WIFI_BLOCKED] ?: false,
+            globalWifiTimerExpiresAtMillis = prefs[Keys.GLOBAL_WIFI_TIMER_EXPIRES_AT] ?: 0L,
+            globalWifiTimerDurationMillis = prefs[Keys.GLOBAL_WIFI_TIMER_DURATION_MS] ?: 0L,
+            autoBlockWifiOnIdleEnabled = prefs[Keys.AUTO_BLOCK_WIFI_ON_IDLE] ?: false,
+            autoBlockWifiIdleMinutes = (prefs[Keys.AUTO_BLOCK_WIFI_IDLE_MINUTES] ?: 10).coerceIn(1, 240),
+            autoBlockWifiOpenPanelNotify = prefs[Keys.AUTO_BLOCK_WIFI_PANEL_NOTIFY] ?: true
         )
     }
 
@@ -271,5 +295,119 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setBlurAnimationEnabled(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.IS_BLUR_ANIMATION_ENABLED] = enabled }
+    }
+
+    suspend fun setHotspotProxyEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.HOTSPOT_PROXY_ENABLED] = enabled }
+    }
+
+    suspend fun setHotspotProxyPort(port: Int) {
+        context.firewallDataStore.edit { it[Keys.HOTSPOT_PROXY_PORT] = port.coerceIn(1024, 65535) }
+    }
+
+    suspend fun setHotspotApplyNetGateFilters(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.HOTSPOT_APPLY_NETGATE_FILTERS] = enabled }
+    }
+
+    suspend fun setHotspotClientBlocked(clientIp: String, blocked: Boolean) {
+        val clean = clientIp.trim()
+        if (clean.isEmpty()) return
+        context.firewallDataStore.edit { prefs ->
+            val current = prefs[Keys.HOTSPOT_BLOCKED_CLIENT_IPS] ?: emptySet()
+            prefs[Keys.HOTSPOT_BLOCKED_CLIENT_IPS] = if (blocked) current + clean else current - clean
+        }
+    }
+
+    suspend fun setHotspotClientDataCap(clientIp: String, capBytes: Long) {
+        val clean = clientIp.trim()
+        if (clean.isEmpty()) return
+        context.firewallDataStore.edit { prefs ->
+            val map = parseClientCaps(prefs[Keys.HOTSPOT_CLIENT_CAPS_SET]).toMutableMap()
+            if (capBytes <= 0L) {
+                map.remove(clean)
+            } else {
+                map[clean] = capBytes
+            }
+            prefs[Keys.HOTSPOT_CLIENT_CAPS_SET] = map.entries.map { "${it.key}|${it.value}" }.toSet()
+        }
+    }
+
+    suspend fun setHotspotClientLabel(clientIp: String, label: String) {
+        val cleanIp = clientIp.trim()
+        val cleanLabel = label.trim().replace("|", "")
+        if (cleanIp.isEmpty()) return
+        context.firewallDataStore.edit { prefs ->
+            val map = parseClientLabels(prefs[Keys.HOTSPOT_CLIENT_LABELS_SET]).toMutableMap()
+            if (cleanLabel.isEmpty()) {
+                map.remove(cleanIp)
+            } else {
+                map[cleanIp] = cleanLabel
+            }
+            prefs[Keys.HOTSPOT_CLIENT_LABELS_SET] = map.entries.map { "${it.key}|${it.value}" }.toSet()
+        }
+    }
+
+    suspend fun setGlobalWifiBlocked(blocked: Boolean) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.GLOBAL_WIFI_BLOCKED] = blocked
+            if (!blocked && (prefs[Keys.GLOBAL_WIFI_TIMER_EXPIRES_AT] ?: 0L) <= System.currentTimeMillis()) {
+                prefs[Keys.GLOBAL_WIFI_TIMER_EXPIRES_AT] = 0L
+                prefs[Keys.GLOBAL_WIFI_TIMER_DURATION_MS] = 0L
+            }
+        }
+    }
+
+    suspend fun setGlobalWifiTimer(expiresAtMillis: Long, durationMillis: Long) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.GLOBAL_WIFI_TIMER_EXPIRES_AT] = expiresAtMillis
+            prefs[Keys.GLOBAL_WIFI_TIMER_DURATION_MS] = durationMillis
+        }
+    }
+
+    suspend fun clearGlobalWifiTimer() {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.GLOBAL_WIFI_TIMER_EXPIRES_AT] = 0L
+            prefs[Keys.GLOBAL_WIFI_TIMER_DURATION_MS] = 0L
+        }
+    }
+
+    suspend fun setAutoBlockWifiOnIdle(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.AUTO_BLOCK_WIFI_ON_IDLE] = enabled }
+    }
+
+    suspend fun setAutoBlockWifiIdleMinutes(minutes: Int) {
+        context.firewallDataStore.edit { it[Keys.AUTO_BLOCK_WIFI_IDLE_MINUTES] = minutes.coerceIn(1, 240) }
+    }
+
+    suspend fun setAutoBlockWifiOpenPanelNotify(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.AUTO_BLOCK_WIFI_PANEL_NOTIFY] = enabled }
+    }
+
+    private fun parseClientCaps(raw: Set<String>?): Map<String, Long> {
+        if (raw.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, Long>()
+        for (entry in raw) {
+            val parts = entry.split('|', limit = 2)
+            if (parts.size == 2) {
+                val ip = parts[0].trim()
+                val bytes = parts[1].toLongOrNull() ?: 0L
+                if (ip.isNotEmpty() && bytes > 0L) out[ip] = bytes
+            }
+        }
+        return out
+    }
+
+    private fun parseClientLabels(raw: Set<String>?): Map<String, String> {
+        if (raw.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        for (entry in raw) {
+            val parts = entry.split('|', limit = 2)
+            if (parts.size == 2) {
+                val ip = parts[0].trim()
+                val label = parts[1].trim()
+                if (ip.isNotEmpty() && label.isNotEmpty()) out[ip] = label
+            }
+        }
+        return out
     }
 }

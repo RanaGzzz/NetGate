@@ -25,4 +25,11 @@
     <string name="nav_dns">DNS</string>
     <string name="dns_title">DNS &amp; Leak Test</string>
     <string name="dns_subtitle">Upstream DoH, Leak Test &amp; Private DNS</string>
+    <string name="nav_hotspot">Hotspot</string>
+    <string name="hotspot_title">Hotspot &amp; Wi-Fi</string>
+    <string name="hotspot_subtitle">Proxy Sharing, Client Caps &amp; Wi-Fi Lock</string>
+    <string name="hotspot_proxy_channel_name">NetGate Hotspot Proxy</string>
+    <string name="hotspot_proxy_channel_description">Shares filtering or active VPN over Hotspot and tracks connected proxy devices</string>
+    <string name="wifi_automation_channel_name">Wi-Fi Timer &amp; Idle Lock</string>
+    <string name="wifi_automation_channel_description">Alerts when Wi-Fi timer expires or auto-lock pauses Wi-Fi traffic</string>
 </resources>

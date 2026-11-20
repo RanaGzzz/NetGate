@@ -16,6 +16,7 @@ import com.example.R
 import com.example.data.local.FirewallPreferences
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AppDestination
+import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.LiveNetworkTelemetry
 import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.formatDataBytes
@@ -42,6 +43,9 @@ class NetworkMonitorService : Service() {
 
     @Volatile
     private var showDailyUsage: Boolean = true
+
+    @Volatile
+    private var latestPrefs: FirewallPreferencesState = FirewallPreferencesState()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -81,6 +85,7 @@ class NetworkMonitorService : Service() {
         prefsJob?.cancel()
         prefsJob = serviceScope.launch {
             preferences.preferencesFlow.collect { prefs ->
+                latestPrefs = prefs
                 val styleChanged = currentStyle != prefs.statusBarSpeedStyle ||
                     showDailyUsage != prefs.showStatusBarDailyUsage
                 currentStyle = prefs.statusBarSpeedStyle
@@ -103,6 +108,14 @@ class NetworkMonitorService : Service() {
             while (isActive) {
                 delay(1000L)
                 val telemetry = SystemNetworkMonitor.sampleNow(applicationContext)
+                if (latestPrefs.autoBlockWifiOnIdleEnabled) {
+                    WifiAutomationManager.evaluateIdleSample(
+                        context = applicationContext,
+                        activeNetworkType = telemetry.activeNetworkType,
+                        totalBytesPerSec = telemetry.totalBytesPerSec,
+                        prefs = latestPrefs
+                    )
+                }
                 postNotification(telemetry)
             }
         }

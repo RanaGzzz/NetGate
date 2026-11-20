@@ -28,7 +28,9 @@ import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SignalCellularOff
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiLock
 import androidx.compose.material.icons.rounded.WifiOff
+import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -68,12 +70,15 @@ fun FirewallHeaderCard(
     isAdBlockerEnabled: Boolean = false,
     blockedAdsCount: Long = 0L,
     liveTelemetry: LiveNetworkTelemetry = LiveNetworkTelemetry(),
+    isGlobalWifiBlocked: Boolean = false,
+    isHotspotProxyActive: Boolean = false,
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onOpenDnsProtection: () -> Unit,
     onOpenSpeedTest: () -> Unit,
     onOpenAdBlocker: () -> Unit = {},
     onOpenNetworkMonitor: () -> Unit = {},
+    onOpenHotspot: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -472,6 +477,66 @@ fun FirewallHeaderCard(
                         color = EmeraldPrimary,
                         maxLines = 1
                     )
+                }
+            }
+
+            if (isGlobalWifiBlocked || isHotspotProxyActive) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val alertColor = if (isGlobalWifiBlocked) BlockedRed else WifiAccent
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = alertColor.copy(alpha = if (isDark) 0.18f else 0.12f),
+                    border = BorderStroke(1.dp, alertColor.copy(alpha = 0.45f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenHotspot)
+                        .testTag("header_hotspot_wifi_status_strip")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = if (isGlobalWifiBlocked) {
+                                    Icons.Rounded.WifiLock
+                                } else {
+                                    Icons.Rounded.WifiTethering
+                                },
+                                contentDescription = null,
+                                tint = alertColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = when {
+                                    isGlobalWifiBlocked && isHotspotProxyActive ->
+                                        "Global Wi-Fi Lock & Hotspot Proxy Active"
+                                    isGlobalWifiBlocked ->
+                                        "Global Wi-Fi Lock Active • All app Wi-Fi blocked"
+                                    else ->
+                                        "Hotspot Proxy Sharing Active"
+                                },
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = alertColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = "Open Hotspot and Wi-Fi automation",
+                            tint = alertColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 

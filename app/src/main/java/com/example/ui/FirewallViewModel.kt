@@ -43,6 +43,7 @@ import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
+import com.example.data.model.HotspotProxyRuntimeState
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.LiveNetworkTelemetry
 import com.example.data.model.ManagedApp
@@ -58,6 +59,7 @@ import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
+import com.example.data.model.WifiIdleStatus
 import com.example.data.model.YouTubeRestrictedMode
 import com.example.data.network.DnsConnectionChecker
 import com.example.data.network.SpeedTestPhase
@@ -66,10 +68,13 @@ import com.example.data.network.SpeedTestState
 import com.example.data.repository.FirewallRepository
 import com.example.service.AdBlockFilterEngine
 import com.example.service.ConnectionMonitorHub
+import com.example.service.HotspotProxyManager
+import com.example.service.HotspotProxyService
 import com.example.service.NetGateVpnService
 import com.example.service.NetworkMonitorService
 import com.example.service.SystemNetworkMonitor
 import com.example.service.VpnRuntimeState
+import com.example.service.WifiAutomationManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -177,6 +182,8 @@ data class FirewallUiState(
     val dataUsageState: DataUsageUiState = DataUsageUiState(),
     val websiteBlockerState: WebsiteBlockerUiState = WebsiteBlockerUiState(),
     val liveTelemetry: LiveNetworkTelemetry = LiveNetworkTelemetry(),
+    val hotspotProxyState: HotspotProxyRuntimeState = HotspotProxyRuntimeState(),
+    val wifiIdleStatus: WifiIdleStatus = WifiIdleStatus(),
     val nowMillis: Long = System.currentTimeMillis()
 ) {
     val effectiveNetworkType: ActiveNetworkType
@@ -285,6 +292,30 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         registerNetworkMonitor()
         observeActiveTimerTicker()
         observeLiveNetworkTelemetry()
+        initHotspotAndWifiObservers()
+    }
+
+    private fun initHotspotAndWifiObservers() {
+        HotspotProxyManager.refreshEnvironment(getApplication())
+        viewModelScope.launch {
+            repository.preferencesFlow.collectLatest { prefs ->
+                HotspotProxyManager.updatePreferencesOnly(prefs)
+                if (prefs.globalWifiTimerExpiresAtMillis > 0L) {
+                    while (isActive) {
+                        val now = System.currentTimeMillis()
+                        nowMillisFlow.value = now
+                        if (now >= prefs.globalWifiTimerExpiresAtMillis) {
+                            val triggered = WifiAutomationManager.processDueWifiTimer(getApplication(), now)
+                            if (triggered) {
+                                _snackbarMessages.tryEmit("Wi-Fi Timer expired — Wi-Fi traffic locked")
+                            }
+                            break
+                        }
+                        delay(1000L)
+                    }
+                }
+            }
+        }
     }
 
     private fun observeLiveNetworkTelemetry() {
@@ -293,7 +324,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             while (isActive) {
                 delay(1000L)
                 if (!SystemNetworkMonitor.isServiceActive) {
-                    SystemNetworkMonitor.sampleNow(getApplication())
+                    val telemetry = SystemNetworkMonitor.sampleNow(getApplication())
+                    val prefs = uiState.value.preferences
+                    if (prefs.autoBlockWifiOnIdleEnabled) {
+                        WifiAutomationManager.evaluateIdleSample(
+                            context = getApplication(),
+                            activeNetworkType = telemetry.activeNetworkType,
+                            totalBytesPerSec = telemetry.totalBytesPerSec,
+                            prefs = prefs
+                        )
+                    }
                 }
             }
         }
@@ -556,6 +596,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         Triple(websiteRules, adLists, isSyncingAds)
     }
 
+    private val hotspotAndIdleFlow = combine(
+        HotspotProxyManager.runtimeState,
+        WifiAutomationManager.idleStatus
+    ) { hotspot, idle ->
+        hotspot to idle
+    }
+
     val uiState: StateFlow<FirewallUiState> = combine(
         baseDataFlow,
         uiInteractionFlow,
@@ -565,15 +612,18 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             currentDestinationFlow,
             usageStateFlow,
             websiteAndAdRepoFlow,
-            SystemNetworkMonitor.telemetryFlow
-        ) { dest, usage, webAndAd, liveTelemetry ->
-            TailSnapshot(dest, usage, webAndAd, liveTelemetry)
+            SystemNetworkMonitor.telemetryFlow,
+            hotspotAndIdleFlow
+        ) { dest, usage, webAndAd, liveTelemetry, (hotspot, idle) ->
+            TailSnapshot(dest, usage, webAndAd, liveTelemetry, hotspot, idle)
         }
     ) { base, interaction, connDetails, sheets, tail ->
         val destination = tail.destination
         val dataUsage = tail.dataUsage
         val (websiteRules, adLists, isSyncingAds) = tail.webAndAd
         val liveTelemetry = tail.liveTelemetry
+        val hotspotState = tail.hotspotProxyState
+        val idleStatus = tail.wifiIdleStatus
         val ruleMap = base.rules.associateBy { it.packageName }
         val timerMap = base.timers.associateBy { it.packageName }
 
@@ -687,6 +737,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             dataUsageState = dataUsage,
             websiteBlockerState = websiteState,
             liveTelemetry = liveTelemetry,
+            hotspotProxyState = hotspotState,
+            wifiIdleStatus = idleStatus,
             nowMillis = base.nowMillis
         )
     }.stateIn(
@@ -1536,6 +1588,150 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         _snackbarMessages.tryEmit("Reset live session speed & byte counters")
     }
 
+    fun setHotspotProxyEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setHotspotProxyEnabled(enabled)
+            if (enabled) {
+                HotspotProxyService.start(getApplication())
+                val prefs = uiState.value.preferences.copy(hotspotProxyEnabled = true)
+                HotspotProxyManager.startOrUpdate(getApplication(), prefs)
+                _snackbarMessages.tryEmit(
+                    "Hotspot Proxy started on port ${prefs.hotspotProxyPort}"
+                )
+            } else {
+                HotspotProxyService.stop(getApplication())
+                HotspotProxyManager.stop(getApplication())
+                _snackbarMessages.tryEmit("Hotspot Proxy stopped")
+            }
+        }
+    }
+
+    fun setHotspotProxyPort(port: Int) {
+        val valid = port.coerceIn(1024, 65535)
+        if (valid == uiState.value.preferences.httpsProxyPort && uiState.value.preferences.isHttpsProxyEnabled) {
+            _snackbarMessages.tryEmit("Port $valid is used by local SNI proxy — pick another (e.g. 8890)")
+            return
+        }
+        viewModelScope.launch {
+            preferences.setHotspotProxyPort(valid)
+            _snackbarMessages.tryEmit("Hotspot proxy port set to $valid")
+        }
+    }
+
+    fun setHotspotApplyNetGateFilters(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setHotspotApplyNetGateFilters(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "Hotspot clients will share NetGate ad & site filters"
+                else "Hotspot Proxy switched to Direct Relay"
+            )
+        }
+    }
+
+    fun toggleHotspotClientBlocked(clientIp: String, blocked: Boolean) {
+        viewModelScope.launch {
+            preferences.setHotspotClientBlocked(clientIp, blocked)
+            _snackbarMessages.tryEmit(
+                if (blocked) "Blocked Hotspot client $clientIp"
+                else "Allowed Hotspot client $clientIp"
+            )
+        }
+    }
+
+    fun setHotspotClientDataCap(clientIp: String, capBytes: Long) {
+        viewModelScope.launch {
+            preferences.setHotspotClientDataCap(clientIp, capBytes)
+            _snackbarMessages.tryEmit(
+                if (capBytes > 0L) {
+                    "Set cap on $clientIp to ${com.example.data.model.formatDataBytes(capBytes)}"
+                } else {
+                    "Removed data cap on $clientIp"
+                }
+            )
+        }
+    }
+
+    fun setHotspotClientLabel(clientIp: String, label: String) {
+        viewModelScope.launch {
+            preferences.setHotspotClientLabel(clientIp, label)
+        }
+    }
+
+    fun resetHotspotClientStats(clientIp: String) {
+        HotspotProxyManager.resetClientStats(clientIp)
+        _snackbarMessages.tryEmit("Cleared usage counter for $clientIp")
+    }
+
+    fun clearAllHotspotStats() {
+        HotspotProxyManager.clearAllClientStats()
+        _snackbarMessages.tryEmit("Cleared Hotspot client session stats")
+    }
+
+    fun refreshHotspotEnvironment() {
+        viewModelScope.launch(Dispatchers.IO) {
+            HotspotProxyManager.refreshEnvironment(getApplication())
+        }
+    }
+
+    fun notifyCopiedHotspotEndpoint(endpoint: String) {
+        _snackbarMessages.tryEmit("Copied Hotspot proxy $endpoint")
+    }
+
+    fun setGlobalWifiBlocked(blocked: Boolean) {
+        viewModelScope.launch {
+            WifiAutomationManager.setGlobalWifiLocked(
+                context = getApplication(),
+                locked = blocked,
+                triggerReasonTitle = if (blocked) "Global Wi-Fi Lock Active" else null,
+                triggerReasonBody = if (blocked) "All app Wi-Fi traffic is paused by NetGate." else null
+            )
+            _snackbarMessages.tryEmit(
+                if (blocked) "Wi-Fi traffic locked across all apps"
+                else "Wi-Fi traffic restored"
+            )
+        }
+    }
+
+    fun scheduleGlobalWifiTimer(minutes: Int) {
+        viewModelScope.launch {
+            val validMin = minutes.coerceIn(1, 720)
+            WifiAutomationManager.scheduleWifiTimer(getApplication(), validMin)
+            _snackbarMessages.tryEmit("Wi-Fi traffic will auto-lock in $validMin min")
+        }
+    }
+
+    fun cancelGlobalWifiTimer() {
+        viewModelScope.launch {
+            WifiAutomationManager.cancelWifiTimer(getApplication())
+            _snackbarMessages.tryEmit("Cancelled Wi-Fi countdown timer")
+        }
+    }
+
+    fun setAutoBlockWifiOnIdle(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setAutoBlockWifiOnIdle(enabled)
+            if (!enabled) {
+                WifiAutomationManager.resetIdleProgress()
+            }
+            _snackbarMessages.tryEmit(
+                if (enabled) "Auto-lock Wi-Fi when idle enabled"
+                else "Auto-lock Wi-Fi when idle turned off"
+            )
+        }
+    }
+
+    fun setAutoBlockWifiIdleMinutes(minutes: Int) {
+        viewModelScope.launch {
+            preferences.setAutoBlockWifiIdleMinutes(minutes)
+        }
+    }
+
+    fun setAutoBlockWifiOpenPanelNotify(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setAutoBlockWifiOpenPanelNotify(enabled)
+        }
+    }
+
     private fun formatCompactCount(count: Int): String {
         return when {
             count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
@@ -1599,7 +1795,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val destination: AppDestination,
         val dataUsage: DataUsageUiState,
         val webAndAd: Triple<List<WebsiteRuleItem>, List<AdFilterListItem>, Boolean>,
-        val liveTelemetry: LiveNetworkTelemetry
+        val liveTelemetry: LiveNetworkTelemetry,
+        val hotspotProxyState: HotspotProxyRuntimeState,
+        val wifiIdleStatus: WifiIdleStatus
     )
 
     private data class SiteControlsSnapshot(
