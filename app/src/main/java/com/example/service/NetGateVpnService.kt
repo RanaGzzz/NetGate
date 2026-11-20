@@ -51,6 +51,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -60,6 +61,7 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -215,6 +217,9 @@ class NetGateVpnService : VpnService() {
 
     @Volatile
     private var currentNetworkType: ActiveNetworkType = ActiveNetworkType.NONE
+
+    @Volatile
+    private var isSelfDisallowedOnTunnel: Boolean = false
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
     private var lastAdMatcherSignature: String? = null
@@ -716,10 +721,15 @@ class NetGateVpnService : VpnService() {
                     stopProxyServerLocked()
                     false
                 }
+                val activeProxyPort = if (proxyActiveNow) {
+                    proxyServer?.boundPort?.takeIf { it in 1024..65535 } ?: plan.httpsProxyPort
+                } else {
+                    null
+                }
                 val established = buildHybridDnsProxyInterface(
                     bypassPackages = plan.bypassPackages,
                     netType = netType,
-                    proxyPort = if (proxyActiveNow) plan.httpsProxyPort else null
+                    proxyPort = activeProxyPort
                 )
                 if (established == null) {
                     stopProxyServerLocked()
@@ -810,7 +820,13 @@ class NetGateVpnService : VpnService() {
             builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
             if (proxyPort != null) {
                 runCatching {
-                    builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort))
+                    builder.setHttpProxy(
+                        ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort, PROXY_BYPASS_HOSTS)
+                    )
+                }.onFailure {
+                    runCatching {
+                        builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort))
+                    }
                 }
             }
         }
@@ -819,7 +835,10 @@ class NetGateVpnService : VpnService() {
             runCatching { builder.addRoute(cidrIp, prefixLen) }
         }
 
-        runCatching { builder.addDisallowedApplication(packageName) }
+        isSelfDisallowedOnTunnel = runCatching {
+            builder.addDisallowedApplication(packageName)
+            true
+        }.getOrDefault(false)
         for (bypassPkg in bypassPackages) {
             runCatching { builder.addDisallowedApplication(bypassPkg) }
         }
@@ -837,10 +856,11 @@ class NetGateVpnService : VpnService() {
         val server = LocalFilteringProxyServer(
             port = port,
             stripTrackingParams = stripTracking,
-            protectSocket = { socket -> protect(socket) },
+            protectSocket = { socket -> protect(socket) || isSelfDisallowedOnTunnel },
             isClientBlocked = ::isProxyClientSocketBlocked,
             evaluateRequest = ::evaluateProxyRequest,
             resolveTargetHost = ::resolveProxyTargetHost,
+            resolveTargetAddresses = ::resolveProxyTargetAddresses,
             upstreamProxyProvider = ::provideUpstreamSniProxy,
             dpiBypassConfigProvider = {
                 DpiBypassConfig(
@@ -887,6 +907,106 @@ class NetGateVpnService : VpnService() {
             youtubeRestrictedMode = latestYoutubeRestrictedMode
         )
         return rewrite?.aliasDomain ?: host
+    }
+
+    private fun resolveProxyTargetAddresses(host: String): List<InetAddress> {
+        val cleanHost = host.trim().trimEnd('.').removeSurrounding("[", "]")
+        if (cleanHost.isEmpty()) return emptyList()
+
+        // Numeric IP literals don't need DNS resolution
+        if (isIpLiteral(cleanHost)) {
+            return runCatching { listOf(InetAddress.getByName(cleanHost)) }.getOrDefault(emptyList())
+        }
+
+        val now = System.currentTimeMillis()
+        proxyAddressCache[cleanHost.lowercase()]?.let { cached ->
+            if (now < cached.expiresAtMs && cached.addresses.isNotEmpty()) {
+                return cached.addresses
+            }
+        }
+
+        val resolved = mutableListOf<InetAddress>()
+        val antiPoison = latestAntiDnsPoisonEnabled
+
+        // Query A (IPv4) first via NetGate's DoH / DoTCP / Anti-Poisoned DNS so blocked/poisoned
+        // domains still resolve cleanly and never stall on unreachable IPv6 routes.
+        val ipv4Query = buildRawDnsQuery(cleanHost, qType = 1)
+        val aResp = resolveDnsUpstream(ipv4Query, cleanHost).first
+        if (aResp != null) {
+            val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(aResp)
+            val safeIps = if (antiPoison && DpiBypassEngine.isLikelyForgedDnsResponse(cleanHost, ips)) {
+                emptyList()
+            } else {
+                ips
+            }
+            for (ipStr in safeIps) {
+                runCatching { InetAddress.getByName(ipStr) }.getOrNull()?.let(resolved::add)
+            }
+        }
+
+        if (resolved.isEmpty()) {
+            val ipv6Query = buildRawDnsQuery(cleanHost, qType = 28)
+            val aaaaResp = resolveDnsUpstream(ipv6Query, cleanHost).first
+            if (aaaaResp != null) {
+                val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(aaaaResp)
+                val safeIps = if (antiPoison && DpiBypassEngine.isLikelyForgedDnsResponse(cleanHost, ips)) {
+                    emptyList()
+                } else {
+                    ips
+                }
+                for (ipStr in safeIps) {
+                    runCatching { InetAddress.getByName(ipStr) }.getOrNull()?.let(resolved::add)
+                }
+            }
+        }
+
+        if (resolved.isEmpty()) {
+            val osAddrs = LocalFilteringProxyServer.defaultResolveAddressesIpv4First(cleanHost)
+            resolved.addAll(osAddrs)
+        }
+
+        val ordered = LocalFilteringProxyServer.sortIpv4First(resolved)
+        if (ordered.isNotEmpty()) {
+            if (proxyAddressCache.size > 512) {
+                proxyAddressCache.clear()
+            }
+            proxyAddressCache[cleanHost.lowercase()] = CachedHostAddresses(
+                addresses = ordered,
+                expiresAtMs = now + PROXY_DNS_CACHE_TTL_MS
+            )
+        }
+        return ordered
+    }
+
+    private fun isIpLiteral(host: String): Boolean {
+        if (':' in host) return true
+        val parts = host.split('.')
+        return parts.size == 4 && parts.all { part ->
+            val n = part.toIntOrNull()
+            n != null && n in 0..255
+        }
+    }
+
+    private fun buildRawDnsQuery(domain: String, qType: Int): ByteArray {
+        val out = ByteArrayOutputStream(64)
+        // Random-ish TxID + standard recursive query flags (RD=1, QDCOUNT=1)
+        val txId = (System.nanoTime() and 0xFFFFL).toInt()
+        out.write((txId ushr 8) and 0xFF)
+        out.write(txId and 0xFF)
+        out.write(0x01); out.write(0x00)
+        out.write(0x00); out.write(0x01)
+        out.write(ByteArray(6))
+        for (label in domain.split('.')) {
+            if (label.isEmpty() || label.length > 63) continue
+            val bytes = label.toByteArray(Charsets.US_ASCII)
+            out.write(bytes.size)
+            out.write(bytes)
+        }
+        out.write(0x00)
+        out.write((qType ushr 8) and 0xFF)
+        out.write(qType and 0xFF)
+        out.write(0x00); out.write(0x01) // QCLASS = IN
+        return out.toByteArray()
     }
 
     private fun provideUpstreamSniProxy(): Pair<String, Int>? {
@@ -1394,15 +1514,15 @@ class NetGateVpnService : VpnService() {
 
     private fun resolveDnsUpstream(dnsPayload: ByteArray, domain: String): Pair<ByteArray?, String> {
         val antiPoison = latestAntiDnsPoisonEnabled
-        return when (latestDnsTransportMode) {
+        val resolved = when (latestDnsTransportMode) {
             DnsTransportMode.DNS_OVER_TCP -> {
                 val tcpResp = forwardDnsOverTcp(dnsPayload)
                 if (tcpResp != null && !isPoisoned(domain, tcpResp, antiPoison)) {
                     tcpResp to "${latestUpstreamDnsTitle} DoTCP"
                 } else {
-                    val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+                    val dohResp = forwardDohWithBackup(dnsPayload)
                     if (dohResp != null) {
-                        dohResp to "${latestUpstreamDnsTitle} DoH"
+                        dohResp.first to dohResp.second
                     } else {
                         forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
                     }
@@ -1417,9 +1537,9 @@ class NetGateVpnService : VpnService() {
                     if (udpResp != null) {
                         antiDnsPoisonCount.incrementAndGet()
                     }
-                    val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+                    val dohResp = forwardDohWithBackup(dnsPayload)
                     if (dohResp != null) {
-                        dohResp to "${latestUpstreamDnsTitle} DoH (Poison Guard)"
+                        dohResp.first to "${dohResp.second} (Poison Guard)"
                     } else {
                         forwardDnsOverTcp(dnsPayload) to "${latestUpstreamDnsTitle} DoTCP"
                     }
@@ -1437,10 +1557,35 @@ class NetGateVpnService : VpnService() {
                 if (tcpResp != null && !isPoisoned(domain, tcpResp, antiPoison)) {
                     tcpResp to "${latestUpstreamDnsTitle} DoTCP"
                 } else {
-                    forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
+                    val udpPair = forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
+                    if (udpPair.first != null) {
+                        udpPair
+                    } else {
+                        forwardBackupDohOnly(dnsPayload) ?: udpPair
+                    }
                 }
             }
         }
+        return resolved
+    }
+
+    private fun forwardDohWithBackup(dnsPayload: ByteArray): Pair<ByteArray, String>? {
+        val primary = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+        if (primary != null) {
+            return primary to "${latestUpstreamDnsTitle} DoH"
+        }
+        return forwardBackupDohOnly(dnsPayload)
+    }
+
+    private fun forwardBackupDohOnly(dnsPayload: ByteArray): Pair<ByteArray, String>? {
+        for ((backupLabel, backupUrl) in BACKUP_DOH_ENDPOINTS) {
+            if (backupUrl.equals(latestDohUrl, ignoreCase = true)) continue
+            val resp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, backupUrl)
+            if (resp != null) {
+                return resp to "$backupLabel DoH"
+            }
+        }
+        return null
     }
 
     private fun forwardValidatedUdpDns(
@@ -1451,9 +1596,9 @@ class NetGateVpnService : VpnService() {
         val udpResp = forwardDnsQuery(dnsPayload)
         if (udpResp != null && isPoisoned(domain, udpResp, antiPoison)) {
             antiDnsPoisonCount.incrementAndGet()
-            val dohFallback = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+            val dohFallback = forwardDohWithBackup(dnsPayload)
             if (dohFallback != null) {
-                return dohFallback to "${latestUpstreamDnsTitle} DoH (Anti-Poison)"
+                return dohFallback.first to "${dohFallback.second} (Anti-Poison)"
             }
             val tcpFallback = forwardDnsOverTcp(dnsPayload)
             if (tcpFallback != null) {
@@ -1481,13 +1626,13 @@ class NetGateVpnService : VpnService() {
             var socket: Socket? = null
             try {
                 socket = Socket()
-                if (!protect(socket)) {
+                if (!protect(socket) && !isSelfDisallowedOnTunnel) {
                     socket.close()
                     continue
                 }
                 socket.tcpNoDelay = true
-                socket.soTimeout = 3000
-                socket.connect(InetSocketAddress(InetAddress.getByName(upstreamIp), 53), 2500)
+                socket.soTimeout = 1800
+                socket.connect(InetSocketAddress(InetAddress.getByName(upstreamIp), 53), 1500)
                 val out = socket.getOutputStream()
                 val frame = ByteArray(2 + dnsPayload.size)
                 frame[0] = ((dnsPayload.size ushr 8) and 0xFF).toByte()
@@ -1572,11 +1717,11 @@ class NetGateVpnService : VpnService() {
             var socket: DatagramSocket? = null
             try {
                 socket = DatagramSocket()
-                if (!protect(socket)) {
+                if (!protect(socket) && !isSelfDisallowedOnTunnel) {
                     socket.close()
                     continue
                 }
-                socket.soTimeout = 2500
+                socket.soTimeout = 1600
                 val upstreamAddr = InetAddress.getByName(upstreamIp)
                 val outPacket = DatagramPacket(dnsPayload, dnsPayload.size, upstreamAddr, 53)
                 socket.send(outPacket)
@@ -1839,7 +1984,26 @@ class NetGateVpnService : VpnService() {
         private const val VIRTUAL_DNS_SERVER = "10.1.10.2"
         private const val VIRTUAL_IPV6_ADDR = "fd00:1:fd00:1:fd00:1:fd00:1"
         private const val VIRTUAL_IPV6_DNS_SERVER = "fd00:1:fd00:1:fd00:1:fd00:2"
+        private const val PROXY_DNS_CACHE_TTL_MS = 45_000L
         private val UPSTREAM_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")
+        private val BACKUP_DOH_ENDPOINTS = listOf(
+            "Google" to "https://dns.google/dns-query",
+            "Quad9" to "https://dns.quad9.net/dns-query"
+        )
+        private val PROXY_BYPASS_HOSTS = listOf(
+            "localhost",
+            "127.0.0.1",
+            "10.*",
+            "192.168.*",
+            "*.local"
+        )
+
+        private data class CachedHostAddresses(
+            val addresses: List<InetAddress>,
+            val expiresAtMs: Long
+        )
+
+        private val proxyAddressCache = ConcurrentHashMap<String, CachedHostAddresses>()
 
         // Route major public DNS / DoH / DoT resolver IPs through local TUN in Website Filter mode.
         // TCP 443/853 packets hitting these IPs receive an immediate TCP RST so Chrome/Firefox fall back to UDP/53.
@@ -1925,6 +2089,7 @@ class NetGateVpnService : VpnService() {
 
         fun flushDnsAndAutopilotCache(context: Context) {
             DpiBypassEngine.clearAutopilotCache()
+            proxyAddressCache.clear()
             if (_runtimeState.value.isServiceRunning) {
                 val intent = Intent(context, NetGateVpnService::class.java).apply {
                     action = ACTION_RELOAD_RULES

@@ -5,6 +5,7 @@ import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -34,6 +35,9 @@ class LocalFilteringProxyServer(
     private val clientBlockReason: (clientIp: String) -> String? = { null },
     private val evaluateRequest: (host: String, pathAndQuery: String?) -> ProxyFilterDecision,
     private val resolveTargetHost: (host: String) -> String = { it },
+    private val resolveTargetAddresses: (host: String) -> List<InetAddress> = { host ->
+        defaultResolveAddressesIpv4First(host)
+    },
     private val upstreamProxyProvider: () -> Pair<String, Int>? = { null },
     private val dpiBypassConfigProvider: () -> DpiBypassConfig = { DpiBypassConfig() },
     private val onDpiBypassApplied: (host: String, strategy: DpiStrategy) -> Unit = { _, _ -> },
@@ -60,14 +64,30 @@ class LocalFilteringProxyServer(
     private var acceptExecutor: ExecutorService? = null
     private var workerExecutor: ExecutorService? = null
 
+    @Volatile
+    var boundPort: Int = port
+        private set
+
     val isRunning: Boolean get() = running.get()
 
     fun start(): Boolean {
         if (!running.compareAndSet(false, true)) return true
         return try {
-            val server = ServerSocket(port, 64, InetAddress.getByName(bindHost)).apply {
+            val bindAddr = InetAddress.getByName(bindHost)
+            val server = ServerSocket().apply {
                 reuseAddress = true
             }
+            try {
+                server.bind(InetSocketAddress(bindAddr, port), 128)
+            } catch (bindErr: Exception) {
+                if (port != 0 && bindHost == "127.0.0.1") {
+                    // Fallback to an ephemeral loopback port if the default port is held in TIME_WAIT
+                    server.bind(InetSocketAddress(bindAddr, 0), 128)
+                } else {
+                    throw bindErr
+                }
+            }
+            boundPort = server.localPort
             serverSocket = server
             acceptExecutor = Executors.newSingleThreadExecutor()
             workerExecutor = Executors.newCachedThreadPool()
@@ -94,6 +114,7 @@ class LocalFilteringProxyServer(
         running.set(false)
         runCatching { serverSocket?.close() }
         serverSocket = null
+        boundPort = port
         runCatching { acceptExecutor?.shutdownNow() }
         acceptExecutor = null
         runCatching { workerExecutor?.shutdownNow() }
@@ -220,12 +241,12 @@ class LocalFilteringProxyServer(
             var initialBytesSent = 0L
             var initialBytesReceived = 0L
 
-            // Peek first TLS ClientHello packet to verify SNI matches allowed rules & apply DPI reshaping
-            clientIn.mark(4096)
-            val peekBuf = ByteArray(2048)
-            val peekLen = runCatching { clientIn.read(peekBuf) }.getOrDefault(-1)
+            // Read complete initial payload (including full multi-KB post-quantum TLS ClientHello)
+            val initialPayload = readInitialConnectPayload(clientIn)
+            val peekLen = initialPayload.size
             if (peekLen > 0) {
-                val sniHost = extractTlsSniHostname(peekBuf, peekLen)
+                val isClientHello = isTlsClientHello(initialPayload, peekLen)
+                val sniHost = if (isClientHello) extractTlsSniHostname(initialPayload, peekLen) else null
                 if (!sniHost.isNullOrEmpty() && !sniHost.equals(host, ignoreCase = true)) {
                     val sniDecision = evaluateRequest(sniHost, null)
                     if (!sniDecision.allow) {
@@ -239,75 +260,111 @@ class LocalFilteringProxyServer(
                 }
                 onRequestLogged(activeHost, initialDecision)
 
-                var activeStrategy = DpiBypassEngine.resolveStrategy(activeHost, dpiConfig)
-                var handshakeSent = false
+                if (!isClientHello) {
+                    // Non-TLS CONNECT tunnel (e.g. WebSocket/raw TCP): forward intact without splitting
+                    upstream.getOutputStream().write(initialPayload, 0, peekLen)
+                    upstream.getOutputStream().flush()
+                    initialBytesSent = peekLen.toLong()
+                } else {
+                    var activeStrategy = DpiBypassEngine.resolveStrategy(activeHost, dpiConfig)
+                    var handshakeSent = false
 
-                if (dpiConfig.mode == DpiBypassMode.AUTOPILOT && activeStrategy != DpiStrategy.MICRO_CHUNKS) {
-                    val probeResult = runCatching {
-                        DpiBypassEngine.writeTlsClientHello(
-                            output = upstream.getOutputStream(),
-                            packet = peekBuf,
+                    if (dpiConfig.mode == DpiBypassMode.AUTOPILOT) {
+                        val firstResp = writeAndProbeTlsServerHello(
+                            upstream = upstream,
+                            packet = initialPayload,
                             length = peekLen,
                             strategy = activeStrategy,
                             chunkSize = dpiConfig.chunkSize,
                             fragmentDelayMs = dpiConfig.fragmentDelayMs
                         )
-                        upstream.soTimeout = 3_500
-                        val serverProbe = ByteArray(4096)
-                        val probeLen = upstream.getInputStream().read(serverProbe)
-                        upstream.soTimeout = 0
-                        if (probeLen > 0) {
-                            clientOut.write(serverProbe, 0, probeLen)
+
+                        if (firstResp != null) {
+                            clientOut.write(firstResp)
                             clientOut.flush()
-                            initialBytesReceived = probeLen.toLong()
-                            true
+                            initialBytesReceived = firstResp.size.toLong()
+                            handshakeSent = true
+                            DpiBypassEngine.recordSuccess(activeHost, activeStrategy)
+                            onDpiBypassApplied(activeHost, activeStrategy)
                         } else {
-                            false
-                        }
-                    }.getOrDefault(false)
+                            // Strategy timed out or received DPI RST/EOF: try escalated strategy, then DIRECT fallback
+                            runCatching { upstream.close() }
+                            val escalated = if (activeStrategy != DpiStrategy.MICRO_CHUNKS) {
+                                DpiBypassEngine.escalateOnFailure(activeHost, activeStrategy) ?: DpiStrategy.MICRO_CHUNKS
+                            } else {
+                                null
+                            }
 
-                    if (probeResult) {
-                        handshakeSent = true
-                        DpiBypassEngine.recordSuccess(activeHost, activeStrategy)
-                        onDpiBypassApplied(activeHost, activeStrategy)
-                    } else {
-                        // Stateless DPI RST/EOF detected; escalate strategy & reconnect cleanly
-                        runCatching { upstream.close() }
-                        val escalated = DpiBypassEngine.escalateOnFailure(activeHost, activeStrategy)
-                            ?: DpiStrategy.MICRO_CHUNKS
-                        activeStrategy = escalated
-                        val retrySocket = openUpstreamConnectSocket(
-                            connectHost = connectHost,
-                            targetPort = targetPort,
-                            upstreamProxy = upstreamProxy,
-                            dpiConfig = dpiConfig,
-                            clientOut = null
+                            var recovered = false
+                            if (escalated != null) {
+                                val retrySocket = openUpstreamConnectSocket(
+                                    connectHost = connectHost,
+                                    targetPort = targetPort,
+                                    upstreamProxy = upstreamProxy,
+                                    dpiConfig = dpiConfig,
+                                    clientOut = null
+                                )
+                                if (retrySocket != null) {
+                                    upstream = retrySocket
+                                    remoteIp = upstream.inetAddress?.hostAddress
+                                    val escalatedResp = writeAndProbeTlsServerHello(
+                                        upstream = upstream,
+                                        packet = initialPayload,
+                                        length = peekLen,
+                                        strategy = escalated,
+                                        chunkSize = dpiConfig.chunkSize,
+                                        fragmentDelayMs = dpiConfig.fragmentDelayMs
+                                    )
+                                    if (escalatedResp != null) {
+                                        clientOut.write(escalatedResp)
+                                        clientOut.flush()
+                                        initialBytesReceived = escalatedResp.size.toLong()
+                                        handshakeSent = true
+                                        recovered = true
+                                        DpiBypassEngine.recordSuccess(activeHost, escalated)
+                                        onDpiBypassApplied(activeHost, escalated)
+                                    } else {
+                                        runCatching { upstream.close() }
+                                    }
+                                }
+                            }
+
+                            if (!recovered) {
+                                // Final DIRECT fallback so strict servers/CDNs that reject TCP splitting still load
+                                val directSocket = openUpstreamConnectSocket(
+                                    connectHost = connectHost,
+                                    targetPort = targetPort,
+                                    upstreamProxy = upstreamProxy,
+                                    dpiConfig = dpiConfig,
+                                    clientOut = null
+                                ) ?: run {
+                                    runCatching { client.close() }
+                                    return
+                                }
+                                upstream = directSocket
+                                upstream.soTimeout = 0
+                                remoteIp = upstream.inetAddress?.hostAddress
+                                activeStrategy = DpiStrategy.DIRECT
+                            }
+                        }
+                    }
+
+                    if (!handshakeSent) {
+                        DpiBypassEngine.writeTlsClientHello(
+                            output = upstream.getOutputStream(),
+                            packet = initialPayload,
+                            length = peekLen,
+                            strategy = activeStrategy,
+                            chunkSize = dpiConfig.chunkSize,
+                            fragmentDelayMs = dpiConfig.fragmentDelayMs
                         )
-                        if (retrySocket == null) {
-                            runCatching { client.close() }
-                            return
+                        if (activeStrategy != DpiStrategy.DIRECT) {
+                            DpiBypassEngine.recordSuccess(activeHost, activeStrategy)
+                            onDpiBypassApplied(activeHost, activeStrategy)
                         }
-                        upstream = retrySocket
-                        upstream.soTimeout = 0
-                        remoteIp = upstream.inetAddress?.hostAddress
                     }
+                    initialBytesSent = peekLen.toLong()
                 }
-
-                if (!handshakeSent) {
-                    DpiBypassEngine.writeTlsClientHello(
-                        output = upstream.getOutputStream(),
-                        packet = peekBuf,
-                        length = peekLen,
-                        strategy = activeStrategy,
-                        chunkSize = dpiConfig.chunkSize,
-                        fragmentDelayMs = dpiConfig.fragmentDelayMs
-                    )
-                    if (activeStrategy != DpiStrategy.DIRECT) {
-                        DpiBypassEngine.recordSuccess(activeHost, activeStrategy)
-                        onDpiBypassApplied(activeHost, activeStrategy)
-                    }
-                }
-                initialBytesSent = peekLen.toLong()
             } else {
                 onRequestLogged(host, initialDecision)
             }
@@ -332,6 +389,67 @@ class LocalFilteringProxyServer(
         }
     }
 
+    private fun readInitialConnectPayload(clientIn: BufferedInputStream): ByteArray {
+        val firstChunk = ByteArray(4096)
+        val firstLen = runCatching { clientIn.read(firstChunk) }.getOrDefault(-1)
+        if (firstLen <= 0) return ByteArray(0)
+
+        // If this is a TLS Handshake record (0x16 0x03 ...), assemble the complete ClientHello record
+        if (firstLen >= 5 &&
+            (firstChunk[0].toInt() and 0xFF) == 0x16 &&
+            (firstChunk[1].toInt() and 0xFF) == 0x03
+        ) {
+            val recordPayloadLen = ((firstChunk[3].toInt() and 0xFF) shl 8) or (firstChunk[4].toInt() and 0xFF)
+            val totalExpected = (5 + recordPayloadLen).coerceIn(5, 16_384)
+            if (firstLen >= totalExpected) {
+                return firstChunk.copyOf(firstLen)
+            }
+            val assembled = ByteArrayOutputStream(totalExpected)
+            assembled.write(firstChunk, 0, firstLen)
+            val extraBuf = ByteArray(2048)
+            while (assembled.size() < totalExpected) {
+                val want = minOf(extraBuf.size, totalExpected - assembled.size())
+                val readMore = runCatching { clientIn.read(extraBuf, 0, want) }.getOrDefault(-1)
+                if (readMore <= 0) break
+                assembled.write(extraBuf, 0, readMore)
+            }
+            return assembled.toByteArray()
+        }
+
+        return firstChunk.copyOf(firstLen)
+    }
+
+    private fun isTlsClientHello(packet: ByteArray, length: Int): Boolean {
+        return length >= 43 &&
+            (packet[0].toInt() and 0xFF) == 0x16 &&
+            (packet[5].toInt() and 0xFF) == 0x01
+    }
+
+    private fun writeAndProbeTlsServerHello(
+        upstream: Socket,
+        packet: ByteArray,
+        length: Int,
+        strategy: DpiStrategy,
+        chunkSize: Int,
+        fragmentDelayMs: Int
+    ): ByteArray? {
+        return runCatching {
+            DpiBypassEngine.writeTlsClientHello(
+                output = upstream.getOutputStream(),
+                packet = packet,
+                length = length,
+                strategy = strategy,
+                chunkSize = chunkSize,
+                fragmentDelayMs = fragmentDelayMs
+            )
+            upstream.soTimeout = 2_400
+            val serverProbe = ByteArray(4096)
+            val probeLen = upstream.getInputStream().read(serverProbe)
+            upstream.soTimeout = 0
+            if (probeLen > 0) serverProbe.copyOf(probeLen) else null
+        }.getOrNull()
+    }
+
     private fun openUpstreamConnectSocket(
         connectHost: String,
         targetPort: Int,
@@ -339,42 +457,123 @@ class LocalFilteringProxyServer(
         dpiConfig: DpiBypassConfig,
         clientOut: OutputStream?
     ): Socket? {
-        val upstream = Socket()
-        return try {
-            if (!protectSocket(upstream)) {
-                runCatching { upstream.close() }
-                return null
-            }
-            upstream.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
-            upstream.keepAlive = dpiConfig.idleKeepAliveEnabled
-            if (upstreamProxy != null) {
-                val (proxyHost, proxyPort) = upstreamProxy
-                upstream.connect(InetSocketAddress(proxyHost, proxyPort), 8_000)
-                val upstreamOut = upstream.getOutputStream()
-                val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
-                    "Host: $connectHost:$targetPort\r\n" +
-                    "Proxy-Connection: keep-alive\r\n\r\n"
-                upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
-                upstreamOut.flush()
-
-                val proxyRespBytes = readHttpHeaderBlock(upstream.getInputStream())
-                val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
-                    .substringBefore("\r\n")
-                if (!statusLine.contains(" 200")) {
-                    if (clientOut != null) {
-                        writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
-                    }
+        if (upstreamProxy != null) {
+            val upstream = Socket()
+            return try {
+                if (!protectSocket(upstream)) {
                     runCatching { upstream.close() }
                     return null
                 }
-            } else {
-                upstream.connect(InetSocketAddress(connectHost, targetPort), 8_000)
+                upstream.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
+                upstream.keepAlive = dpiConfig.idleKeepAliveEnabled
+                val (proxyHost, proxyPort) = upstreamProxy
+                val proxyCandidates = resolveCandidateAddresses(proxyHost)
+                var connected = false
+                if (proxyCandidates.isNotEmpty()) {
+                    for (addr in proxyCandidates) {
+                        val candidate = Socket()
+                        if (!protectSocket(candidate)) {
+                            runCatching { candidate.close() }
+                            continue
+                        }
+                        candidate.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
+                        candidate.keepAlive = dpiConfig.idleKeepAliveEnabled
+                        val ok = runCatching {
+                            candidate.connect(InetSocketAddress(addr, proxyPort), 5_000)
+                        }.isSuccess
+                        if (ok) {
+                            runCatching { upstream.close() }
+                            val upstreamOut = candidate.getOutputStream()
+                            val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
+                                "Host: $connectHost:$targetPort\r\n" +
+                                "Proxy-Connection: keep-alive\r\n\r\n"
+                            upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
+                            upstreamOut.flush()
+
+                            val proxyRespBytes = readHttpHeaderBlock(candidate.getInputStream())
+                            val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
+                                .substringBefore("\r\n")
+                            if (!statusLine.contains(" 200")) {
+                                if (clientOut != null) {
+                                    writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
+                                }
+                                runCatching { candidate.close() }
+                                return null
+                            }
+                            return candidate
+                        } else {
+                            runCatching { candidate.close() }
+                        }
+                    }
+                }
+                if (!connected) {
+                    upstream.connect(InetSocketAddress(proxyHost, proxyPort), 6_000)
+                    val upstreamOut = upstream.getOutputStream()
+                    val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
+                        "Host: $connectHost:$targetPort\r\n" +
+                        "Proxy-Connection: keep-alive\r\n\r\n"
+                    upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
+                    upstreamOut.flush()
+
+                    val proxyRespBytes = readHttpHeaderBlock(upstream.getInputStream())
+                    val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
+                        .substringBefore("\r\n")
+                    if (!statusLine.contains(" 200")) {
+                        if (clientOut != null) {
+                            writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
+                        }
+                        runCatching { upstream.close() }
+                        return null
+                    }
+                }
+                upstream
+            } catch (_: Exception) {
+                runCatching { upstream.close() }
+                null
             }
-            upstream
+        }
+
+        val candidates = resolveCandidateAddresses(connectHost)
+        for (addr in candidates) {
+            val socket = Socket()
+            if (!protectSocket(socket)) {
+                runCatching { socket.close() }
+                continue
+            }
+            socket.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
+            socket.keepAlive = dpiConfig.idleKeepAliveEnabled
+            val ok = runCatching {
+                socket.connect(InetSocketAddress(addr, targetPort), 4_500)
+            }.isSuccess
+            if (ok) {
+                return socket
+            }
+            runCatching { socket.close() }
+        }
+
+        // Last-resort direct hostname connect if custom resolution returned nothing
+        val fallback = Socket()
+        return try {
+            if (!protectSocket(fallback)) {
+                runCatching { fallback.close() }
+                return null
+            }
+            fallback.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
+            fallback.keepAlive = dpiConfig.idleKeepAliveEnabled
+            fallback.connect(InetSocketAddress(connectHost, targetPort), 5_500)
+            fallback
         } catch (_: Exception) {
-            runCatching { upstream.close() }
+            runCatching { fallback.close() }
             null
         }
+    }
+
+    private fun resolveCandidateAddresses(host: String): List<InetAddress> {
+        val fromProvider = runCatching { resolveTargetAddresses(host) }.getOrNull().orEmpty()
+        if (fromProvider.isNotEmpty()) {
+            return sortIpv4First(fromProvider)
+        }
+        return defaultResolveAddressesIpv4First(host)
     }
 
     private fun handlePlainHttpRequest(
@@ -438,18 +637,19 @@ class LocalFilteringProxyServer(
         val connectHost = resolveTargetHost(host).ifBlank { host }
         val dpiConfig = dpiBypassConfigProvider()
         val strategy = DpiBypassEngine.resolveStrategy(host, dpiConfig)
-        val upstream = Socket()
+        val upstream = openUpstreamConnectSocket(
+            connectHost = connectHost,
+            targetPort = targetPort,
+            upstreamProxy = null,
+            dpiConfig = dpiConfig,
+            clientOut = clientOut
+        ) ?: run {
+            runCatching { client.close() }
+            return
+        }
         try {
-            if (!protectSocket(upstream)) {
-                runCatching { upstream.close() }
-                runCatching { client.close() }
-                return
-            }
-            upstream.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
-            upstream.keepAlive = dpiConfig.idleKeepAliveEnabled
-            client.keepAlive = dpiConfig.idleKeepAliveEnabled
-            upstream.connect(InetSocketAddress(connectHost, targetPort), 8_000)
             upstream.soTimeout = 0
+            client.keepAlive = dpiConfig.idleKeepAliveEnabled
             client.soTimeout = 0
 
             val rebuiltHeaders = StringBuilder()
@@ -631,6 +831,19 @@ class LocalFilteringProxyServer(
     }
 
     companion object {
+        fun sortIpv4First(addresses: List<InetAddress>): List<InetAddress> {
+            if (addresses.size <= 1) return addresses
+            val v4 = addresses.filterIsInstance<Inet4Address>()
+            val other = addresses.filter { it !is Inet4Address }
+            return (v4 + other).distinct()
+        }
+
+        fun defaultResolveAddressesIpv4First(host: String): List<InetAddress> {
+            return runCatching {
+                sortIpv4First(InetAddress.getAllByName(host).toList())
+            }.getOrDefault(emptyList())
+        }
+
         fun parseAuthority(authority: String, defaultPort: Int): Pair<String, Int> {
             val trimmed = authority.trim()
             if (trimmed.isEmpty()) return "" to defaultPort

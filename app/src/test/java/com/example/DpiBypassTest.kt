@@ -25,7 +25,9 @@ import com.example.service.DpiBypassConfig
 import com.example.service.DpiBypassEngine
 import com.example.service.DpiStrategy
 import com.example.service.FirewallTunnelMode
+import com.example.service.LocalFilteringProxyServer
 import com.example.service.PerAppFirewallEngine
+import com.example.service.ProxyFilterDecision
 import com.example.ui.WebsiteBlockerContent
 import com.example.ui.WebsiteBlockerUiState
 import com.example.ui.components.DpiBypassShieldCard
@@ -45,6 +47,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
+import java.net.Inet6Address
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -356,6 +364,145 @@ class DpiBypassTest {
         composeRule.onNodeWithTag("dns_log_search_input").assertIsDisplayed()
     }
 
+    @Test
+    fun `proxy server sorts IPv4 first and handles large multi-chunk TLS ClientHello under Autopilot`() {
+        val v6 = InetAddress.getByName("2606:4700:4700::1111") as Inet6Address
+        val v4 = InetAddress.getByName("1.1.1.1")
+        val sorted = LocalFilteringProxyServer.sortIpv4First(listOf(v6, v4))
+        assertEquals(v4, sorted.first())
+
+        val mockServer = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        val receivedLen = AtomicInteger(0)
+        val serverThread = thread {
+            mockServer.use { srv ->
+                val conn = srv.accept()
+                conn.use { sock ->
+                    val input = sock.getInputStream()
+                    val hdr = ByteArray(5)
+                    var n = 0
+                    while (n < 5) {
+                        val r = input.read(hdr, n, 5 - n)
+                        if (r <= 0) break
+                        n += r
+                    }
+                    val recLen = ((hdr[3].toInt() and 0xFF) shl 8) or (hdr[4].toInt() and 0xFF)
+                    val rest = ByteArray(recLen)
+                    var got = 0
+                    while (got < recLen) {
+                        val r = input.read(rest, got, recLen - got)
+                        if (r <= 0) break
+                        got += r
+                    }
+                    receivedLen.set(5 + got)
+                    sock.getOutputStream().write(byteArrayOf(0x16, 0x03, 0x03, 0x00, 0x02, 0x02, 0x00))
+                    sock.getOutputStream().flush()
+                }
+            }
+        }
+
+        val proxy = LocalFilteringProxyServer(
+            port = 0,
+            stripTrackingParams = true,
+            protectSocket = { true },
+            evaluateRequest = { _, _ -> ProxyFilterDecision(allow = true, reason = "OK") },
+            resolveTargetAddresses = { listOf(InetAddress.getByName("127.0.0.1")) },
+            dpiBypassConfigProvider = { DpiBypassConfig(mode = DpiBypassMode.AUTOPILOT, fragmentDelayMs = 0) },
+            onRequestLogged = { _, _ -> }
+        )
+        assertTrue(proxy.start())
+        try {
+            val largeClientHello = buildSyntheticTlsClientHello("pq.example.com", extraExtensionPadding = 2600)
+            assertTrue(largeClientHello.size > 2400)
+
+            Socket("127.0.0.1", proxy.boundPort).use { client ->
+                client.soTimeout = 4_000
+                val out = client.getOutputStream()
+                val inp = client.getInputStream()
+                out.write("CONNECT pq.example.com:${mockServer.localPort} HTTP/1.1\r\nHost: pq.example.com\r\n\r\n".toByteArray())
+                out.flush()
+
+                val respBuf = ByteArray(512)
+                val hdrLen = inp.read(respBuf)
+                assertTrue(String(respBuf, 0, hdrLen).contains("200"))
+
+                // Send large ClientHello in two separate writes
+                out.write(largeClientHello, 0, 1200)
+                out.flush()
+                Thread.sleep(25)
+                out.write(largeClientHello, 1200, largeClientHello.size - 1200)
+                out.flush()
+
+                val serverReply = ByteArray(64)
+                val replyLen = inp.read(serverReply)
+                assertEquals(7, replyLen)
+                assertEquals(largeClientHello.size, receivedLen.get())
+            }
+        } finally {
+            proxy.stop()
+            runCatching { mockServer.close() }
+            serverThread.join(2000)
+        }
+    }
+
+    @Test
+    fun `proxy server falls back to DIRECT when Autopilot probes fail to receive ServerHello`() {
+        val mockServer = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        val attemptCount = AtomicInteger(0)
+        val serverThread = thread {
+            mockServer.use { srv ->
+                // Attempt 1 (SNI split) & Attempt 2 (Micro chunks): immediately close; Attempt 3 (DIRECT): reply!
+                while (attemptCount.get() < 3) {
+                    val conn = runCatching { srv.accept() }.getOrNull() ?: break
+                    val attempt = attemptCount.incrementAndGet()
+                    conn.use { sock ->
+                        val buf = ByteArray(4096)
+                        runCatching { sock.getInputStream().read(buf) }
+                        if (attempt >= 3) {
+                            sock.getOutputStream().write(byteArrayOf(0x16, 0x03, 0x03, 0x00, 0x02, 0x02, 0x00))
+                            sock.getOutputStream().flush()
+                        }
+                    }
+                }
+            }
+        }
+
+        val proxy = LocalFilteringProxyServer(
+            port = 0,
+            stripTrackingParams = true,
+            protectSocket = { true },
+            evaluateRequest = { _, _ -> ProxyFilterDecision(allow = true, reason = "OK") },
+            resolveTargetAddresses = { listOf(InetAddress.getByName("127.0.0.1")) },
+            dpiBypassConfigProvider = { DpiBypassConfig(mode = DpiBypassMode.AUTOPILOT, fragmentDelayMs = 0) },
+            onRequestLogged = { _, _ -> }
+        )
+        assertTrue(proxy.start())
+        try {
+            val hello = buildSyntheticTlsClientHello("strict.cdn.example")
+            Socket("127.0.0.1", proxy.boundPort).use { client ->
+                client.soTimeout = 5_000
+                val out = client.getOutputStream()
+                val inp = client.getInputStream()
+                out.write("CONNECT strict.cdn.example:${mockServer.localPort} HTTP/1.1\r\n\r\n".toByteArray())
+                out.flush()
+                val hdrBuf = ByteArray(512)
+                val hdrLen = inp.read(hdrBuf)
+                assertTrue(String(hdrBuf, 0, hdrLen).contains("200"))
+
+                out.write(hello)
+                out.flush()
+
+                val serverReply = ByteArray(64)
+                val replyLen = inp.read(serverReply)
+                assertEquals(7, replyLen)
+                assertEquals(3, attemptCount.get())
+            }
+        } finally {
+            proxy.stop()
+            runCatching { mockServer.close() }
+            serverThread.join(2000)
+        }
+    }
+
     private class RecordingOutputStream : OutputStream() {
         private val buffer = ByteArrayOutputStream()
         val writeSizes = mutableListOf<Int>()
@@ -378,7 +525,10 @@ class DpiBypassTest {
         fun toByteArray(): ByteArray = buffer.toByteArray()
     }
 
-    private fun buildSyntheticTlsClientHello(hostname: String): ByteArray {
+    private fun buildSyntheticTlsClientHello(
+        hostname: String,
+        extraExtensionPadding: Int = 0
+    ): ByteArray {
         val hostBytes = hostname.toByteArray(Charsets.US_ASCII)
         val sniEntryLen = 1 + 2 + hostBytes.size
         val sniExtData = ByteArrayOutputStream().apply {
@@ -396,6 +546,13 @@ class DpiBypassTest {
             write((sniExtData.size shr 8) and 0xFF)
             write(sniExtData.size and 0xFF)
             write(sniExtData)
+            if (extraExtensionPadding > 0) {
+                write(0x00)
+                write(0x15) // padding extension
+                write((extraExtensionPadding shr 8) and 0xFF)
+                write(extraExtensionPadding and 0xFF)
+                write(ByteArray(extraExtensionPadding))
+            }
         }.toByteArray()
 
         val body = ByteArrayOutputStream().apply {

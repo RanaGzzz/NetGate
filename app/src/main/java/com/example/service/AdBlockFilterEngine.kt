@@ -603,8 +603,8 @@ object AdBlockFilterEngine {
             val url = URL(targetUrl)
             connection = (url.openConnection() as HttpsURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = 2500
-                readTimeout = 2500
+                connectTimeout = 1600
+                readTimeout = 1600
                 doOutput = true
                 useCaches = false
                 setRequestProperty("Content-Type", "application/dns-message")
