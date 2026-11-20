@@ -28,6 +28,8 @@ import com.example.data.local.WebsiteRuleType
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.DnsQueryStatus
+import com.example.data.model.DnsTransportMode
+import com.example.data.model.DpiBypassMode
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.SniProxyPreset
 import com.example.data.model.UpstreamDnsServer
@@ -49,6 +51,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.DataInputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
@@ -56,6 +59,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -82,6 +86,12 @@ data class VpnRuntimeState(
     val activeSniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
     val safeRewriteCount: Long = 0L,
     val isGlobalWifiBlocked: Boolean = false,
+    val dpiBypassMode: DpiBypassMode = DpiBypassMode.OFF,
+    val dpiBypassedConnectionsCount: Long = 0L,
+    val dpiAutopilotLearnedCount: Int = 0,
+    val dnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK,
+    val antiDnsPoisonBlockedCount: Long = 0L,
+    val quicStrippedCount: Long = 0L,
     val recentBlockedDomains: List<String> = emptyList(),
     val recentDnsLogs: List<DnsQueryLogEntry> = emptyList()
 )
@@ -102,6 +112,7 @@ class NetGateVpnService : VpnService() {
     private var networkCallbackRegistered = false
     private val wifiNetworks = mutableSetOf<Network>()
     private val cellularNetworks = mutableSetOf<Network>()
+    private val otherNetworks = mutableSetOf<Network>()
 
     @Volatile
     private var latestRules: List<AppNetworkRuleEntity> = emptyList()
@@ -170,6 +181,9 @@ class NetGateVpnService : VpnService() {
     private var latestBypassPackages: Set<String> = emptySet()
 
     @Volatile
+    private var latestBlockedPackages: Set<String> = emptySet()
+
+    @Volatile
     private var latestBlockedUids: Set<Int> = emptySet()
 
     @Volatile
@@ -177,6 +191,27 @@ class NetGateVpnService : VpnService() {
 
     @Volatile
     private var latestFullPreferences: FirewallPreferencesState = FirewallPreferencesState()
+
+    @Volatile
+    private var latestDpiBypassMode: DpiBypassMode = DpiBypassMode.OFF
+
+    @Volatile
+    private var latestDpiFragmentChunkSize: Int = 4
+
+    @Volatile
+    private var latestDpiFragmentDelayMs: Int = 1
+
+    @Volatile
+    private var latestDpiIdleKeepAliveEnabled: Boolean = true
+
+    @Volatile
+    private var latestBlockQuicForDpiBypass: Boolean = true
+
+    @Volatile
+    private var latestAntiDnsPoisonEnabled: Boolean = true
+
+    @Volatile
+    private var latestDnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK
 
     @Volatile
     private var currentNetworkType: ActiveNetworkType = ActiveNetworkType.NONE
@@ -193,6 +228,9 @@ class NetGateVpnService : VpnService() {
     private val blockedProxyCount = AtomicLong(0L)
     private val allowedProxyCount = AtomicLong(0L)
     private val safeRewriteCount = AtomicLong(0L)
+    private val dpiBypassedCount = AtomicLong(0L)
+    private val antiDnsPoisonCount = AtomicLong(0L)
+    private val quicStrippedCount = AtomicLong(0L)
     private val pendingLifetimeAdsDelta = AtomicLong(0L)
     private val isFlushingLifetimeAds = AtomicBoolean(false)
     private val dnsLogSeq = AtomicLong(1L)
@@ -217,6 +255,7 @@ class NetGateVpnService : VpnService() {
             synchronized(this@NetGateVpnService) {
                 wifiNetworks.remove(network)
                 cellularNetworks.remove(network)
+                otherNetworks.remove(network)
             }
             recomputeNetworkAndRebuild()
         }
@@ -243,6 +282,13 @@ class NetGateVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             ACTION_RELOAD_RULES -> {
+                if (prepare(this) != null) {
+                    serviceScope.launch {
+                        preferences.setFirewallEnabled(false)
+                        stopFirewall()
+                    }
+                    return START_NOT_STICKY
+                }
                 startForegroundCompat(
                     buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
                 )
@@ -250,6 +296,13 @@ class NetGateVpnService : VpnService() {
                 return START_STICKY
             }
             else -> {
+                if (prepare(this) != null) {
+                    serviceScope.launch {
+                        preferences.setFirewallEnabled(false)
+                        stopFirewall()
+                    }
+                    return START_NOT_STICKY
+                }
                 startForegroundCompat(
                     buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
                 )
@@ -357,6 +410,13 @@ class NetGateVpnService : VpnService() {
                 latestCustomSniProxyPort = prefs.customSniProxyPort.coerceIn(1, 65535)
                 latestIsDeepMonitorEnabled = prefs.isDeepMonitorEnabled
                 latestGlobalWifiBlocked = prefs.globalWifiBlocked
+                latestDpiBypassMode = prefs.dpiBypassMode
+                latestDpiFragmentChunkSize = prefs.dpiFragmentChunkSize
+                latestDpiFragmentDelayMs = prefs.dpiFragmentDelayMs
+                latestDpiIdleKeepAliveEnabled = prefs.dpiIdleKeepAliveEnabled
+                latestBlockQuicForDpiBypass = prefs.blockQuicForDpiBypass
+                latestAntiDnsPoisonEnabled = prefs.antiDnsPoisonEnabled
+                latestDnsTransportMode = prefs.dnsTransportMode
 
                 val desiredAdSig = if (!prefs.isAdBlockerEnabled && !prefs.isYoutubeAdBlockEnabled) {
                     "OFF"
@@ -438,16 +498,21 @@ class NetGateVpnService : VpnService() {
         val all = cm.allNetworks
         var hasWifi = false
         var hasCell = false
+        var hasOther = false
         for (net in all) {
             val caps = cm.getNetworkCapabilities(net) ?: continue
             if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
             if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) hasWifi = true
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) hasCell = true
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> hasWifi = true
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> hasCell = true
+                else -> hasOther = true
+            }
         }
         return when {
             hasWifi -> ActiveNetworkType.WIFI
             hasCell -> ActiveNetworkType.MOBILE_DATA
+            hasOther -> ActiveNetworkType.OTHER
             else -> ActiveNetworkType.NONE
         }
     }
@@ -458,17 +523,15 @@ class NetGateVpnService : VpnService() {
         available: Boolean
     ) {
         if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return
+        val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         synchronized(this) {
-            if (available && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                wifiNetworks.add(network)
-            } else {
-                wifiNetworks.remove(network)
-            }
-            if (available && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                cellularNetworks.add(network)
-            } else {
-                cellularNetworks.remove(network)
-            }
+            val isWifi = available && hasInternet && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+            val isCell = available && hasInternet && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+            val isOther = available && hasInternet && !isWifi && !isCell
+
+            if (isWifi) wifiNetworks.add(network) else wifiNetworks.remove(network)
+            if (isCell) cellularNetworks.add(network) else cellularNetworks.remove(network)
+            if (isOther) otherNetworks.add(network) else otherNetworks.remove(network)
         }
         recomputeNetworkAndRebuild()
     }
@@ -478,6 +541,7 @@ class NetGateVpnService : VpnService() {
             when {
                 wifiNetworks.isNotEmpty() -> ActiveNetworkType.WIFI
                 cellularNetworks.isNotEmpty() -> ActiveNetworkType.MOBILE_DATA
+                otherNetworks.isNotEmpty() -> ActiveNetworkType.OTHER
                 else -> ActiveNetworkType.NONE
             }
         }
@@ -494,7 +558,9 @@ class NetGateVpnService : VpnService() {
             when (networkType) {
                 ActiveNetworkType.WIFI -> wifiNetworks.toTypedArray().takeIf { it.isNotEmpty() }
                 ActiveNetworkType.MOBILE_DATA -> cellularNetworks.toTypedArray().takeIf { it.isNotEmpty() }
-                ActiveNetworkType.OTHER -> (wifiNetworks + cellularNetworks).toTypedArray().takeIf { it.isNotEmpty() }
+                ActiveNetworkType.OTHER -> otherNetworks.toTypedArray()
+                    .ifEmpty { (wifiNetworks + cellularNetworks).toTypedArray() }
+                    .takeIf { it.isNotEmpty() }
                 ActiveNetworkType.NONE -> emptyArray()
             }
         }
@@ -521,70 +587,34 @@ class NetGateVpnService : VpnService() {
     }.getOrDefault(false)
 
     private suspend fun rebuildTunnel(forceRebuild: Boolean) = tunnelMutex.withLock {
+        val prefs = latestFullPreferences
         val netType = currentNetworkType
         val websiteMode = latestWebsiteFilterMode
         val adBlockEnabled = latestIsAdBlockerEnabled
-        val httpsProxyEnabled = latestIsHttpsProxyEnabled
-        val proxyPort = latestHttpsProxyPort.coerceIn(1024, 65535)
-        val stripTracking = latestStripTrackingParams
-        val safeSearchEnabled = latestIsSafeSearchEnabled
-        val youtubeRestrictedMode = latestYoutubeRestrictedMode
-        val youtubeAdBlockEnabled = latestIsYoutubeAdBlockEnabled
-        val targetBlockedPackages = when (netType) {
-            ActiveNetworkType.WIFI -> latestRules.filter { it.blockWifi }.map { it.packageName }
-            ActiveNetworkType.MOBILE_DATA -> latestRules.filter { it.blockMobileData }.map { it.packageName }
-            ActiveNetworkType.OTHER -> latestRules.filter { it.blockWifi && it.blockMobileData }.map { it.packageName }
-            ActiveNetworkType.NONE -> emptyList()
-        }.filter { it != packageName }.distinct().sorted()
 
-        val globalWifiLockNow = (netType == ActiveNetworkType.WIFI && latestGlobalWifiBlocked)
-        val needsDnsProxy = !globalWifiLockNow && (
-            websiteMode != WebsiteFilterMode.OFF ||
-                adBlockEnabled ||
-                httpsProxyEnabled ||
-                safeSearchEnabled ||
-                youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
-                youtubeAdBlockEnabled ||
-                (latestIsDeepMonitorEnabled && targetBlockedPackages.isEmpty())
-            )
-
-        latestBlockedUids = targetBlockedPackages.mapNotNull { resolvePackageUid(it) }.toSet()
-
-        val installedBlocked = targetBlockedPackages.filter { isPackageInstalled(it) }
-        val effectiveBypass = if (!needsDnsProxy) {
-            emptySet()
-        } else {
-            latestBypassPackages
-                .filter { it != packageName && it !in targetBlockedPackages && isPackageInstalled(it) }
-                .toSet()
-        }
-
-        val desiredSignature = TunnelConfigSignature(
+        val plan = PerAppFirewallEngine.buildTunnelPlan(
             networkType = netType,
-            websiteMode = websiteMode,
-            adBlockerEnabled = adBlockEnabled,
-            httpsProxyEnabled = httpsProxyEnabled,
-            httpsProxyPort = proxyPort,
-            stripTrackingParams = stripTracking,
-            safeSearchEnabled = safeSearchEnabled,
-            youtubeRestrictedMode = youtubeRestrictedMode,
-            youtubeAdBlockEnabled = youtubeAdBlockEnabled,
-            sniProxyPreset = latestSniProxyPreset,
-            blockedPackages = if (!needsDnsProxy && !globalWifiLockNow) installedBlocked else emptyList(),
-            bypassPackages = effectiveBypass,
-            globalWifiLock = globalWifiLockNow
+            rules = latestRules,
+            preferences = prefs,
+            selfPackageName = packageName,
+            isPackageInstalled = ::isPackageInstalled,
+            resolvePackageUid = ::resolvePackageUid
         )
 
-        // If TUN configuration hasn't changed (e.g. only rule lists or upstream DNS changed), keep existing TUN running.
-        if (!forceRebuild && vpnInterface != null && activeTunnelSignature == desiredSignature) {
+        latestBlockedPackages = plan.blockedPackages.toSet()
+        latestBlockedUids = plan.blockedUids
+
+        // If TUN configuration hasn't changed (e.g. only upstream DNS, rule lists, or UID blocks in hybrid mode),
+        // keep existing TUN running seamlessly and refresh state + notification.
+        if (!forceRebuild && vpnInterface != null && activeTunnelSignature == plan.signature) {
             publishRuntimeState(
                 isTunnelActive = true,
                 netType = netType,
-                blockedCount = installedBlocked.size,
+                blockedCount = plan.blockedPackages.size,
                 websiteMode = websiteMode,
                 adBlockEnabled = adBlockEnabled
             )
-            updateNotification(installedBlocked.size, netType, websiteMode, adBlockEnabled)
+            updateNotification(plan.blockedPackages.size, netType, websiteMode, adBlockEnabled)
             return
         }
 
@@ -593,10 +623,7 @@ class NetGateVpnService : VpnService() {
         closeVpnInterface()
         activeTunnelSignature = null
 
-        val shouldRunTunnel = netType != ActiveNetworkType.NONE &&
-            (globalWifiLockNow || needsDnsProxy || installedBlocked.isNotEmpty())
-
-        if (!shouldRunTunnel) {
+        if (!plan.shouldRunTunnel) {
             stopProxyServerLocked()
             publishRuntimeState(
                 isTunnelActive = false,
@@ -609,151 +636,8 @@ class NetGateVpnService : VpnService() {
             return
         }
 
-        if (globalWifiLockNow) {
-            stopProxyServerLocked()
-            // Global Wi-Fi Lock: route all other device apps into blackhole TUN on Wi-Fi
-            val builder = Builder()
-                .setSession(getString(R.string.app_name))
-                .setMtu(1500)
-                .addAddress("10.1.10.1", 32)
-                .addRoute("0.0.0.0", 0)
-                .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
-                .addRoute("::", 0)
-
-            runCatching { builder.addDisallowedApplication(packageName) }
-
-            val established = runCatching { builder.establish() }.getOrNull()
-            if (established == null) {
-                publishRuntimeState(
-                    isTunnelActive = false,
-                    netType = netType,
-                    blockedCount = 0,
-                    websiteMode = websiteMode,
-                    adBlockEnabled = adBlockEnabled
-                )
-                updateNotification(0, netType, websiteMode, adBlockEnabled)
-                return
-            }
-
-            vpnInterface = established
-            activeTunnelSignature = desiredSignature
-            syncUnderlyingNetworks(netType)
-            drainJob = serviceScope.launch(Dispatchers.IO) {
-                drainPackets(established, emptyList())
-            }
-
-            publishRuntimeState(
-                isTunnelActive = true,
-                netType = netType,
-                blockedCount = installedBlocked.size,
-                websiteMode = websiteMode,
-                adBlockEnabled = adBlockEnabled
-            )
-            updateNotification(installedBlocked.size, netType, websiteMode, adBlockEnabled)
-        } else if (!needsDnsProxy) {
-            stopProxyServerLocked()
-            // Pure per-app sinkhole mode: route all traffic of blocked apps into local TUN and drop/reject packets.
-            val builder = Builder()
-                .setSession(getString(R.string.app_name))
-                .setMtu(1500)
-                .addAddress("10.1.10.1", 32)
-                .addRoute("0.0.0.0", 0)
-                .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
-                .addRoute("::", 0)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
-            }
-
-            var addedCount = 0
-            for (pkg in installedBlocked) {
-                if (runCatching { builder.addAllowedApplication(pkg) }.isSuccess) {
-                    addedCount++
-                }
-            }
-
-            // CRITICAL: Never call establish() with an empty allowed-list, as Android routes ALL apps when empty.
-            if (addedCount == 0) {
-                publishRuntimeState(
-                    isTunnelActive = false,
-                    netType = netType,
-                    blockedCount = 0,
-                    websiteMode = websiteMode,
-                    adBlockEnabled = adBlockEnabled
-                )
-                updateNotification(0, netType, websiteMode, adBlockEnabled)
-                return
-            }
-
-            val established = runCatching { builder.establish() }.getOrNull()
-            if (established == null) {
-                publishRuntimeState(
-                    isTunnelActive = false,
-                    netType = netType,
-                    blockedCount = 0,
-                    websiteMode = websiteMode,
-                    adBlockEnabled = adBlockEnabled
-                )
-                updateNotification(0, netType, websiteMode, adBlockEnabled)
-                return
-            }
-
-            vpnInterface = established
-            activeTunnelSignature = desiredSignature
-            syncUnderlyingNetworks(netType)
-            drainJob = serviceScope.launch(Dispatchers.IO) {
-                drainPackets(established, installedBlocked)
-            }
-
-            publishRuntimeState(
-                isTunnelActive = true,
-                netType = netType,
-                blockedCount = addedCount,
-                websiteMode = websiteMode,
-                adBlockEnabled = adBlockEnabled
-            )
-            updateNotification(addedCount, netType, websiteMode, adBlockEnabled)
-        } else {
-            // Start local HTTP/CONNECT & TLS SNI proxy before binding VPN HTTP Proxy if enabled
-            val proxyActiveNow = if (httpsProxyEnabled) {
-                ensureProxyServerStartedLocked(proxyPort, stripTracking)
-            } else {
-                stopProxyServerLocked()
-                false
-            }
-
-            // DNS Proxy Mode (Website Blocker, Ad Blocker, and/or HTTPS Filtering Proxy):
-            // Dual-stack IPv4 + IPv6 DNS interception plus DoH/DoT resolver routes so Chrome/Firefox cannot bypass.
-            val builder = Builder()
-                .setSession(getString(R.string.app_name))
-                .setMtu(1500)
-                .addAddress("10.1.10.1", 32)
-                .addDnsServer(VIRTUAL_DNS_SERVER)
-                .addRoute(VIRTUAL_DNS_SERVER, 32)
-                .addAddress(VIRTUAL_IPV6_ADDR, 128)
-                .addDnsServer(VIRTUAL_IPV6_DNS_SERVER)
-                .addRoute(VIRTUAL_IPV6_DNS_SERVER, 128)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
-                if (proxyActiveNow) {
-                    runCatching {
-                        builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort))
-                    }
-                }
-            }
-
-            for ((cidrIp, prefixLen) in DOH_SINKHOLE_ROUTES) {
-                runCatching { builder.addRoute(cidrIp, prefixLen) }
-            }
-
-            runCatching { builder.addDisallowedApplication(packageName) }
-            for (bypassPkg in effectiveBypass) {
-                runCatching { builder.addDisallowedApplication(bypassPkg) }
-            }
-
-            val established = runCatching { builder.establish() }.getOrNull()
-            if (established == null) {
+        when (plan.mode) {
+            FirewallTunnelMode.DISABLED -> {
                 stopProxyServerLocked()
                 publishRuntimeState(
                     isTunnelActive = false,
@@ -763,25 +647,184 @@ class NetGateVpnService : VpnService() {
                     adBlockEnabled = adBlockEnabled
                 )
                 updateNotification(0, netType, websiteMode, adBlockEnabled)
-                return
             }
 
-            vpnInterface = established
-            activeTunnelSignature = desiredSignature
-            syncUnderlyingNetworks(netType)
-            drainJob = serviceScope.launch(Dispatchers.IO) {
-                runDnsProxyLoop(established)
+            FirewallTunnelMode.GLOBAL_WIFI_LOCK -> {
+                stopProxyServerLocked()
+                val established = buildGlobalWifiLockInterface()
+                if (established == null) {
+                    publishRuntimeState(
+                        isTunnelActive = false,
+                        netType = netType,
+                        blockedCount = 0,
+                        websiteMode = websiteMode,
+                        adBlockEnabled = adBlockEnabled
+                    )
+                    updateNotification(0, netType, websiteMode, adBlockEnabled)
+                    return
+                }
+                vpnInterface = established
+                activeTunnelSignature = plan.signature
+                syncUnderlyingNetworks(netType)
+                drainJob = serviceScope.launch(Dispatchers.IO) {
+                    drainPackets(established, emptyList())
+                }
+                publishRuntimeState(
+                    isTunnelActive = true,
+                    netType = netType,
+                    blockedCount = plan.blockedPackages.size,
+                    websiteMode = websiteMode,
+                    adBlockEnabled = adBlockEnabled
+                )
+                updateNotification(plan.blockedPackages.size, netType, websiteMode, adBlockEnabled)
             }
 
-            publishRuntimeState(
-                isTunnelActive = true,
-                netType = netType,
-                blockedCount = installedBlocked.size,
-                websiteMode = websiteMode,
-                adBlockEnabled = adBlockEnabled
-            )
-            updateNotification(installedBlocked.size, netType, websiteMode, adBlockEnabled)
+            FirewallTunnelMode.PER_APP_SINKHOLE -> {
+                stopProxyServerLocked()
+                val (established, addedCount) = buildPerAppSinkholeInterface(plan.blockedPackages, netType)
+                if (established == null || addedCount == 0) {
+                    publishRuntimeState(
+                        isTunnelActive = false,
+                        netType = netType,
+                        blockedCount = 0,
+                        websiteMode = websiteMode,
+                        adBlockEnabled = adBlockEnabled
+                    )
+                    updateNotification(0, netType, websiteMode, adBlockEnabled)
+                    return
+                }
+                vpnInterface = established
+                activeTunnelSignature = plan.signature
+                syncUnderlyingNetworks(netType)
+                drainJob = serviceScope.launch(Dispatchers.IO) {
+                    drainPackets(established, plan.blockedPackages)
+                }
+                publishRuntimeState(
+                    isTunnelActive = true,
+                    netType = netType,
+                    blockedCount = addedCount,
+                    websiteMode = websiteMode,
+                    adBlockEnabled = adBlockEnabled
+                )
+                updateNotification(addedCount, netType, websiteMode, adBlockEnabled)
+            }
+
+            FirewallTunnelMode.HYBRID_DNS_AND_APP_FILTER -> {
+                val proxyActiveNow = if (plan.isHttpsProxyEnabled) {
+                    ensureProxyServerStartedLocked(plan.httpsProxyPort, plan.stripTrackingParams)
+                } else {
+                    stopProxyServerLocked()
+                    false
+                }
+                val established = buildHybridDnsProxyInterface(
+                    bypassPackages = plan.bypassPackages,
+                    netType = netType,
+                    proxyPort = if (proxyActiveNow) plan.httpsProxyPort else null
+                )
+                if (established == null) {
+                    stopProxyServerLocked()
+                    publishRuntimeState(
+                        isTunnelActive = false,
+                        netType = netType,
+                        blockedCount = 0,
+                        websiteMode = websiteMode,
+                        adBlockEnabled = adBlockEnabled
+                    )
+                    updateNotification(0, netType, websiteMode, adBlockEnabled)
+                    return
+                }
+                vpnInterface = established
+                activeTunnelSignature = plan.signature
+                syncUnderlyingNetworks(netType)
+                drainJob = serviceScope.launch(Dispatchers.IO) {
+                    runDnsProxyLoop(established)
+                }
+                publishRuntimeState(
+                    isTunnelActive = true,
+                    netType = netType,
+                    blockedCount = plan.blockedPackages.size,
+                    websiteMode = websiteMode,
+                    adBlockEnabled = adBlockEnabled
+                )
+                updateNotification(plan.blockedPackages.size, netType, websiteMode, adBlockEnabled)
+            }
         }
+    }
+
+    private fun buildGlobalWifiLockInterface(): ParcelFileDescriptor? {
+        val builder = Builder()
+            .setSession(getString(R.string.app_name))
+            .setMtu(1500)
+            .addAddress("10.1.10.1", 32)
+            .addRoute("0.0.0.0", 0)
+            .addAddress(VIRTUAL_IPV6_ADDR, 128)
+            .addRoute("::", 0)
+        runCatching { builder.addDisallowedApplication(packageName) }
+        return runCatching { builder.establish() }.getOrNull()
+    }
+
+    private fun buildPerAppSinkholeInterface(
+        blockedPackages: List<String>,
+        netType: ActiveNetworkType
+    ): Pair<ParcelFileDescriptor?, Int> {
+        val builder = Builder()
+            .setSession(getString(R.string.app_name))
+            .setMtu(1500)
+            .addAddress("10.1.10.1", 32)
+            .addRoute("0.0.0.0", 0)
+            .addAddress(VIRTUAL_IPV6_ADDR, 128)
+            .addRoute("::", 0)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
+        }
+
+        var addedCount = 0
+        for (pkg in blockedPackages) {
+            if (runCatching { builder.addAllowedApplication(pkg) }.isSuccess) {
+                addedCount++
+            }
+        }
+        // CRITICAL: Never call establish() with an empty allowed-list, as Android routes ALL apps when empty.
+        if (addedCount == 0) return null to 0
+
+        return runCatching { builder.establish() }.getOrNull() to addedCount
+    }
+
+    private fun buildHybridDnsProxyInterface(
+        bypassPackages: Set<String>,
+        netType: ActiveNetworkType,
+        proxyPort: Int?
+    ): ParcelFileDescriptor? {
+        val builder = Builder()
+            .setSession(getString(R.string.app_name))
+            .setMtu(1500)
+            .addAddress("10.1.10.1", 32)
+            .addDnsServer(VIRTUAL_DNS_SERVER)
+            .addRoute(VIRTUAL_DNS_SERVER, 32)
+            .addAddress(VIRTUAL_IPV6_ADDR, 128)
+            .addDnsServer(VIRTUAL_IPV6_DNS_SERVER)
+            .addRoute(VIRTUAL_IPV6_DNS_SERVER, 128)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setMetered(netType == ActiveNetworkType.MOBILE_DATA)
+            if (proxyPort != null) {
+                runCatching {
+                    builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", proxyPort))
+                }
+            }
+        }
+
+        for ((cidrIp, prefixLen) in DOH_SINKHOLE_ROUTES) {
+            runCatching { builder.addRoute(cidrIp, prefixLen) }
+        }
+
+        runCatching { builder.addDisallowedApplication(packageName) }
+        for (bypassPkg in bypassPackages) {
+            runCatching { builder.addDisallowedApplication(bypassPkg) }
+        }
+
+        return runCatching { builder.establish() }.getOrNull()
     }
 
     private fun ensureProxyServerStartedLocked(port: Int, stripTracking: Boolean): Boolean {
@@ -799,6 +842,18 @@ class NetGateVpnService : VpnService() {
             evaluateRequest = ::evaluateProxyRequest,
             resolveTargetHost = ::resolveProxyTargetHost,
             upstreamProxyProvider = ::provideUpstreamSniProxy,
+            dpiBypassConfigProvider = {
+                DpiBypassConfig(
+                    mode = latestDpiBypassMode,
+                    chunkSize = latestDpiFragmentChunkSize,
+                    fragmentDelayMs = latestDpiFragmentDelayMs,
+                    idleKeepAliveEnabled = latestDpiIdleKeepAliveEnabled
+                )
+            },
+            onDpiBypassApplied = { _, _ ->
+                dpiBypassedCount.incrementAndGet()
+                publishDnsStatsOnly()
+            },
             onRequestLogged = ::handleProxyLogged,
             onTrafficRelayed = { host, targetPort, protocol, remoteIp, bytesSent, bytesReceived, decision ->
                 if (latestIsDeepMonitorEnabled) {
@@ -927,13 +982,12 @@ class NetGateVpnService : VpnService() {
                     if (bytesRead < 0) break
                     if (bytesRead == 0) continue
 
-                    val packetCopy = buffer.copyOf(bytesRead)
-                    val parsed = TunPacketInspector.parseIpPacket(packetCopy, bytesRead)
                     blockedPacketsCount.incrementAndGet()
+                    val parsed = TunPacketInspector.parseIpPacket(buffer, bytesRead) ?: continue
 
-                    if (parsed != null) {
-                        if (parsed.protocol == TunPacketInspector.IPPROTO_UDP && parsed.dstPort == 53) {
-                            val dnsQuery = DnsPacketFilter.parseUdpDnsQuery(packetCopy, bytesRead)
+                    when (PerAppFirewallEngine.classifySinkholePacket(parsed)) {
+                        BlockedPacketAction.REJECT_DNS_NXDOMAIN -> {
+                            val dnsQuery = DnsPacketFilter.parseUdpDnsQuery(buffer, bytesRead)
                             if (dnsQuery != null) {
                                 sendNxDomain(dnsQuery, output)
                                 recordInterceptedAppPacket(
@@ -943,8 +997,17 @@ class NetGateVpnService : VpnService() {
                                 )
                                 continue
                             }
-                        } else if (parsed.protocol == TunPacketInspector.IPPROTO_TCP && parsed.isTcpSyn) {
-                            val rstPacket = DnsPacketFilter.buildTcpResetPacket(packetCopy, bytesRead)
+                            val icmpPacket = DnsPacketFilter.buildIcmpUnreachablePacket(buffer, bytesRead)
+                            if (icmpPacket != null) {
+                                synchronized(tunWriteLock) {
+                                    runCatching { output.write(icmpPacket) }
+                                }
+                            }
+                        }
+
+                        BlockedPacketAction.REJECT_TCP_RST -> {
+                            // Reset both new SYN handshakes and already-open sockets immediately.
+                            val rstPacket = DnsPacketFilter.buildTcpResetPacket(buffer, bytesRead)
                             if (rstPacket != null) {
                                 synchronized(tunWriteLock) {
                                     runCatching { output.write(rstPacket) }
@@ -952,12 +1015,23 @@ class NetGateVpnService : VpnService() {
                             }
                         }
 
-                        recordInterceptedAppPacket(
-                            parsed = parsed,
-                            domainOrHost = parsed.dstIpText,
-                            blockedPackages = blockedPackages
-                        )
+                        BlockedPacketAction.REJECT_ICMP_UNREACHABLE -> {
+                            val icmpPacket = DnsPacketFilter.buildIcmpUnreachablePacket(buffer, bytesRead)
+                            if (icmpPacket != null) {
+                                synchronized(tunWriteLock) {
+                                    runCatching { output.write(icmpPacket) }
+                                }
+                            }
+                        }
+
+                        BlockedPacketAction.DROP_SILENTLY -> Unit
                     }
+
+                    recordInterceptedAppPacket(
+                        parsed = parsed,
+                        domainOrHost = parsed.dstIpText,
+                        blockedPackages = blockedPackages
+                    )
                 }
             }
         } catch (_: IOException) {
@@ -1036,7 +1110,10 @@ class NetGateVpnService : VpnService() {
 
     private fun isProxyClientSocketBlocked(client: java.net.Socket): Boolean {
         val blockedUids = latestBlockedUids
-        if (blockedUids.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val blockedPkgs = latestBlockedPackages
+        if ((blockedUids.isEmpty() && blockedPkgs.isEmpty()) || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return false
+        }
         val cm = connectivityManager ?: return false
         val clientLocal = client.remoteSocketAddress as? InetSocketAddress ?: return false
         val proxyRemote = client.localSocketAddress as? InetSocketAddress ?: return false
@@ -1046,7 +1123,13 @@ class NetGateVpnService : VpnService() {
                 clientLocal,
                 proxyRemote
             )
-            uid in blockedUids
+            if (uid <= 0) {
+                false
+            } else if (uid in blockedUids) {
+                true
+            } else {
+                packageManager.getPackagesForUid(uid)?.any { it in blockedPkgs } == true
+            }
         }.getOrDefault(false)
     }
 
@@ -1087,8 +1170,12 @@ class NetGateVpnService : VpnService() {
 
     private fun handleDnsQuery(query: ParsedDnsQuery, output: FileOutputStream) {
         val isCanary = DnsPacketFilter.isInternalBypassCanary(query.domain)
-        val ownerPackage = if (!isCanary) resolveQueryOwnerPackage(query) else ""
-        val isAppBlockedByUid = isQueryFromBlockedUid(query)
+        val owner = if (!isCanary) resolveDnsQueryOwner(query) else null
+        val ownerPackage = owner?.primaryPackage.orEmpty()
+        val isAppBlockedByUid = owner != null && (
+            owner.uid in latestBlockedUids ||
+                owner.packages.any { it in latestBlockedPackages }
+            )
         if (isAppBlockedByUid) {
             sendNxDomain(query, output)
             if (!isCanary) {
@@ -1220,6 +1307,22 @@ class NetGateVpnService : VpnService() {
             }
         }
 
+        if (!isExplicitlyWhitelisted &&
+            latestDpiBypassMode != DpiBypassMode.OFF &&
+            latestBlockQuicForDpiBypass &&
+            DnsPacketFilter.extractQueryType(query) == 65
+        ) {
+            // Strip HTTP/3 QUIC SVCB/HTTPS record so browsers downgrade cleanly onto TLS/TCP for SNI DPI bypass.
+            val noDataPacket = DnsPacketFilter.buildNoDataDnsResponsePacket(query)
+            synchronized(tunWriteLock) {
+                runCatching { output.write(noDataPacket) }
+            }
+            quicStrippedCount.incrementAndGet()
+            recordDnsLog(query.domain, DnsQueryStatus.PASSTHROUGH, "QUIC Downgrade (DPI Bypass)")
+            publishDnsStatsOnly()
+            return
+        }
+
         val safeRewrite = if (!isExplicitlyWhitelisted) {
             DnsPacketFilter.resolveSafeSearchAlias(
                 domain = query.domain,
@@ -1233,7 +1336,7 @@ class NetGateVpnService : VpnService() {
         if (safeRewrite != null) {
             val rewrittenPayload = DnsPacketFilter.buildRewrittenQueryPayload(query, safeRewrite.aliasDomain)
             if (rewrittenPayload != null) {
-                val aliasResponse = resolveDnsUpstream(rewrittenPayload).first
+                val aliasResponse = resolveDnsUpstream(rewrittenPayload, safeRewrite.aliasDomain).first
                 if (aliasResponse != null) {
                     val rewrittenAnswer = DnsPacketFilter.buildRewrittenAnswerPayload(query, aliasResponse)
                     if (rewrittenAnswer != null) {
@@ -1255,7 +1358,7 @@ class NetGateVpnService : VpnService() {
             }
         }
 
-        val (upstreamDnsResponse, upstreamLabel) = resolveDnsUpstream(query.dnsPayload)
+        val (upstreamDnsResponse, upstreamLabel) = resolveDnsUpstream(query.dnsPayload, query.domain)
 
         if (upstreamDnsResponse != null) {
             val responsePacket = DnsPacketFilter.buildDnsResponsePacket(query, upstreamDnsResponse)
@@ -1273,7 +1376,11 @@ class NetGateVpnService : VpnService() {
                     context = applicationContext,
                     domain = query.domain,
                     remoteIp = primaryIp,
-                    remotePort = if (latestIsHttpsProxyEnabled) latestHttpsProxyPort else 443,
+                    remotePort = if (latestIsHttpsProxyEnabled || latestDpiBypassMode != DpiBypassMode.OFF) {
+                        latestHttpsProxyPort
+                    } else {
+                        443
+                    },
                     protocol = "DNS",
                     appPackage = ownerPackage,
                     bytesSent = query.dnsPayload.size.toLong(),
@@ -1285,17 +1392,124 @@ class NetGateVpnService : VpnService() {
         }
     }
 
-    private fun resolveDnsUpstream(dnsPayload: ByteArray): Pair<ByteArray?, String> {
-        return if (latestUseDohUpstream) {
-            val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
-            if (dohResp != null) {
-                dohResp to "${latestUpstreamDnsTitle} DoH"
-            } else {
-                forwardDnsQuery(dnsPayload) to "${latestUpstreamDnsTitle} UDP"
+    private fun resolveDnsUpstream(dnsPayload: ByteArray, domain: String): Pair<ByteArray?, String> {
+        val antiPoison = latestAntiDnsPoisonEnabled
+        return when (latestDnsTransportMode) {
+            DnsTransportMode.DNS_OVER_TCP -> {
+                val tcpResp = forwardDnsOverTcp(dnsPayload)
+                if (tcpResp != null && !isPoisoned(domain, tcpResp, antiPoison)) {
+                    tcpResp to "${latestUpstreamDnsTitle} DoTCP"
+                } else {
+                    val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+                    if (dohResp != null) {
+                        dohResp to "${latestUpstreamDnsTitle} DoH"
+                    } else {
+                        forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
+                    }
+                }
             }
-        } else {
-            forwardDnsQuery(dnsPayload) to "${latestUpstreamDnsTitle} UDP"
+
+            DnsTransportMode.UDP_THEN_TCP -> {
+                val udpResp = forwardDnsQuery(dnsPayload)
+                if (udpResp != null && !isPoisoned(domain, udpResp, antiPoison)) {
+                    udpResp to "${latestUpstreamDnsTitle} UDP"
+                } else {
+                    if (udpResp != null) {
+                        antiDnsPoisonCount.incrementAndGet()
+                    }
+                    val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+                    if (dohResp != null) {
+                        dohResp to "${latestUpstreamDnsTitle} DoH (Poison Guard)"
+                    } else {
+                        forwardDnsOverTcp(dnsPayload) to "${latestUpstreamDnsTitle} DoTCP"
+                    }
+                }
+            }
+
+            DnsTransportMode.DOH_WITH_FALLBACK -> {
+                if (latestUseDohUpstream) {
+                    val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+                    if (dohResp != null) {
+                        return dohResp to "${latestUpstreamDnsTitle} DoH"
+                    }
+                }
+                val tcpResp = forwardDnsOverTcp(dnsPayload)
+                if (tcpResp != null && !isPoisoned(domain, tcpResp, antiPoison)) {
+                    tcpResp to "${latestUpstreamDnsTitle} DoTCP"
+                } else {
+                    forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
+                }
+            }
         }
+    }
+
+    private fun forwardValidatedUdpDns(
+        dnsPayload: ByteArray,
+        domain: String,
+        antiPoison: Boolean
+    ): Pair<ByteArray?, String> {
+        val udpResp = forwardDnsQuery(dnsPayload)
+        if (udpResp != null && isPoisoned(domain, udpResp, antiPoison)) {
+            antiDnsPoisonCount.incrementAndGet()
+            val dohFallback = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
+            if (dohFallback != null) {
+                return dohFallback to "${latestUpstreamDnsTitle} DoH (Anti-Poison)"
+            }
+            val tcpFallback = forwardDnsOverTcp(dnsPayload)
+            if (tcpFallback != null) {
+                return tcpFallback to "${latestUpstreamDnsTitle} DoTCP"
+            }
+            return null to "${latestUpstreamDnsTitle} Poison Dropped"
+        }
+        return udpResp to "${latestUpstreamDnsTitle} UDP"
+    }
+
+    private fun isPoisoned(domain: String, responseBytes: ByteArray, enabled: Boolean): Boolean {
+        if (!enabled) return false
+        val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(responseBytes)
+        return DpiBypassEngine.isLikelyForgedDnsResponse(domain, ips)
+    }
+
+    /**
+     * Resolves DNS using RFC 1035 2-byte length-prefixed framing over TCP port 53 so
+     * DPI / ISP throttles targeting UDP port 53 can still be bypassed reliably.
+     */
+    private fun forwardDnsOverTcp(dnsPayload: ByteArray): ByteArray? {
+        if (dnsPayload.isEmpty() || dnsPayload.size > 65535) return null
+        val candidates = latestUdpDnsServers.ifEmpty { UPSTREAM_DNS_SERVERS }
+        for (upstreamIp in candidates) {
+            var socket: Socket? = null
+            try {
+                socket = Socket()
+                if (!protect(socket)) {
+                    socket.close()
+                    continue
+                }
+                socket.tcpNoDelay = true
+                socket.soTimeout = 3000
+                socket.connect(InetSocketAddress(InetAddress.getByName(upstreamIp), 53), 2500)
+                val out = socket.getOutputStream()
+                val frame = ByteArray(2 + dnsPayload.size)
+                frame[0] = ((dnsPayload.size ushr 8) and 0xFF).toByte()
+                frame[1] = (dnsPayload.size and 0xFF).toByte()
+                System.arraycopy(dnsPayload, 0, frame, 2, dnsPayload.size)
+                out.write(frame)
+                out.flush()
+
+                val dataIn = DataInputStream(socket.getInputStream())
+                val respLen = dataIn.readUnsignedShort()
+                if (respLen in 12..65535) {
+                    val resp = ByteArray(respLen)
+                    dataIn.readFully(resp)
+                    return resp
+                }
+            } catch (_: Exception) {
+                // Try next upstream resolver
+            } finally {
+                runCatching { socket?.close() }
+            }
+        }
+        return null
     }
 
     private fun sendNxDomain(query: ParsedDnsQuery, output: FileOutputStream) {
@@ -1325,35 +1539,31 @@ class NetGateVpnService : VpnService() {
         }
     }
 
-    private fun isQueryFromBlockedUid(query: ParsedDnsQuery): Boolean {
-        val blockedUids = latestBlockedUids
-        if (blockedUids.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
-        val cm = connectivityManager ?: return false
-        val srcAddr = DnsPacketFilter.ipBytesToInetAddress(query.srcIp) ?: return false
-        val dstAddr = DnsPacketFilter.ipBytesToInetAddress(query.dstIp) ?: return false
-        return runCatching {
-            val uid = cm.getConnectionOwnerUid(
-                17, // IPPROTO_UDP
-                InetSocketAddress(srcAddr, query.srcPort),
-                InetSocketAddress(dstAddr, query.dstPort)
-            )
-            uid in blockedUids
-        }.getOrDefault(false)
-    }
+    private data class PacketOwner(
+        val uid: Int,
+        val primaryPackage: String,
+        val packages: Array<String>
+    )
 
-    private fun resolveQueryOwnerPackage(query: ParsedDnsQuery): String {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return ""
-        val cm = connectivityManager ?: return ""
-        val srcAddr = DnsPacketFilter.ipBytesToInetAddress(query.srcIp) ?: return ""
-        val dstAddr = DnsPacketFilter.ipBytesToInetAddress(query.dstIp) ?: return ""
+    private fun resolveDnsQueryOwner(query: ParsedDnsQuery): PacketOwner? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val cm = connectivityManager ?: return null
+        val srcAddr = DnsPacketFilter.ipBytesToInetAddress(query.srcIp) ?: return null
+        val dstAddr = DnsPacketFilter.ipBytesToInetAddress(query.dstIp) ?: return null
         return runCatching {
             val uid = cm.getConnectionOwnerUid(
-                17,
+                TunPacketInspector.IPPROTO_UDP,
                 InetSocketAddress(srcAddr, query.srcPort),
                 InetSocketAddress(dstAddr, query.dstPort)
             )
-            if (uid > 0) packageManager.getPackagesForUid(uid)?.firstOrNull().orEmpty() else ""
-        }.getOrDefault("")
+            if (uid <= 0) return null
+            val packages = packageManager.getPackagesForUid(uid) ?: emptyArray()
+            PacketOwner(
+                uid = uid,
+                primaryPackage = packages.firstOrNull().orEmpty(),
+                packages = packages
+            )
+        }.getOrNull()
     }
 
     private fun forwardDnsQuery(dnsPayload: ByteArray): ByteArray? {
@@ -1431,6 +1641,12 @@ class NetGateVpnService : VpnService() {
             isYoutubeAdBlockActive = latestIsYoutubeAdBlockEnabled,
             activeSniProxyPreset = latestSniProxyPreset,
             safeRewriteCount = safeRewriteCount.get(),
+            dpiBypassMode = latestDpiBypassMode,
+            dpiBypassedConnectionsCount = dpiBypassedCount.get(),
+            dpiAutopilotLearnedCount = DpiBypassEngine.getAutopilotLearnedCount(),
+            dnsTransportMode = latestDnsTransportMode,
+            antiDnsPoisonBlockedCount = antiDnsPoisonCount.get(),
+            quicStrippedCount = quicStrippedCount.get(),
             recentBlockedDomains = recentSnapshot,
             recentDnsLogs = logSnapshot
         )
@@ -1468,6 +1684,12 @@ class NetGateVpnService : VpnService() {
             activeSniProxyPreset = latestSniProxyPreset,
             safeRewriteCount = safeRewriteCount.get(),
             isGlobalWifiBlocked = (netType == ActiveNetworkType.WIFI && latestGlobalWifiBlocked),
+            dpiBypassMode = latestDpiBypassMode,
+            dpiBypassedConnectionsCount = dpiBypassedCount.get(),
+            dpiAutopilotLearnedCount = DpiBypassEngine.getAutopilotLearnedCount(),
+            dnsTransportMode = latestDnsTransportMode,
+            antiDnsPoisonBlockedCount = antiDnsPoisonCount.get(),
+            quicStrippedCount = quicStrippedCount.get(),
             recentBlockedDomains = recentSnapshot,
             recentDnsLogs = logSnapshot
         )
@@ -1566,6 +1788,7 @@ class NetGateVpnService : VpnService() {
             if (latestIsYoutubeAdBlockEnabled) append(" + YT Ads")
             if (latestIsSafeSearchEnabled) append(" + SafeSearch")
             if (latestYoutubeRestrictedMode != YouTubeRestrictedMode.OFF) append(" + YT Kids")
+            if (latestDpiBypassMode != DpiBypassMode.OFF) append(" + DPI ${latestDpiBypassMode.title}")
             if (proxyActive) append(" + SNI Proxy")
         }
         val contentText = when {
@@ -1606,22 +1829,6 @@ class NetGateVpnService : VpnService() {
     private data class ProxyConfigSignature(
         val port: Int,
         val stripTrackingParams: Boolean
-    )
-
-    private data class TunnelConfigSignature(
-        val networkType: ActiveNetworkType,
-        val websiteMode: WebsiteFilterMode,
-        val adBlockerEnabled: Boolean,
-        val httpsProxyEnabled: Boolean,
-        val httpsProxyPort: Int,
-        val stripTrackingParams: Boolean,
-        val safeSearchEnabled: Boolean,
-        val youtubeRestrictedMode: YouTubeRestrictedMode,
-        val youtubeAdBlockEnabled: Boolean,
-        val sniProxyPreset: SniProxyPreset,
-        val blockedPackages: List<String>,
-        val bypassPackages: Set<String>,
-        val globalWifiLock: Boolean = false
     )
 
     companion object {
@@ -1714,6 +1921,22 @@ class NetGateVpnService : VpnService() {
                 action = ACTION_STOP
             }
             context.startService(intent)
+        }
+
+        fun flushDnsAndAutopilotCache(context: Context) {
+            DpiBypassEngine.clearAutopilotCache()
+            if (_runtimeState.value.isServiceRunning) {
+                val intent = Intent(context, NetGateVpnService::class.java).apply {
+                    action = ACTION_RELOAD_RULES
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } else {
+                _runtimeState.value = _runtimeState.value.copy(dpiAutopilotLearnedCount = 0)
+            }
         }
     }
 }

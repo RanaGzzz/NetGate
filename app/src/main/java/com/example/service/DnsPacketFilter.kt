@@ -432,14 +432,29 @@ object DnsPacketFilter {
         )
     }
 
+    fun extractQueryType(query: ParsedDnsQuery): Int {
+        if (query.questionEndOffset < 16 || query.questionEndOffset > query.dnsPayload.size) return 0
+        val idx = query.questionEndOffset - 4
+        return ((query.dnsPayload[idx].toInt() and 0xFF) shl 8) or
+            (query.dnsPayload[idx + 1].toInt() and 0xFF)
+    }
+
     fun buildBlockedDnsResponsePacket(query: ParsedDnsQuery): ByteArray {
+        return buildEmptyAnswerDnsResponsePacket(query, rcode = 3)
+    }
+
+    fun buildNoDataDnsResponsePacket(query: ParsedDnsQuery): ByteArray {
+        return buildEmptyAnswerDnsResponsePacket(query, rcode = 0)
+    }
+
+    private fun buildEmptyAnswerDnsResponsePacket(query: ParsedDnsQuery, rcode: Int): ByteArray {
         val respSize = query.questionEndOffset.coerceIn(12, query.dnsPayload.size)
         val dnsResp = ByteArray(respSize)
         System.arraycopy(query.dnsPayload, 0, dnsResp, 0, respSize)
 
         val rdBit = query.dnsPayload[2].toInt() and 0x01
         dnsResp[2] = (0x80 or rdBit).toByte()
-        dnsResp[3] = 0x83.toByte() // RA=1, RCODE=3 (NXDOMAIN)
+        dnsResp[3] = (0x80 or (rcode and 0x0F)).toByte() // RA=1, RCODE=0 (NODATA) or 3 (NXDOMAIN)
         dnsResp[4] = 0
         dnsResp[5] = 1
         dnsResp[6] = 0
@@ -657,6 +672,107 @@ object DnsPacketFilter {
         outPacket[outIpLen + 17] = (tcpChecksum and 0xFF).toByte()
 
         return outPacket
+    }
+
+    /**
+     * Builds an RFC 792 (ICMPv4 Type 3 Code 3) or RFC 4443 (ICMPv6 Type 1 Code 4) Port
+     * Unreachable packet for blocked non-DNS UDP packets (such as QUIC/443 or WebRTC),
+     * forcing immediate socket failure instead of long UDP timeout stalls.
+     */
+    fun buildIcmpUnreachablePacket(packet: ByteArray, length: Int): ByteArray? {
+        if (length < 28 || packet.size < length) return null
+        val version = (packet[0].toInt() ushr 4) and 0x0F
+
+        return when (version) {
+            4 -> {
+                val ihl = (packet[0].toInt() and 0x0F) * 4
+                if (ihl < 20 || ihl + 8 > length) return null
+                val totalLen = ((packet[2].toInt() and 0xFF) shl 8) or (packet[3].toInt() and 0xFF)
+                if (totalLen < ihl + 8 || totalLen > length) return null
+                val protocol = packet[9].toInt() and 0xFF
+                if (protocol != 17) return null
+
+                // Skip multicast (224.0.0.0/4) and limited broadcast (255.255.255.255)
+                val firstDstOctet = packet[16].toInt() and 0xFF
+                if ((firstDstOctet and 0xF0) == 0xE0) return null
+                if (firstDstOctet == 0xFF &&
+                    (packet[17].toInt() and 0xFF) == 0xFF &&
+                    (packet[18].toInt() and 0xFF) == 0xFF &&
+                    (packet[19].toInt() and 0xFF) == 0xFF
+                ) {
+                    return null
+                }
+
+                val quotedLen = minOf(totalLen, ihl + 8)
+                val icmpLen = 8 + quotedLen
+                val outTotal = 20 + icmpLen
+                val out = ByteArray(outTotal)
+
+                out[0] = 0x45.toByte()
+                out[2] = ((outTotal ushr 8) and 0xFF).toByte()
+                out[3] = (outTotal and 0xFF).toByte()
+                out[6] = 0x40.toByte()
+                out[8] = 64.toByte()
+                out[9] = 1.toByte() // ICMPv4
+                System.arraycopy(packet, 16, out, 12, 4) // src = original dst
+                System.arraycopy(packet, 12, out, 16, 4) // dst = original src
+                val ipCs = computeChecksum(out, 0, 20)
+                out[10] = ((ipCs ushr 8) and 0xFF).toByte()
+                out[11] = (ipCs and 0xFF).toByte()
+
+                out[20] = 3.toByte() // Destination Unreachable
+                out[21] = 3.toByte() // Port Unreachable
+                System.arraycopy(packet, 0, out, 28, quotedLen)
+
+                val icmpCs = computeChecksum(out, 20, icmpLen)
+                out[22] = ((icmpCs ushr 8) and 0xFF).toByte()
+                out[23] = (icmpCs and 0xFF).toByte()
+                out
+            }
+            6 -> {
+                if (length < 48) return null
+                val payloadLen = ((packet[4].toInt() and 0xFF) shl 8) or (packet[5].toInt() and 0xFF)
+                val totalLen = 40 + payloadLen
+                if (payloadLen < 8 || totalLen > length) return null
+                val protocol = packet[6].toInt() and 0xFF
+                if (protocol != 17) return null
+
+                // Skip IPv6 multicast (ff00::/8)
+                if ((packet[24].toInt() and 0xFF) == 0xFF) return null
+
+                val quotedLen = minOf(totalLen, 1232)
+                val icmpLen = 8 + quotedLen
+                val out = ByteArray(40 + icmpLen)
+
+                out[0] = 0x60.toByte()
+                out[4] = ((icmpLen ushr 8) and 0xFF).toByte()
+                out[5] = (icmpLen and 0xFF).toByte()
+                out[6] = 58.toByte() // ICMPv6
+                out[7] = 64.toByte()
+                val srcIp = packet.copyOfRange(24, 40) // original dst becomes outer src
+                val dstIp = packet.copyOfRange(8, 24)  // original src becomes outer dst
+                System.arraycopy(srcIp, 0, out, 8, 16)
+                System.arraycopy(dstIp, 0, out, 24, 16)
+
+                out[40] = 1.toByte() // Destination Unreachable
+                out[41] = 4.toByte() // Port Unreachable
+                System.arraycopy(packet, 0, out, 48, quotedLen)
+
+                val icmpCs = computeTransportChecksum(
+                    packet = out,
+                    transportOffset = 40,
+                    transportLen = icmpLen,
+                    srcIp = srcIp,
+                    dstIp = dstIp,
+                    protocol = 58,
+                    isUdp = false
+                )
+                out[42] = ((icmpCs ushr 8) and 0xFF).toByte()
+                out[43] = (icmpCs and 0xFF).toByte()
+                out
+            }
+            else -> null
+        }
     }
 
     fun ipBytesToInetAddress(ip: ByteArray): InetAddress? = runCatching {

@@ -11,6 +11,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.BlurEngineStyle
+import com.example.data.model.DnsTransportMode
+import com.example.data.model.DpiBypassMode
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.SniProxyPreset
 import com.example.data.model.StatusBarSpeedStyle
@@ -71,6 +73,13 @@ class FirewallPreferences(private val context: Context) {
         val AUTO_BLOCK_WIFI_ON_IDLE = booleanPreferencesKey("auto_block_wifi_on_idle")
         val AUTO_BLOCK_WIFI_IDLE_MINUTES = intPreferencesKey("auto_block_wifi_idle_minutes")
         val AUTO_BLOCK_WIFI_PANEL_NOTIFY = booleanPreferencesKey("auto_block_wifi_panel_notify")
+        val DPI_BYPASS_MODE = stringPreferencesKey("dpi_bypass_mode")
+        val DPI_FRAGMENT_CHUNK_SIZE = intPreferencesKey("dpi_fragment_chunk_size")
+        val DPI_FRAGMENT_DELAY_MS = intPreferencesKey("dpi_fragment_delay_ms")
+        val DPI_IDLE_KEEPALIVE_ENABLED = booleanPreferencesKey("dpi_idle_keepalive_enabled")
+        val BLOCK_QUIC_FOR_DPI_BYPASS = booleanPreferencesKey("block_quic_for_dpi_bypass")
+        val ANTI_DNS_POISON_ENABLED = booleanPreferencesKey("anti_dns_poison_enabled")
+        val DNS_TRANSPORT_MODE = stringPreferencesKey("dns_transport_mode")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -94,6 +103,12 @@ class FirewallPreferences(private val context: Context) {
         val blurStyleName = prefs[Keys.BLUR_ENGINE_STYLE] ?: BlurEngineStyle.ACRYLIC_PRO.name
         val blurStyle = BlurEngineStyle.entries.firstOrNull { it.name == blurStyleName }
             ?: BlurEngineStyle.ACRYLIC_PRO
+        val dpiModeName = prefs[Keys.DPI_BYPASS_MODE] ?: DpiBypassMode.OFF.name
+        val dpiMode = DpiBypassMode.entries.firstOrNull { it.name == dpiModeName }
+            ?: DpiBypassMode.OFF
+        val dnsTransportName = prefs[Keys.DNS_TRANSPORT_MODE] ?: DnsTransportMode.DOH_WITH_FALLBACK.name
+        val dnsTransport = DnsTransportMode.entries.firstOrNull { it.name == dnsTransportName }
+            ?: DnsTransportMode.DOH_WITH_FALLBACK
 
         FirewallPreferencesState(
             isFirewallEnabled = prefs[Keys.IS_FIREWALL_ENABLED] ?: false,
@@ -138,7 +153,14 @@ class FirewallPreferences(private val context: Context) {
             globalWifiTimerDurationMillis = prefs[Keys.GLOBAL_WIFI_TIMER_DURATION_MS] ?: 0L,
             autoBlockWifiOnIdleEnabled = prefs[Keys.AUTO_BLOCK_WIFI_ON_IDLE] ?: false,
             autoBlockWifiIdleMinutes = (prefs[Keys.AUTO_BLOCK_WIFI_IDLE_MINUTES] ?: 10).coerceIn(1, 240),
-            autoBlockWifiOpenPanelNotify = prefs[Keys.AUTO_BLOCK_WIFI_PANEL_NOTIFY] ?: true
+            autoBlockWifiOpenPanelNotify = prefs[Keys.AUTO_BLOCK_WIFI_PANEL_NOTIFY] ?: true,
+            dpiBypassMode = dpiMode,
+            dpiFragmentChunkSize = (prefs[Keys.DPI_FRAGMENT_CHUNK_SIZE] ?: 4).coerceIn(1, 32),
+            dpiFragmentDelayMs = (prefs[Keys.DPI_FRAGMENT_DELAY_MS] ?: 1).coerceIn(0, 15),
+            dpiIdleKeepAliveEnabled = prefs[Keys.DPI_IDLE_KEEPALIVE_ENABLED] ?: true,
+            blockQuicForDpiBypass = prefs[Keys.BLOCK_QUIC_FOR_DPI_BYPASS] ?: true,
+            antiDnsPoisonEnabled = prefs[Keys.ANTI_DNS_POISON_ENABLED] ?: true,
+            dnsTransportMode = dnsTransport
         )
     }
 
@@ -381,6 +403,44 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setAutoBlockWifiOpenPanelNotify(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.AUTO_BLOCK_WIFI_PANEL_NOTIFY] = enabled }
+    }
+
+    suspend fun setDpiBypassMode(mode: DpiBypassMode) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.DPI_BYPASS_MODE] = mode.name
+            if (mode != DpiBypassMode.OFF) {
+                prefs[Keys.IS_HTTPS_PROXY_ENABLED] = true
+            }
+        }
+    }
+
+    suspend fun setDpiFragmentChunkSize(size: Int) {
+        context.firewallDataStore.edit { it[Keys.DPI_FRAGMENT_CHUNK_SIZE] = size.coerceIn(1, 32) }
+    }
+
+    suspend fun setDpiFragmentDelayMs(delayMs: Int) {
+        context.firewallDataStore.edit { it[Keys.DPI_FRAGMENT_DELAY_MS] = delayMs.coerceIn(0, 15) }
+    }
+
+    suspend fun setDpiIdleKeepAliveEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.DPI_IDLE_KEEPALIVE_ENABLED] = enabled }
+    }
+
+    suspend fun setBlockQuicForDpiBypass(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.BLOCK_QUIC_FOR_DPI_BYPASS] = enabled }
+    }
+
+    suspend fun setAntiDnsPoisonEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.ANTI_DNS_POISON_ENABLED] = enabled }
+    }
+
+    suspend fun setDnsTransportMode(mode: DnsTransportMode) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.DNS_TRANSPORT_MODE] = mode.name
+            if (mode == DnsTransportMode.DOH_WITH_FALLBACK) {
+                prefs[Keys.USE_DOH_UPSTREAM] = true
+            }
+        }
     }
 
     private fun parseClientCaps(raw: Set<String>?): Map<String, Long> {

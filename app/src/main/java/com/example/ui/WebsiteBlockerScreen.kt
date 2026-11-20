@@ -1,5 +1,15 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -20,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,15 +52,19 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.FamilyRestroom
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GppGood
+import androidx.compose.material.icons.rounded.Http
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PublicOff
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -92,9 +107,12 @@ import com.example.data.model.AdFilterListItem
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.DnsQueryStatus
+import com.example.data.model.DnsTransportMode
+import com.example.data.model.DpiBypassMode
 import com.example.data.model.ManagedApp
 import com.example.data.model.SniProxyPreset
 import com.example.data.model.WebsiteFilterMode
+import com.example.data.model.WebsiteMainTab
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.model.WebsiteTabSection
 import com.example.data.model.YouTubeRestrictedMode
@@ -103,6 +121,7 @@ import com.example.ui.components.AdFilterListRow
 import com.example.ui.components.DnsLogFilter
 import com.example.ui.components.DnsLogsFilterCard
 import com.example.ui.components.DnsQueryLogRow
+import com.example.ui.components.DpiBypassShieldCard
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.HttpsFilteringProxyCard
 import com.example.ui.components.SafeSearchAndYoutubeCard
@@ -149,6 +168,13 @@ fun WebsiteBlockerContent(
     onToggleYoutubeAdBlock: (Boolean) -> Unit,
     onSelectSniPreset: (SniProxyPreset) -> Unit,
     onSaveCustomSniProxy: (host: String, port: Int) -> Unit,
+    onSelectDpiMode: (DpiBypassMode) -> Unit,
+    onSelectDpiChunkSize: (Int) -> Unit,
+    onToggleDpiIdleKeepAlive: (Boolean) -> Unit,
+    onToggleBlockQuic: (Boolean) -> Unit,
+    onToggleAntiDnsPoison: (Boolean) -> Unit,
+    onSelectDnsTransportMode: (DnsTransportMode) -> Unit,
+    onFlushDpiCache: () -> Unit,
     onAddCustomAdFilterList: (title: String, url: String, category: String) -> Unit,
     onDeleteCustomAdFilterList: (String) -> Unit,
     onCopiedProxyEndpoint: (String) -> Unit,
@@ -157,12 +183,17 @@ fun WebsiteBlockerContent(
     onOpenDnsProtection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedSection by rememberSaveable { mutableStateOf(WebsiteTabSection.AD_FILTERS) }
+    var selectedMainTab by rememberSaveable { mutableStateOf(WebsiteMainTab.AD_BLOCKER) }
+    var selectedWebsiteSection by rememberSaveable { mutableStateOf(WebsiteTabSection.BLOCKLIST) }
     var domainInput by rememberSaveable { mutableStateOf("") }
     var appSearchQuery by rememberSaveable { mutableStateOf("") }
     var dnsLogSearchQuery by rememberSaveable { mutableStateOf("") }
     var dnsLogFilter by rememberSaveable { mutableStateOf(DnsLogFilter.ALL) }
     var isAddFilterDialogOpen by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = selectedMainTab != WebsiteMainTab.AD_BLOCKER) {
+        selectedMainTab = WebsiteMainTab.AD_BLOCKER
+    }
 
     val filteredBypassApps = remember(allManagedApps, appSearchQuery, state.bypassPackages) {
         val q = appSearchQuery.trim().lowercase()
@@ -202,285 +233,529 @@ fun WebsiteBlockerContent(
             .testTag("website_blocker_screen")
     ) {
         val isWide = maxWidth >= 800.dp
+        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val listBottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp
+        val sidePadding = if (isWide) 20.dp else 16.dp
 
-        if (isWide) {
-            Row(
+        Column(modifier = Modifier.fillMaxSize()) {
+            WebsiteMainTabBar(
+                selectedTab = selectedMainTab,
+                state = state,
+                onSelectTab = { selectedMainTab = it },
+                modifier = Modifier.padding(horizontal = sidePadding, vertical = 4.dp)
+            )
+
+            AnimatedContent(
+                targetState = selectedMainTab,
+                transitionSpec = {
+                    val forward = WebsiteMainTab.entries.indexOf(targetState) >=
+                        WebsiteMainTab.entries.indexOf(initialState)
+                    val enter = slideInHorizontally(
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        initialOffsetX = { fullWidth -> if (forward) fullWidth / 6 else -fullWidth / 6 }
+                    ) + fadeIn(tween(180))
+                    val exit = slideOutHorizontally(
+                        animationSpec = tween(180, easing = FastOutSlowInEasing),
+                        targetOffsetX = { fullWidth -> if (forward) -fullWidth / 8 else fullWidth / 8 }
+                    ) + fadeOut(tween(140))
+                    (enter togetherWith exit).using(SizeTransform(clip = false))
+                },
+                label = "website_main_tab_transition",
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    item(key = "ad_blocker_card") {
-                        AdBlockerHeroCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            onToggleAdBlocker = onToggleAdBlocker,
-                            onSyncFilterLists = onSyncAdFilterLists,
-                            onToggleEssentialPassthrough = onToggleEssentialPassthrough,
-                            onToggleUseDohUpstream = onToggleUseDohUpstream,
-                            onRequestEnableFirewall = onRequestEnableFirewall
-                        )
-                    }
-                    item(key = "safesearch_youtube_card") {
-                        SafeSearchAndYoutubeCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            onToggleSafeSearch = onToggleSafeSearch,
-                            onSelectYoutubeMode = onSelectYoutubeMode,
-                            onToggleYoutubeAdBlock = onToggleYoutubeAdBlock,
-                            onRequestEnableFirewall = onRequestEnableFirewall
-                        )
-                    }
-                    item(key = "https_proxy_card") {
-                        HttpsFilteringProxyCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            onToggleHttpsProxy = onToggleHttpsProxy,
-                            onSelectProxyPort = onSelectProxyPort,
-                            onToggleStripTracking = onToggleProxyStripTracking,
-                            onSelectSniPreset = onSelectSniPreset,
-                            onSaveCustomSniProxy = onSaveCustomSniProxy,
-                            onRequestEnableFirewall = onRequestEnableFirewall,
-                            onCopiedEndpoint = onCopiedProxyEndpoint
-                        )
-                    }
-                    item(key = "mode_card") {
-                        WebsiteModeControlCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            connectionDetails = connectionDetails,
-                            onSelectFilterMode = onSelectFilterMode,
-                            onRequestEnableFirewall = onRequestEnableFirewall,
-                            onOpenDnsProtection = onOpenDnsProtection
-                        )
-                    }
-                    item(key = "manual_input") {
-                        ManualDomainEntryCard(
-                            domainInput = domainInput,
-                            selectedSection = selectedSection,
-                            onDomainInputChange = { domainInput = it },
-                            onAddRule = { isWhitelist ->
-                                onAddWebsiteRule(domainInput, isWhitelist)
-                                domainInput = ""
-                            },
-                            onQuickAddDomain = { domain, isWhitelist ->
-                                onAddWebsiteRule(domain, isWhitelist)
-                            }
-                        )
-                    }
-                    if (state.recentBlockedDomains.isNotEmpty()) {
-                        item(key = "recent_blocked") {
-                            RecentBlockedDomainsCard(
-                                domains = state.recentBlockedDomains,
-                                onAllowDomain = { domain ->
-                                    onAddWebsiteRule(domain, true)
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) { currentTab ->
+                when (currentTab) {
+                    WebsiteMainTab.AD_BLOCKER -> {
+                        if (isWide) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            ) {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp)
+                                ) {
+                                    item(key = "ad_blocker_card") {
+                                        AdBlockerHeroCard(
+                                            state = state,
+                                            isFirewallActive = isFirewallActive,
+                                            onToggleAdBlocker = onToggleAdBlocker,
+                                            onSyncFilterLists = onSyncAdFilterLists,
+                                            onToggleEssentialPassthrough = onToggleEssentialPassthrough,
+                                            onToggleUseDohUpstream = onToggleUseDohUpstream,
+                                            onRequestEnableFirewall = onRequestEnableFirewall
+                                        )
+                                    }
                                 }
-                            )
-                        }
-                    }
-                }
-
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    item(key = "section_tabs") {
-                        WebsiteSectionTabsBar(
-                            selectedSection = selectedSection,
-                            adFiltersCount = state.adFilterLists.count { it.isEnabled },
-                            dnsLogsCount = state.dnsQueryLogs.size,
-                            blocklistCount = state.blocklistRules.size,
-                            whitelistCount = state.whitelistRules.size,
-                            allowedAppsCount = state.bypassPackages.size,
-                            onSelectSection = { selectedSection = it },
-                            onClearCurrent = {
-                                when (selectedSection) {
-                                    WebsiteTabSection.AD_FILTERS -> onSyncAdFilterLists()
-                                    WebsiteTabSection.DNS_LOGS -> onClearDnsLogs()
-                                    WebsiteTabSection.BLOCKLIST -> onClearWebsiteRules(false)
-                                    WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
-                                    WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp)
+                                ) {
+                                    item(key = "ad_lists_header") {
+                                        AdListsHeaderRow(
+                                            enabledCount = state.adFilterLists.count { it.isEnabled },
+                                            onSyncAll = onSyncAdFilterLists
+                                        )
+                                    }
+                                    adFilterSectionItems(
+                                        adFilterLists = state.adFilterLists,
+                                        onToggleAdFilterList = onToggleAdFilterList,
+                                        onOpenAddCustomFilterDialog = { isAddFilterDialogOpen = true },
+                                        onDeleteCustomAdFilterList = onDeleteCustomAdFilterList
+                                    )
                                 }
                             }
-                        )
-                    }
-
-                    websiteSectionItems(
-                        selectedSection = selectedSection,
-                        adFilterLists = state.adFilterLists,
-                        dnsLogs = filteredDnsLogs,
-                        totalDnsLogsCount = state.dnsQueryLogs.size,
-                        dnsLogSearchQuery = dnsLogSearchQuery,
-                        dnsLogFilter = dnsLogFilter,
-                        onDnsLogSearchChange = { dnsLogSearchQuery = it },
-                        onDnsLogFilterChange = { dnsLogFilter = it },
-                        onToggleAdFilterList = onToggleAdFilterList,
-                        onOpenAddCustomFilterDialog = { isAddFilterDialogOpen = true },
-                        onDeleteCustomAdFilterList = onDeleteCustomAdFilterList,
-                        onBlockDomain = { domain -> onAddWebsiteRule(domain, false) },
-                        onAllowDomain = { domain -> onAddWebsiteRule(domain, true) },
-                        blocklistRules = state.blocklistRules,
-                        whitelistRules = state.whitelistRules,
-                        filteredBypassApps = filteredBypassApps,
-                        bypassPackages = state.bypassPackages,
-                        appSearchQuery = appSearchQuery,
-                        onAppSearchQueryChange = { appSearchQuery = it },
-                        loadIcon = loadIcon,
-                        onToggleRuleEnabled = onToggleWebsiteRuleEnabled,
-                        onDeleteRule = onDeleteWebsiteRule,
-                        onToggleBypassApp = onToggleBypassApp
-                    )
-                }
-            }
-        } else {
-            val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            Box(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .widthIn(max = 680.dp)
-                        .align(Alignment.TopCenter),
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 8.dp,
-                        bottom = navInsetBottom + 96.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    item(key = "ad_blocker_card") {
-                        AdBlockerHeroCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            onToggleAdBlocker = onToggleAdBlocker,
-                            onSyncFilterLists = onSyncAdFilterLists,
-                            onToggleEssentialPassthrough = onToggleEssentialPassthrough,
-                            onToggleUseDohUpstream = onToggleUseDohUpstream,
-                            onRequestEnableFirewall = onRequestEnableFirewall
-                        )
-                    }
-
-                    item(key = "safesearch_youtube_card") {
-                        SafeSearchAndYoutubeCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            onToggleSafeSearch = onToggleSafeSearch,
-                            onSelectYoutubeMode = onSelectYoutubeMode,
-                            onToggleYoutubeAdBlock = onToggleYoutubeAdBlock,
-                            onRequestEnableFirewall = onRequestEnableFirewall
-                        )
-                    }
-
-                    item(key = "https_proxy_card") {
-                        HttpsFilteringProxyCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            onToggleHttpsProxy = onToggleHttpsProxy,
-                            onSelectProxyPort = onSelectProxyPort,
-                            onToggleStripTracking = onToggleProxyStripTracking,
-                            onSelectSniPreset = onSelectSniPreset,
-                            onSaveCustomSniProxy = onSaveCustomSniProxy,
-                            onRequestEnableFirewall = onRequestEnableFirewall,
-                            onCopiedEndpoint = onCopiedProxyEndpoint
-                        )
-                    }
-
-                    item(key = "mode_card") {
-                        WebsiteModeControlCard(
-                            state = state,
-                            isFirewallActive = isFirewallActive,
-                            connectionDetails = connectionDetails,
-                            onSelectFilterMode = onSelectFilterMode,
-                            onRequestEnableFirewall = onRequestEnableFirewall,
-                            onOpenDnsProtection = onOpenDnsProtection
-                        )
-                    }
-
-                    item(key = "manual_input") {
-                        ManualDomainEntryCard(
-                            domainInput = domainInput,
-                            selectedSection = selectedSection,
-                            onDomainInputChange = { domainInput = it },
-                            onAddRule = { isWhitelist ->
-                                onAddWebsiteRule(domainInput, isWhitelist)
-                                domainInput = ""
-                            },
-                            onQuickAddDomain = { domain, isWhitelist ->
-                                onAddWebsiteRule(domain, isWhitelist)
-                            }
-                        )
-                    }
-
-                    if (state.recentBlockedDomains.isNotEmpty()) {
-                        item(key = "recent_blocked") {
-                            RecentBlockedDomainsCard(
-                                domains = state.recentBlockedDomains,
-                                onAllowDomain = { domain ->
-                                    onAddWebsiteRule(domain, true)
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .widthIn(max = 680.dp)
+                                        .align(Alignment.TopCenter),
+                                    contentPadding = PaddingValues(
+                                        start = 16.dp,
+                                        end = 16.dp,
+                                        top = 8.dp,
+                                        bottom = listBottomPadding
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    item(key = "ad_blocker_card") {
+                                        AdBlockerHeroCard(
+                                            state = state,
+                                            isFirewallActive = isFirewallActive,
+                                            onToggleAdBlocker = onToggleAdBlocker,
+                                            onSyncFilterLists = onSyncAdFilterLists,
+                                            onToggleEssentialPassthrough = onToggleEssentialPassthrough,
+                                            onToggleUseDohUpstream = onToggleUseDohUpstream,
+                                            onRequestEnableFirewall = onRequestEnableFirewall
+                                        )
+                                    }
+                                    item(key = "ad_lists_header") {
+                                        AdListsHeaderRow(
+                                            enabledCount = state.adFilterLists.count { it.isEnabled },
+                                            onSyncAll = onSyncAdFilterLists
+                                        )
+                                    }
+                                    adFilterSectionItems(
+                                        adFilterLists = state.adFilterLists,
+                                        onToggleAdFilterList = onToggleAdFilterList,
+                                        onOpenAddCustomFilterDialog = { isAddFilterDialogOpen = true },
+                                        onDeleteCustomAdFilterList = onDeleteCustomAdFilterList
+                                    )
                                 }
-                            )
+                            }
                         }
                     }
 
-                    item(key = "section_tabs") {
-                        WebsiteSectionTabsBar(
-                            selectedSection = selectedSection,
-                            adFiltersCount = state.adFilterLists.count { it.isEnabled },
-                            dnsLogsCount = state.dnsQueryLogs.size,
-                            blocklistCount = state.blocklistRules.size,
-                            whitelistCount = state.whitelistRules.size,
-                            allowedAppsCount = state.bypassPackages.size,
-                            onSelectSection = { selectedSection = it },
-                            onClearCurrent = {
-                                when (selectedSection) {
-                                    WebsiteTabSection.AD_FILTERS -> onSyncAdFilterLists()
-                                    WebsiteTabSection.DNS_LOGS -> onClearDnsLogs()
-                                    WebsiteTabSection.BLOCKLIST -> onClearWebsiteRules(false)
-                                    WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
-                                    WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
+                    WebsiteMainTab.WEBSITES -> {
+                        val effectiveRuleSection = when (selectedWebsiteSection) {
+                            WebsiteTabSection.BLOCKLIST,
+                            WebsiteTabSection.WHITELIST,
+                            WebsiteTabSection.ALLOWED_APPS -> selectedWebsiteSection
+                            else -> WebsiteTabSection.BLOCKLIST
+                        }
+                        if (isWide) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            ) {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp)
+                                ) {
+                                    item(key = "mode_card") {
+                                        WebsiteModeControlCard(
+                                            state = state,
+                                            isFirewallActive = isFirewallActive,
+                                            connectionDetails = connectionDetails,
+                                            onSelectFilterMode = onSelectFilterMode,
+                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                            onOpenDnsProtection = onOpenDnsProtection
+                                        )
+                                    }
+                                    item(key = "manual_input") {
+                                        ManualDomainEntryCard(
+                                            domainInput = domainInput,
+                                            selectedSection = effectiveRuleSection,
+                                            onDomainInputChange = { domainInput = it },
+                                            onAddRule = { isWhitelist ->
+                                                onAddWebsiteRule(domainInput, isWhitelist)
+                                                domainInput = ""
+                                            },
+                                            onQuickAddDomain = { domain, isWhitelist ->
+                                                onAddWebsiteRule(domain, isWhitelist)
+                                            }
+                                        )
+                                    }
+                                    if (state.recentBlockedDomains.isNotEmpty()) {
+                                        item(key = "recent_blocked") {
+                                            RecentBlockedDomainsCard(
+                                                domains = state.recentBlockedDomains,
+                                                onAllowDomain = { domain ->
+                                                    onAddWebsiteRule(domain, true)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp)
+                                ) {
+                                    item(key = "website_rule_tabs") {
+                                        WebsiteRulesSubTabsBar(
+                                            selectedSection = effectiveRuleSection,
+                                            blocklistCount = state.blocklistRules.size,
+                                            whitelistCount = state.whitelistRules.size,
+                                            allowedAppsCount = state.bypassPackages.size,
+                                            onSelectSection = { selectedWebsiteSection = it },
+                                            onClearCurrent = {
+                                                when (effectiveRuleSection) {
+                                                    WebsiteTabSection.BLOCKLIST -> onClearWebsiteRules(false)
+                                                    WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
+                                                    WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
+                                                    else -> Unit
+                                                }
+                                            }
+                                        )
+                                    }
+                                    websiteRulesSectionItems(
+                                        selectedSection = effectiveRuleSection,
+                                        blocklistRules = state.blocklistRules,
+                                        whitelistRules = state.whitelistRules,
+                                        filteredBypassApps = filteredBypassApps,
+                                        bypassPackages = state.bypassPackages,
+                                        appSearchQuery = appSearchQuery,
+                                        onAppSearchQueryChange = { appSearchQuery = it },
+                                        loadIcon = loadIcon,
+                                        onToggleRuleEnabled = onToggleWebsiteRuleEnabled,
+                                        onDeleteRule = onDeleteWebsiteRule,
+                                        onToggleBypassApp = onToggleBypassApp
+                                    )
                                 }
                             }
-                        )
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .widthIn(max = 680.dp)
+                                        .align(Alignment.TopCenter),
+                                    contentPadding = PaddingValues(
+                                        start = 16.dp,
+                                        end = 16.dp,
+                                        top = 8.dp,
+                                        bottom = listBottomPadding
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    item(key = "mode_card") {
+                                        WebsiteModeControlCard(
+                                            state = state,
+                                            isFirewallActive = isFirewallActive,
+                                            connectionDetails = connectionDetails,
+                                            onSelectFilterMode = onSelectFilterMode,
+                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                            onOpenDnsProtection = onOpenDnsProtection
+                                        )
+                                    }
+                                    item(key = "manual_input") {
+                                        ManualDomainEntryCard(
+                                            domainInput = domainInput,
+                                            selectedSection = effectiveRuleSection,
+                                            onDomainInputChange = { domainInput = it },
+                                            onAddRule = { isWhitelist ->
+                                                onAddWebsiteRule(domainInput, isWhitelist)
+                                                domainInput = ""
+                                            },
+                                            onQuickAddDomain = { domain, isWhitelist ->
+                                                onAddWebsiteRule(domain, isWhitelist)
+                                            }
+                                        )
+                                    }
+                                    if (state.recentBlockedDomains.isNotEmpty()) {
+                                        item(key = "recent_blocked") {
+                                            RecentBlockedDomainsCard(
+                                                domains = state.recentBlockedDomains,
+                                                onAllowDomain = { domain ->
+                                                    onAddWebsiteRule(domain, true)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    item(key = "website_rule_tabs") {
+                                        WebsiteRulesSubTabsBar(
+                                            selectedSection = effectiveRuleSection,
+                                            blocklistCount = state.blocklistRules.size,
+                                            whitelistCount = state.whitelistRules.size,
+                                            allowedAppsCount = state.bypassPackages.size,
+                                            onSelectSection = { selectedWebsiteSection = it },
+                                            onClearCurrent = {
+                                                when (effectiveRuleSection) {
+                                                    WebsiteTabSection.BLOCKLIST -> onClearWebsiteRules(false)
+                                                    WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
+                                                    WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
+                                                    else -> Unit
+                                                }
+                                            }
+                                        )
+                                    }
+                                    websiteRulesSectionItems(
+                                        selectedSection = effectiveRuleSection,
+                                        blocklistRules = state.blocklistRules,
+                                        whitelistRules = state.whitelistRules,
+                                        filteredBypassApps = filteredBypassApps,
+                                        bypassPackages = state.bypassPackages,
+                                        appSearchQuery = appSearchQuery,
+                                        onAppSearchQueryChange = { appSearchQuery = it },
+                                        loadIcon = loadIcon,
+                                        onToggleRuleEnabled = onToggleWebsiteRuleEnabled,
+                                        onDeleteRule = onDeleteWebsiteRule,
+                                        onToggleBypassApp = onToggleBypassApp
+                                    )
+                                }
+                            }
+                        }
                     }
 
-                    websiteSectionItems(
-                        selectedSection = selectedSection,
-                        adFilterLists = state.adFilterLists,
-                        dnsLogs = filteredDnsLogs,
-                        totalDnsLogsCount = state.dnsQueryLogs.size,
-                        dnsLogSearchQuery = dnsLogSearchQuery,
-                        dnsLogFilter = dnsLogFilter,
-                        onDnsLogSearchChange = { dnsLogSearchQuery = it },
-                        onDnsLogFilterChange = { dnsLogFilter = it },
-                        onToggleAdFilterList = onToggleAdFilterList,
-                        onOpenAddCustomFilterDialog = { isAddFilterDialogOpen = true },
-                        onDeleteCustomAdFilterList = onDeleteCustomAdFilterList,
-                        onBlockDomain = { domain -> onAddWebsiteRule(domain, false) },
-                        onAllowDomain = { domain -> onAddWebsiteRule(domain, true) },
-                        blocklistRules = state.blocklistRules,
-                        whitelistRules = state.whitelistRules,
-                        filteredBypassApps = filteredBypassApps,
-                        bypassPackages = state.bypassPackages,
-                        appSearchQuery = appSearchQuery,
-                        onAppSearchQueryChange = { appSearchQuery = it },
-                        loadIcon = loadIcon,
-                        onToggleRuleEnabled = onToggleWebsiteRuleEnabled,
-                        onDeleteRule = onDeleteWebsiteRule,
-                        onToggleBypassApp = onToggleBypassApp
-                    )
+                    WebsiteMainTab.SAFE_SEARCH -> {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .widthIn(max = 720.dp)
+                                    .align(Alignment.TopCenter),
+                                contentPadding = PaddingValues(
+                                    start = sidePadding,
+                                    end = sidePadding,
+                                    top = 8.dp,
+                                    bottom = listBottomPadding
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                item(key = "safesearch_youtube_card") {
+                                    SafeSearchAndYoutubeCard(
+                                        state = state,
+                                        isFirewallActive = isFirewallActive,
+                                        onToggleSafeSearch = onToggleSafeSearch,
+                                        onSelectYoutubeMode = onSelectYoutubeMode,
+                                        onToggleYoutubeAdBlock = onToggleYoutubeAdBlock,
+                                        onRequestEnableFirewall = onRequestEnableFirewall
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                    item(key = "bottom_spacer") {
-                        Spacer(modifier = Modifier.height(16.dp))
+                    WebsiteMainTab.PROXY_DPI -> {
+                        if (isWide) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            ) {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp)
+                                ) {
+                                    item(key = "https_proxy_card") {
+                                        HttpsFilteringProxyCard(
+                                            state = state,
+                                            isFirewallActive = isFirewallActive,
+                                            onToggleHttpsProxy = onToggleHttpsProxy,
+                                            onSelectProxyPort = onSelectProxyPort,
+                                            onToggleStripTracking = onToggleProxyStripTracking,
+                                            onSelectSniPreset = onSelectSniPreset,
+                                            onSaveCustomSniProxy = onSaveCustomSniProxy,
+                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                            onCopiedEndpoint = onCopiedProxyEndpoint
+                                        )
+                                    }
+                                }
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp)
+                                ) {
+                                    item(key = "dpi_bypass_card") {
+                                        DpiBypassShieldCard(
+                                            dpiBypassMode = state.dpiBypassMode,
+                                            dpiFragmentChunkSize = state.dpiFragmentChunkSize,
+                                            dpiIdleKeepAliveEnabled = state.dpiIdleKeepAliveEnabled,
+                                            blockQuicForDpiBypass = state.blockQuicForDpiBypass,
+                                            antiDnsPoisonEnabled = state.antiDnsPoisonEnabled,
+                                            dnsTransportMode = state.dnsTransportMode,
+                                            dpiBypassedConnectionsCount = state.dpiBypassedConnectionsCount,
+                                            dpiAutopilotLearnedCount = state.dpiAutopilotLearnedCount,
+                                            antiDnsPoisonBlockedCount = state.antiDnsPoisonBlockedCount,
+                                            quicStrippedCount = state.quicStrippedCount,
+                                            isFirewallActive = isFirewallActive,
+                                            onSelectDpiMode = onSelectDpiMode,
+                                            onSelectChunkSize = onSelectDpiChunkSize,
+                                            onToggleIdleKeepAlive = onToggleDpiIdleKeepAlive,
+                                            onToggleBlockQuic = onToggleBlockQuic,
+                                            onToggleAntiDnsPoison = onToggleAntiDnsPoison,
+                                            onSelectDnsTransportMode = onSelectDnsTransportMode,
+                                            onFlushCache = onFlushDpiCache,
+                                            onRequestEnableFirewall = onRequestEnableFirewall
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .widthIn(max = 680.dp)
+                                        .align(Alignment.TopCenter)
+                                        .testTag("website_proxy_dpi_list"),
+                                    contentPadding = PaddingValues(
+                                        start = 16.dp,
+                                        end = 16.dp,
+                                        top = 8.dp,
+                                        bottom = listBottomPadding
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    item(key = "https_proxy_card") {
+                                        HttpsFilteringProxyCard(
+                                            state = state,
+                                            isFirewallActive = isFirewallActive,
+                                            onToggleHttpsProxy = onToggleHttpsProxy,
+                                            onSelectProxyPort = onSelectProxyPort,
+                                            onToggleStripTracking = onToggleProxyStripTracking,
+                                            onSelectSniPreset = onSelectSniPreset,
+                                            onSaveCustomSniProxy = onSaveCustomSniProxy,
+                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                            onCopiedEndpoint = onCopiedProxyEndpoint
+                                        )
+                                    }
+                                    item(key = "dpi_bypass_card") {
+                                        DpiBypassShieldCard(
+                                            dpiBypassMode = state.dpiBypassMode,
+                                            dpiFragmentChunkSize = state.dpiFragmentChunkSize,
+                                            dpiIdleKeepAliveEnabled = state.dpiIdleKeepAliveEnabled,
+                                            blockQuicForDpiBypass = state.blockQuicForDpiBypass,
+                                            antiDnsPoisonEnabled = state.antiDnsPoisonEnabled,
+                                            dnsTransportMode = state.dnsTransportMode,
+                                            dpiBypassedConnectionsCount = state.dpiBypassedConnectionsCount,
+                                            dpiAutopilotLearnedCount = state.dpiAutopilotLearnedCount,
+                                            antiDnsPoisonBlockedCount = state.antiDnsPoisonBlockedCount,
+                                            quicStrippedCount = state.quicStrippedCount,
+                                            isFirewallActive = isFirewallActive,
+                                            onSelectDpiMode = onSelectDpiMode,
+                                            onSelectChunkSize = onSelectDpiChunkSize,
+                                            onToggleIdleKeepAlive = onToggleDpiIdleKeepAlive,
+                                            onToggleBlockQuic = onToggleBlockQuic,
+                                            onToggleAntiDnsPoison = onToggleAntiDnsPoison,
+                                            onSelectDnsTransportMode = onSelectDnsTransportMode,
+                                            onFlushCache = onFlushDpiCache,
+                                            onRequestEnableFirewall = onRequestEnableFirewall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    WebsiteMainTab.DNS_LOGS -> {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .widthIn(max = 820.dp)
+                                    .align(Alignment.TopCenter),
+                                contentPadding = PaddingValues(
+                                    start = sidePadding,
+                                    end = sidePadding,
+                                    top = 8.dp,
+                                    bottom = listBottomPadding
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                item(key = "dns_logs_header") {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Live DNS Query Feed",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (state.dnsQueryLogs.isNotEmpty()) {
+                                            TextButton(
+                                                onClick = onClearDnsLogs,
+                                                modifier = Modifier.testTag("clear_dns_logs_button")
+                                            ) {
+                                                Text("Clear (${state.dnsQueryLogs.size})")
+                                            }
+                                        }
+                                    }
+                                }
+                                item(key = "dns_logs_filter_header") {
+                                    DnsLogsFilterCard(
+                                        searchQuery = dnsLogSearchQuery,
+                                        selectedFilter = dnsLogFilter,
+                                        totalLogsCount = state.dnsQueryLogs.size,
+                                        onSearchQueryChange = { dnsLogSearchQuery = it },
+                                        onSelectFilter = { dnsLogFilter = it }
+                                    )
+                                }
+                                if (filteredDnsLogs.isEmpty()) {
+                                    item(key = "empty_dns_logs") {
+                                        EmptyWebsiteRulesCard(
+                                            title = if (state.dnsQueryLogs.isEmpty()) {
+                                                "No DNS queries logged yet"
+                                            } else {
+                                                "No matching DNS queries"
+                                            },
+                                            subtitle = if (state.dnsQueryLogs.isEmpty()) {
+                                                "Turn on Ad Blocker, Website Filter, or DPI Bypass with NetGate Firewall active to inspect live lookups here."
+                                            } else {
+                                                "Clear your search or filter chip to view all recent DNS lookups."
+                                            },
+                                            icon = Icons.Rounded.Dns
+                                        )
+                                    }
+                                } else {
+                                    items(items = filteredDnsLogs, key = { "dnslog_${it.id}" }) { entry ->
+                                        DnsQueryLogRow(
+                                            entry = entry,
+                                            onBlockDomain = { domain -> onAddWebsiteRule(domain, false) },
+                                            onAllowDomain = { domain -> onAddWebsiteRule(domain, true) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -498,20 +773,248 @@ fun WebsiteBlockerContent(
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
-    selectedSection: WebsiteTabSection,
+@Composable
+private fun WebsiteMainTabBar(
+    selectedTab: WebsiteMainTab,
+    state: WebsiteBlockerUiState,
+    onSelectTab: (WebsiteMainTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDark = LocalIsDarkTheme.current
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("website_main_tab_bar"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(WebsiteMainTab.entries) { tab ->
+            val selected = selectedTab == tab
+            val label = when (tab) {
+                WebsiteMainTab.AD_BLOCKER -> if (state.isAdBlockerEnabled) "${tab.label} • ON" else tab.label
+                WebsiteMainTab.WEBSITES -> {
+                    val count = state.blocklistRules.size + state.whitelistRules.size
+                    if (count > 0) "${tab.label} ($count)" else tab.label
+                }
+                WebsiteMainTab.SAFE_SEARCH -> {
+                    if (state.isSafeSearchEnabled || state.youtubeRestrictedMode != YouTubeRestrictedMode.OFF || state.isYoutubeAdBlockEnabled) {
+                        "${tab.label} • ON"
+                    } else {
+                        tab.label
+                    }
+                }
+                WebsiteMainTab.PROXY_DPI -> {
+                    if (state.isHttpsProxyEnabled || state.dpiBypassMode != DpiBypassMode.OFF) {
+                        "${tab.label} • ON"
+                    } else {
+                        tab.label
+                    }
+                }
+                WebsiteMainTab.DNS_LOGS -> {
+                    if (state.dnsQueryLogs.isNotEmpty()) "${tab.label} (${state.dnsQueryLogs.size})" else tab.label
+                }
+            }
+            val icon = when (tab) {
+                WebsiteMainTab.AD_BLOCKER -> Icons.Rounded.GppGood
+                WebsiteMainTab.WEBSITES -> Icons.Rounded.Public
+                WebsiteMainTab.SAFE_SEARCH -> Icons.Rounded.FamilyRestroom
+                WebsiteMainTab.PROXY_DPI -> Icons.Rounded.VpnKey
+                WebsiteMainTab.DNS_LOGS -> Icons.Rounded.Dns
+            }
+
+            FilterChip(
+                selected = selected,
+                onClick = { onSelectTab(tab) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                label = {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                        ),
+                        maxLines = 1
+                    )
+                },
+                shape = RoundedCornerShape(14.dp),
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = if (isDark) {
+                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f)
+                    } else {
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+                    },
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.90f),
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.primary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("website_main_tab_${tab.name.lowercase()}")
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdListsHeaderRow(
+    enabledCount: Int,
+    onSyncAll: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Filter Lists ($enabledCount active)",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        TextButton(
+            onClick = onSyncAll,
+            modifier = Modifier.testTag("sync_current_ad_section_button")
+        ) {
+            Text("Sync All")
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.adFilterSectionItems(
     adFilterLists: List<AdFilterListItem>,
-    dnsLogs: List<DnsQueryLogEntry>,
-    totalDnsLogsCount: Int,
-    dnsLogSearchQuery: String,
-    dnsLogFilter: DnsLogFilter,
-    onDnsLogSearchChange: (String) -> Unit,
-    onDnsLogFilterChange: (DnsLogFilter) -> Unit,
     onToggleAdFilterList: (String, Boolean) -> Unit,
     onOpenAddCustomFilterDialog: () -> Unit,
-    onDeleteCustomAdFilterList: (String) -> Unit,
-    onBlockDomain: (String) -> Unit,
-    onAllowDomain: (String) -> Unit,
+    onDeleteCustomAdFilterList: (String) -> Unit
+) {
+    item(key = "add_custom_filter_cta") {
+        OutlinedButton(
+            onClick = onOpenAddCustomFilterDialog,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("open_add_custom_filter_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Add Custom Hosts / Adblock Filter URL")
+        }
+    }
+    if (adFilterLists.isEmpty()) {
+        item(key = "empty_ad_filters") {
+            EmptyWebsiteRulesCard(
+                title = "Loading ad filter lists…",
+                subtitle = "Built-in ad & tracker protection core is active whenever Ad Blocker is turned on.",
+                icon = Icons.Rounded.FilterList
+            )
+        }
+    } else {
+        items(items = adFilterLists, key = { "adlist_${it.id}" }) { item ->
+            AdFilterListRow(
+                item = item,
+                onToggleEnabled = { enabled -> onToggleAdFilterList(item.id, enabled) },
+                onDeleteCustomList = if (item.id.startsWith("custom_")) {
+                    { onDeleteCustomAdFilterList(item.id) }
+                } else {
+                    null
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun WebsiteRulesSubTabsBar(
+    selectedSection: WebsiteTabSection,
+    blocklistCount: Int,
+    whitelistCount: Int,
+    allowedAppsCount: Int,
+    onSelectSection: (WebsiteTabSection) -> Unit,
+    onClearCurrent: () -> Unit
+) {
+    val isDark = LocalIsDarkTheme.current
+    val ruleSections = listOf(
+        WebsiteTabSection.BLOCKLIST,
+        WebsiteTabSection.WHITELIST,
+        WebsiteTabSection.ALLOWED_APPS
+    )
+    val currentCount = when (selectedSection) {
+        WebsiteTabSection.BLOCKLIST -> blocklistCount
+        WebsiteTabSection.WHITELIST -> whitelistCount
+        WebsiteTabSection.ALLOWED_APPS -> allowedAppsCount
+        else -> 0
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Domain Rules & App Exceptions",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (currentCount > 0) {
+                TextButton(
+                    onClick = onClearCurrent,
+                    modifier = Modifier.testTag("clear_current_website_section_button")
+                ) {
+                    Text("Clear ($currentCount)")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(ruleSections) { section ->
+                val count = when (section) {
+                    WebsiteTabSection.BLOCKLIST -> blocklistCount
+                    WebsiteTabSection.WHITELIST -> whitelistCount
+                    WebsiteTabSection.ALLOWED_APPS -> allowedAppsCount
+                    else -> 0
+                }
+                val selected = selectedSection == section
+                FilterChip(
+                    selected = selected,
+                    onClick = { onSelectSection(section) },
+                    label = {
+                        Text(
+                            text = "${section.label} ($count)",
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1
+                        )
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = if (isDark) {
+                            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
+                        } else {
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+                        },
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f)
+                    ),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("website_section_tab_${section.name.lowercase()}")
+                )
+            }
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.websiteRulesSectionItems(
+    selectedSection: WebsiteTabSection,
     blocklistRules: List<WebsiteRuleItem>,
     whitelistRules: List<WebsiteRuleItem>,
     filteredBypassApps: List<ManagedApp>,
@@ -524,81 +1027,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
     onToggleBypassApp: (String) -> Unit
 ) {
     when (selectedSection) {
-        WebsiteTabSection.AD_FILTERS -> {
-            item(key = "add_custom_filter_cta") {
-                OutlinedButton(
-                    onClick = onOpenAddCustomFilterDialog,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .testTag("open_add_custom_filter_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Custom Hosts / Adblock Filter URL")
-                }
-            }
-            if (adFilterLists.isEmpty()) {
-                item(key = "empty_ad_filters") {
-                    EmptyWebsiteRulesCard(
-                        title = "Loading ad filter lists…",
-                        subtitle = "Built-in ad & tracker protection core is active whenever Ad Blocker is turned on.",
-                        icon = Icons.Rounded.FilterList
-                    )
-                }
-            } else {
-                items(items = adFilterLists, key = { "adlist_${it.id}" }) { item ->
-                    AdFilterListRow(
-                        item = item,
-                        onToggleEnabled = { enabled -> onToggleAdFilterList(item.id, enabled) },
-                        onDeleteCustomList = if (item.id.startsWith("custom_")) {
-                            { onDeleteCustomAdFilterList(item.id) }
-                        } else {
-                            null
-                        }
-                    )
-                }
-            }
-        }
-
-        WebsiteTabSection.DNS_LOGS -> {
-            item(key = "dns_logs_filter_header") {
-                DnsLogsFilterCard(
-                    searchQuery = dnsLogSearchQuery,
-                    selectedFilter = dnsLogFilter,
-                    totalLogsCount = totalDnsLogsCount,
-                    onSearchQueryChange = onDnsLogSearchChange,
-                    onSelectFilter = onDnsLogFilterChange
-                )
-            }
-            if (dnsLogs.isEmpty()) {
-                item(key = "empty_dns_logs") {
-                    EmptyWebsiteRulesCard(
-                        title = if (totalDnsLogsCount == 0) "No DNS queries logged yet" else "No matching DNS queries",
-                        subtitle = if (totalDnsLogsCount == 0) {
-                            "Turn on Ad Blocker or Website Blocker with NetGate Firewall active to inspect live lookups here."
-                        } else {
-                            "Clear your search or filter chip to view all recent DNS lookups."
-                        },
-                        icon = Icons.Rounded.Dns
-                    )
-                }
-            } else {
-                items(items = dnsLogs, key = { "dnslog_${it.id}" }) { entry ->
-                    DnsQueryLogRow(
-                        entry = entry,
-                        onBlockDomain = onBlockDomain,
-                        onAllowDomain = onAllowDomain
-                    )
-                }
-            }
-        }
-
         WebsiteTabSection.BLOCKLIST -> {
             if (blocklistRules.isEmpty()) {
                 item(key = "empty_blocklist") {
@@ -666,8 +1094,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.websiteSectionItems(
                 }
             }
         }
+
+        else -> Unit
     }
 }
+
+// Unused helper removed — replaced by adFilterSectionItems & websiteRulesSectionItems
 
 @Composable
 private fun WebsiteModeControlCard(
@@ -1196,92 +1628,7 @@ private fun RecentBlockedDomainsCard(
     }
 }
 
-@Composable
-private fun WebsiteSectionTabsBar(
-    selectedSection: WebsiteTabSection,
-    adFiltersCount: Int,
-    dnsLogsCount: Int,
-    blocklistCount: Int,
-    whitelistCount: Int,
-    allowedAppsCount: Int,
-    onSelectSection: (WebsiteTabSection) -> Unit,
-    onClearCurrent: () -> Unit
-) {
-    val isDark = LocalIsDarkTheme.current
-    val currentCount = when (selectedSection) {
-        WebsiteTabSection.AD_FILTERS -> adFiltersCount
-        WebsiteTabSection.DNS_LOGS -> dnsLogsCount
-        WebsiteTabSection.BLOCKLIST -> blocklistCount
-        WebsiteTabSection.WHITELIST -> whitelistCount
-        WebsiteTabSection.ALLOWED_APPS -> allowedAppsCount
-    }
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Ad Lists, DNS Log & Rules",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (selectedSection == WebsiteTabSection.AD_FILTERS) {
-                TextButton(
-                    onClick = onClearCurrent,
-                    modifier = Modifier.testTag("sync_current_ad_section_button")
-                ) {
-                    Text("Sync All")
-                }
-            } else if (currentCount > 0) {
-                TextButton(
-                    onClick = onClearCurrent,
-                    modifier = Modifier.testTag("clear_current_website_section_button")
-                ) {
-                    Text("Clear ($currentCount)")
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(WebsiteTabSection.entries) { section ->
-                val count = when (section) {
-                    WebsiteTabSection.AD_FILTERS -> adFiltersCount
-                    WebsiteTabSection.DNS_LOGS -> dnsLogsCount
-                    WebsiteTabSection.BLOCKLIST -> blocklistCount
-                    WebsiteTabSection.WHITELIST -> whitelistCount
-                    WebsiteTabSection.ALLOWED_APPS -> allowedAppsCount
-                }
-                val selected = selectedSection == section
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelectSection(section) },
-                    label = {
-                        Text(
-                            text = "${section.label} ($count)",
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1
-                        )
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isDark) {
-                            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
-                        } else {
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
-                        },
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f)
-                    ),
-                    modifier = Modifier.testTag("website_section_tab_${section.name.lowercase()}")
-                )
-            }
-        }
-    }
-}
+// Replaced by WebsiteRulesSubTabsBar above
 
 @Composable
 private fun WebsiteRuleRow(

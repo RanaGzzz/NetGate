@@ -75,6 +75,8 @@ import com.example.data.model.DnsLeakVerdict
 import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsProviderPreset
 import com.example.data.model.DnsServerIdentity
+import com.example.data.model.DnsTransportMode
+import com.example.data.model.DpiBypassMode
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.UpstreamDnsServer
 import com.example.service.VpnRuntimeState
@@ -98,6 +100,13 @@ fun DnsProtectionContent(
     onRunDnsCheck: () -> Unit,
     onRunDnsLeakTest: () -> Unit,
     onTestCloudflareDoh: () -> Unit,
+    onSelectDpiMode: (DpiBypassMode) -> Unit,
+    onSelectDpiChunkSize: (Int) -> Unit,
+    onToggleDpiIdleKeepAlive: (Boolean) -> Unit,
+    onToggleBlockQuic: (Boolean) -> Unit,
+    onToggleAntiDnsPoison: (Boolean) -> Unit,
+    onSelectDnsTransportMode: (DnsTransportMode) -> Unit,
+    onFlushDpiCache: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
     onCopiedHostname: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -170,6 +179,28 @@ fun DnsProtectionContent(
                         onToggleDohUpstream = onToggleDohUpstream
                     )
 
+                    DpiBypassShieldCard(
+                        dpiBypassMode = preferences.dpiBypassMode,
+                        dpiFragmentChunkSize = preferences.dpiFragmentChunkSize,
+                        dpiIdleKeepAliveEnabled = preferences.dpiIdleKeepAliveEnabled,
+                        blockQuicForDpiBypass = preferences.blockQuicForDpiBypass,
+                        antiDnsPoisonEnabled = preferences.antiDnsPoisonEnabled,
+                        dnsTransportMode = preferences.dnsTransportMode,
+                        dpiBypassedConnectionsCount = vpnRuntimeState.dpiBypassedConnectionsCount,
+                        dpiAutopilotLearnedCount = vpnRuntimeState.dpiAutopilotLearnedCount,
+                        antiDnsPoisonBlockedCount = vpnRuntimeState.antiDnsPoisonBlockedCount,
+                        quicStrippedCount = vpnRuntimeState.quicStrippedCount,
+                        isFirewallActive = isFirewallActive,
+                        onSelectDpiMode = onSelectDpiMode,
+                        onSelectChunkSize = onSelectDpiChunkSize,
+                        onToggleIdleKeepAlive = onToggleDpiIdleKeepAlive,
+                        onToggleBlockQuic = onToggleBlockQuic,
+                        onToggleAntiDnsPoison = onToggleAntiDnsPoison,
+                        onSelectDnsTransportMode = onSelectDnsTransportMode,
+                        onFlushCache = onFlushDpiCache,
+                        onRequestEnableFirewall = onRequestEnableFirewall
+                    )
+
                     DnsPresetsList(
                         selectedPreset = selectedPreset,
                         onSelectPreset = { selectedPreset = it },
@@ -212,6 +243,28 @@ fun DnsProtectionContent(
                         onSelectUpstreamDns = onSelectUpstreamDns,
                         onSaveCustomDns = onSaveCustomDns,
                         onToggleDohUpstream = onToggleDohUpstream
+                    )
+
+                    DpiBypassShieldCard(
+                        dpiBypassMode = preferences.dpiBypassMode,
+                        dpiFragmentChunkSize = preferences.dpiFragmentChunkSize,
+                        dpiIdleKeepAliveEnabled = preferences.dpiIdleKeepAliveEnabled,
+                        blockQuicForDpiBypass = preferences.blockQuicForDpiBypass,
+                        antiDnsPoisonEnabled = preferences.antiDnsPoisonEnabled,
+                        dnsTransportMode = preferences.dnsTransportMode,
+                        dpiBypassedConnectionsCount = vpnRuntimeState.dpiBypassedConnectionsCount,
+                        dpiAutopilotLearnedCount = vpnRuntimeState.dpiAutopilotLearnedCount,
+                        antiDnsPoisonBlockedCount = vpnRuntimeState.antiDnsPoisonBlockedCount,
+                        quicStrippedCount = vpnRuntimeState.quicStrippedCount,
+                        isFirewallActive = isFirewallActive,
+                        onSelectDpiMode = onSelectDpiMode,
+                        onSelectChunkSize = onSelectDpiChunkSize,
+                        onToggleIdleKeepAlive = onToggleDpiIdleKeepAlive,
+                        onToggleBlockQuic = onToggleBlockQuic,
+                        onToggleAntiDnsPoison = onToggleAntiDnsPoison,
+                        onSelectDnsTransportMode = onSelectDnsTransportMode,
+                        onFlushCache = onFlushDpiCache,
+                        onRequestEnableFirewall = onRequestEnableFirewall
                     )
 
                     DnsStatusAndSetupCards(

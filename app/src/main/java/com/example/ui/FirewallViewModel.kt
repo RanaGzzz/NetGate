@@ -41,6 +41,8 @@ import com.example.data.model.DnsCheckState
 import com.example.data.model.DnsLeakTestState
 import com.example.data.model.DnsProbeState
 import com.example.data.model.DnsQueryLogEntry
+import com.example.data.model.DnsTransportMode
+import com.example.data.model.DpiBypassMode
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.HotspotProxyRuntimeState
@@ -158,7 +160,17 @@ data class WebsiteBlockerUiState(
     val sniProxyPreset: SniProxyPreset = SniProxyPreset.STANDARD_DIRECT,
     val customSniProxyHost: String = "",
     val customSniProxyPort: Int = 8080,
-    val safeRewriteCount: Long = 0L
+    val safeRewriteCount: Long = 0L,
+    val dpiBypassMode: DpiBypassMode = DpiBypassMode.OFF,
+    val dpiFragmentChunkSize: Int = 4,
+    val dpiIdleKeepAliveEnabled: Boolean = true,
+    val blockQuicForDpiBypass: Boolean = true,
+    val antiDnsPoisonEnabled: Boolean = true,
+    val dnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK,
+    val dpiBypassedConnectionsCount: Long = 0L,
+    val dpiAutopilotLearnedCount: Int = 0,
+    val antiDnsPoisonBlockedCount: Long = 0L,
+    val quicStrippedCount: Long = 0L
 )
 
 data class FirewallUiState(
@@ -707,7 +719,17 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             sniProxyPreset = base.prefs.sniProxyPreset,
             customSniProxyHost = base.prefs.customSniProxyHost,
             customSniProxyPort = base.prefs.customSniProxyPort,
-            safeRewriteCount = base.vpnState.safeRewriteCount
+            safeRewriteCount = base.vpnState.safeRewriteCount,
+            dpiBypassMode = base.prefs.dpiBypassMode,
+            dpiFragmentChunkSize = base.prefs.dpiFragmentChunkSize,
+            dpiIdleKeepAliveEnabled = base.prefs.dpiIdleKeepAliveEnabled,
+            blockQuicForDpiBypass = base.prefs.blockQuicForDpiBypass,
+            antiDnsPoisonEnabled = base.prefs.antiDnsPoisonEnabled,
+            dnsTransportMode = base.prefs.dnsTransportMode,
+            dpiBypassedConnectionsCount = base.vpnState.dpiBypassedConnectionsCount,
+            dpiAutopilotLearnedCount = base.vpnState.dpiAutopilotLearnedCount,
+            antiDnsPoisonBlockedCount = base.vpnState.antiDnsPoisonBlockedCount,
+            quicStrippedCount = base.vpnState.quicStrippedCount
         )
 
         val effectiveDnsCheck = if (sheets.dnsCheckState.checkedAtMs == 0L && !sheets.dnsCheckState.isChecking) {
@@ -1534,6 +1556,69 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             preferences.setCustomSniProxy(cleanedHost, validPort)
             _snackbarMessages.tryEmit("Saved custom upstream SNI proxy $cleanedHost:$validPort")
         }
+    }
+
+    fun setDpiBypassMode(mode: DpiBypassMode) {
+        viewModelScope.launch {
+            preferences.setDpiBypassMode(mode)
+            val firewallOn = uiState.value.preferences.isFirewallEnabled
+            val msg = when {
+                mode == DpiBypassMode.OFF -> "DPI Bypass Shield turned off"
+                firewallOn -> "DPI Bypass Shield active (${mode.title})"
+                else -> "DPI ${mode.title} enabled — activate Firewall to apply"
+            }
+            _snackbarMessages.tryEmit(msg)
+        }
+    }
+
+    fun setDpiFragmentChunkSize(size: Int) {
+        val valid = size.coerceIn(1, 32)
+        viewModelScope.launch {
+            preferences.setDpiFragmentChunkSize(valid)
+            _snackbarMessages.tryEmit("TLS fragment chunk size set to ${valid}B")
+        }
+    }
+
+    fun setDpiIdleKeepAliveEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setDpiIdleKeepAliveEnabled(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "Messaging idle keep-alive enabled (SO_KEEPALIVE)"
+                else "Messaging idle keep-alive disabled"
+            )
+        }
+    }
+
+    fun setBlockQuicForDpiBypass(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setBlockQuicForDpiBypass(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "QUIC HTTP/3 downgrade active — forcing TCP TLS for DPI bypass"
+                else "QUIC HTTP/3 downgrade disabled"
+            )
+        }
+    }
+
+    fun setAntiDnsPoisonEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setAntiDnsPoisonEnabled(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "Anti-DNS Poisoning Guard active"
+                else "Anti-DNS Poisoning Guard disabled"
+            )
+        }
+    }
+
+    fun setDnsTransportMode(mode: DnsTransportMode) {
+        viewModelScope.launch {
+            preferences.setDnsTransportMode(mode)
+            _snackbarMessages.tryEmit("DNS transport set to ${mode.title}")
+        }
+    }
+
+    fun flushDnsAndAutopilotCache() {
+        NetGateVpnService.flushDnsAndAutopilotCache(getApplication())
+        _snackbarMessages.tryEmit("Flushed DNS responses & reset Autopilot strategy cache")
     }
 
     fun addCustomAdFilterList(title: String, sourceUrl: String, category: String) {

@@ -407,6 +407,50 @@ enum class SniProxyPreset(
     )
 }
 
+enum class DpiBypassMode(
+    val title: String,
+    val subtitle: String
+) {
+    OFF(
+        title = "Off",
+        subtitle = "Standard direct connections without packet reshaping"
+    ),
+    AUTOPILOT(
+        title = "Autopilot",
+        subtitle = "Automatically selects & learns the fastest DPI bypass strategy per domain"
+    ),
+    SNI_SPLIT(
+        title = "SNI Split",
+        subtitle = "Splits TLS ClientHello across the SNI hostname boundary without VPN relay"
+    ),
+    SNI_CHUNKS(
+        title = "Micro Chunks",
+        subtitle = "Fragments ClientHello & Host headers into tiny multi-segment chunks"
+    ),
+    HTTP_DESYNC(
+        title = "HTTP Desync",
+        subtitle = "Combines SNI splitting with HTTP Host header split & case desync"
+    )
+}
+
+enum class DnsTransportMode(
+    val title: String,
+    val subtitle: String
+) {
+    DOH_WITH_FALLBACK(
+        title = "DoH + DoTCP",
+        subtitle = "Encrypted HTTPS DNS first with DNS-over-TCP & UDP fallback"
+    ),
+    DNS_OVER_TCP(
+        title = "DNS over TCP",
+        subtitle = "Forces port 53 over TCP to bypass UDP:53 ISP throttling & blocks"
+    ),
+    UDP_THEN_TCP(
+        title = "UDP + DoTCP",
+        subtitle = "Fast UDP port 53 with automatic TCP retry on spoof or drop"
+    )
+}
+
 enum class StatusBarSpeedStyle(
     val title: String,
     val subtitle: String
@@ -505,7 +549,14 @@ data class FirewallPreferencesState(
     val globalWifiTimerDurationMillis: Long = 0L,
     val autoBlockWifiOnIdleEnabled: Boolean = false,
     val autoBlockWifiIdleMinutes: Int = 10,
-    val autoBlockWifiOpenPanelNotify: Boolean = true
+    val autoBlockWifiOpenPanelNotify: Boolean = true,
+    val dpiBypassMode: DpiBypassMode = DpiBypassMode.OFF,
+    val dpiFragmentChunkSize: Int = 4,
+    val dpiFragmentDelayMs: Int = 1,
+    val dpiIdleKeepAliveEnabled: Boolean = true,
+    val blockQuicForDpiBypass: Boolean = true,
+    val antiDnsPoisonEnabled: Boolean = true,
+    val dnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
@@ -612,6 +663,14 @@ enum class WebsiteFilterMode(val title: String, val subtitle: String) {
         title = "Whitelist Only",
         subtitle = "Block ALL internet websites • Only whitelisted sites & selected apps allowed"
     )
+}
+
+enum class WebsiteMainTab(val label: String) {
+    AD_BLOCKER("Ad Blocker"),
+    WEBSITES("Websites"),
+    SAFE_SEARCH("Safe & Kids"),
+    PROXY_DPI("SNI & DPI"),
+    DNS_LOGS("DNS Logs")
 }
 
 enum class WebsiteTabSection(val label: String) {
