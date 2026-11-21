@@ -2,7 +2,9 @@ package com.example.ui.components
 
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
@@ -39,20 +42,34 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BlurEngineStyle
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.NetGateThemeStyle
 import com.example.data.model.ThemeMode
 import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.LiquidGlassAqua
+import com.example.ui.theme.LiquidGlassCyan
+import com.example.ui.theme.LiquidGlassPrismViolet
+import com.example.ui.theme.LocalBackdropLiquidState
+import com.example.ui.theme.LocalIsDarkTheme
+import com.example.ui.theme.LocalThemeStyle
+import io.github.fletchmckee.liquid.liquefiable
+import io.github.fletchmckee.liquid.rememberLiquidState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FirewallSettingsSheet(
     preferences: FirewallPreferencesState,
     onThemeModeChange: (ThemeMode) -> Unit,
+    onThemeStyleChange: (NetGateThemeStyle) -> Unit = {},
     onToggleDynamicColor: (Boolean) -> Unit,
     onBlurStyleChange: (BlurEngineStyle) -> Unit,
     onToggleBlurAnimation: (Boolean) -> Unit,
@@ -65,21 +82,69 @@ fun FirewallSettingsSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val themeStyle = LocalThemeStyle.current
+    val isDark = LocalIsDarkTheme.current
+    val sheetLiquidState = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) {
+        rememberLiquidState()
+    } else {
+        null
+    }
+    val sheetSurfaceColor = MaterialTheme.colorScheme.surface
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+        containerColor = sheetSurfaceColor.copy(alpha = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) 0.96f else 0.94f)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-                .testTag("firewall_settings_sheet")
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            if (sheetLiquidState != null) {
+                Canvas(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .liquefiable(sheetLiquidState)
+                ) {
+                    drawRect(color = sheetSurfaceColor)
+                    val blobAlpha = if (isDark) 0.24f else 0.22f
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(LiquidGlassCyan.copy(alpha = blobAlpha), Color.Transparent),
+                            center = Offset(size.width * 0.16f, size.height * 0.18f),
+                            radius = size.maxDimension * 0.55f
+                        ),
+                        center = Offset(size.width * 0.16f, size.height * 0.18f),
+                        radius = size.maxDimension * 0.55f
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(LiquidGlassAqua.copy(alpha = blobAlpha * 0.9f), Color.Transparent),
+                            center = Offset(size.width * 0.88f, size.height * 0.45f),
+                            radius = size.maxDimension * 0.48f
+                        ),
+                        center = Offset(size.width * 0.88f, size.height * 0.45f),
+                        radius = size.maxDimension * 0.48f
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(LiquidGlassPrismViolet.copy(alpha = blobAlpha * 0.85f), Color.Transparent),
+                            center = Offset(size.width * 0.30f, size.height * 0.82f),
+                            radius = size.maxDimension * 0.52f
+                        ),
+                        center = Offset(size.width * 0.30f, size.height * 0.82f),
+                        radius = size.maxDimension * 0.52f
+                    )
+                }
+            }
+
+            CompositionLocalProvider(LocalBackdropLiquidState provides sheetLiquidState) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                        .testTag("firewall_settings_sheet")
+                ) {
             Text(
                 text = "Appearance & Firewall",
                 style = MaterialTheme.typography.headlineSmall,
@@ -145,6 +210,114 @@ fun FirewallSettingsSheet(
                                     text = mode.label,
                                     style = MaterialTheme.typography.labelLarge
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Theme Style & Motion Presets (Liquid Glass, Material 3 Expressive, Material You Lite, Cyber Slate)
+            FrostedSurface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("theme_style_settings_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Layers,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Theme Style & Motion",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        FrostedSurface(
+                            shape = RoundedCornerShape(50),
+                            tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            borderAccent = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("theme_style_preview_pill")
+                        ) {
+                            Text(
+                                text = preferences.themeStyle.badgeLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = preferences.themeStyle.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NetGateThemeStyle.entries.chunked(2).forEach { rowStyles ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowStyles.forEach { style ->
+                                    val selected = preferences.themeStyle == style
+                                    FilledTonalButton(
+                                        onClick = { onThemeStyleChange(style) },
+                                        shape = RoundedCornerShape(
+                                            when (style) {
+                                                NetGateThemeStyle.LIQUID_GLASS -> 16.dp
+                                                NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> 18.dp
+                                                else -> 12.dp
+                                            }
+                                        ),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (selected) {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
+                                            },
+                                            contentColor = if (selected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .testTag("theme_style_${style.name.lowercase()}")
+                                    ) {
+                                        Text(
+                                            text = style.title,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -422,6 +595,8 @@ fun FirewallSettingsSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Reset All App Rules")
+            }
+        }
             }
         }
     }

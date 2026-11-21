@@ -1,10 +1,14 @@
 package com.example
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import com.example.data.model.ManagedApp
 import com.example.data.model.VpnGateServer
 import com.example.data.model.VpnGuardProfile
@@ -220,8 +224,10 @@ class VpnGuardTest {
 
         composeRule.onNodeWithTag("vpn_guard_hero_card").assertIsDisplayed()
         composeRule.onNodeWithTag("vpn_guard_generate_warp_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("vpn_guard_screen").performScrollToNode(hasText("Proton NL"))
         composeRule.onNodeWithText("Proton NL").assertIsDisplayed()
-        composeRule.onNodeWithTag("vpn_guard_tab_vpngate").performClick()
+        composeRule.onNodeWithTag("vpn_guard_screen").performScrollToIndex(1)
+        composeRule.onNodeWithTag("vpn_guard_tab_vpngate").performScrollTo().performClick()
         assertEquals(VpnGuardSubTab.VPNGATE, activeTab)
     }
 }

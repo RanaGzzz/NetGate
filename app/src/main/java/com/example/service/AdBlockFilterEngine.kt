@@ -2,10 +2,12 @@ package com.example.service
 
 import android.content.Context
 import com.example.data.local.AdFilterListEntity
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.net.URL
+import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 
@@ -621,6 +623,50 @@ object AdBlockFilterEngine {
             }
         } catch (_: Exception) {
             null
+        } finally {
+            runCatching { connection?.disconnect() }
+        }
+    }
+
+    /**
+     * Resolves A records via Cloudflare/upstream DoH JSON API as a fallback when ISP DNS fails or poisons.
+     */
+    fun resolveViaDoh(
+        domain: String,
+        dohUrl: String = "https://1.1.1.1/dns-query"
+    ): List<String> {
+        val cleanDomain = domain.trim().trimEnd('.')
+        if (cleanDomain.isEmpty()) return emptyList()
+        val encoded = URLEncoder.encode(cleanDomain, "UTF-8")
+        val endpoint = dohUrl.trim().ifEmpty { "https://1.1.1.1/dns-query" }
+        val separator = if ('?' in endpoint) '&' else '?'
+        var connection: HttpsURLConnection? = null
+        return try {
+            val url = URL("$endpoint${separator}name=$encoded&type=A")
+            connection = (url.openConnection() as HttpsURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 2500
+                readTimeout = 2500
+                useCaches = false
+                setRequestProperty("Accept", "application/dns-json")
+                setRequestProperty("Connection", "close")
+            }
+            if (connection.responseCode !in 200..299) return emptyList()
+            val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
+            val answers = JSONObject(jsonText).optJSONArray("Answer") ?: return emptyList()
+            val ips = mutableListOf<String>()
+            for (i in 0 until answers.length()) {
+                val obj = answers.optJSONObject(i) ?: continue
+                if (obj.optInt("type", -1) == 1) {
+                    val data = obj.optString("data", "").trim()
+                    if (IPV4_LITERAL_REGEX.matches(data)) {
+                        ips.add(data)
+                    }
+                }
+            }
+            ips.distinct()
+        } catch (_: Exception) {
+            emptyList()
         } finally {
             runCatching { connection?.disconnect() }
         }

@@ -70,7 +70,9 @@ import com.example.data.model.formatSpeedBytesPerSec
 import com.example.ui.theme.BlockedRed
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.LocalExpressiveMotion
 import com.example.ui.theme.LocalIsDarkTheme
+import com.example.ui.theme.LocalThemeStyle
 import com.example.ui.theme.WifiAccent
 
 @Composable
@@ -99,6 +101,8 @@ fun FirewallHeaderCard(
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
+    val themeStyle = LocalThemeStyle.current
+    val motionSpec = LocalExpressiveMotion.current
     val primaryColor = MaterialTheme.colorScheme.primary
     val accentColor by animateColorAsState(
         targetValue = if (isFirewallActive) primaryColor else MaterialTheme.colorScheme.outline,
@@ -120,17 +124,18 @@ fun FirewallHeaderCard(
         modifier = modifier
             .fillMaxWidth()
             .testTag("firewall_header_card"),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape((26 + themeStyle.cornerRadiusBoostDp).dp),
         tintColor = glassTint,
-        borderAccent = if (isFirewallActive) primaryColor else null
+        borderAccent = if (isFirewallActive) primaryColor else null,
+        enableLiquidTouch = true
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize(
                     animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
+                        dampingRatio = motionSpec.spatialDampingRatio,
+                        stiffness = motionSpec.spatialStiffness
                     )
                 )
                 .padding(18.dp)

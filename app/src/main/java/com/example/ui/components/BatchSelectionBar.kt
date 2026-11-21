@@ -35,7 +35,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BatchAction
+import com.example.ui.theme.LocalBackdropLiquidState
 import com.example.ui.theme.LocalIsDarkTheme
+import com.example.ui.theme.LocalOverlayLiquidState
 
 @Composable
 fun BatchSelectionBar(
@@ -63,7 +65,8 @@ fun BatchSelectionBar(
         shape = RoundedCornerShape(26.dp),
         tintColor = dockTint,
         borderAccent = MaterialTheme.colorScheme.primary,
-        elevation = 12.dp
+        elevation = 12.dp,
+        liquidStateOverride = LocalOverlayLiquidState.current ?: LocalBackdropLiquidState.current
     ) {
         Column(
             modifier = Modifier

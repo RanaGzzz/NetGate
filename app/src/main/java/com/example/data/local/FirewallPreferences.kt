@@ -14,6 +14,7 @@ import com.example.data.model.BlurEngineStyle
 import com.example.data.model.DnsTransportMode
 import com.example.data.model.DpiBypassMode
 import com.example.data.model.FirewallPreferencesState
+import com.example.data.model.NetGateThemeStyle
 import com.example.data.model.SniProxyPreset
 import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.ThemeMode
@@ -36,6 +37,7 @@ class FirewallPreferences(private val context: Context) {
         val DEFAULT_BLOCK_WIFI = booleanPreferencesKey("default_block_wifi")
         val DEFAULT_BLOCK_DATA = booleanPreferencesKey("default_block_data")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val THEME_STYLE = stringPreferencesKey("theme_style")
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
         val WEBSITE_FILTER_MODE = stringPreferencesKey("website_filter_mode")
         val WEBSITE_BYPASS_PACKAGES = stringSetPreferencesKey("website_bypass_packages")
@@ -85,6 +87,9 @@ class FirewallPreferences(private val context: Context) {
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
         val themeModeName = prefs[Keys.THEME_MODE] ?: ThemeMode.SYSTEM.name
         val themeMode = ThemeMode.entries.firstOrNull { it.name == themeModeName } ?: ThemeMode.SYSTEM
+        val themeStyleName = prefs[Keys.THEME_STYLE] ?: NetGateThemeStyle.NETGATE_DEFAULT.name
+        val themeStyle = NetGateThemeStyle.entries.firstOrNull { it.name == themeStyleName }
+            ?: NetGateThemeStyle.NETGATE_DEFAULT
         val websiteModeName = prefs[Keys.WEBSITE_FILTER_MODE] ?: WebsiteFilterMode.OFF.name
         val websiteMode = WebsiteFilterMode.entries.firstOrNull { it.name == websiteModeName }
             ?: WebsiteFilterMode.OFF
@@ -117,6 +122,7 @@ class FirewallPreferences(private val context: Context) {
             defaultBlockWifiForNewRules = prefs[Keys.DEFAULT_BLOCK_WIFI] ?: false,
             defaultBlockDataForNewRules = prefs[Keys.DEFAULT_BLOCK_DATA] ?: false,
             themeMode = themeMode,
+            themeStyle = themeStyle,
             useDynamicColor = prefs[Keys.USE_DYNAMIC_COLOR] ?: true,
             websiteFilterMode = websiteMode,
             websiteBypassPackages = prefs[Keys.WEBSITE_BYPASS_PACKAGES] ?: emptySet(),
@@ -186,6 +192,10 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setThemeMode(mode: ThemeMode) {
         context.firewallDataStore.edit { it[Keys.THEME_MODE] = mode.name }
+    }
+
+    suspend fun setThemeStyle(style: NetGateThemeStyle) {
+        context.firewallDataStore.edit { it[Keys.THEME_STYLE] = style.name }
     }
 
     suspend fun setUseDynamicColor(enabled: Boolean) {

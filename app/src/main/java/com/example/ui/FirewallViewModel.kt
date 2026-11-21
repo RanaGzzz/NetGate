@@ -49,6 +49,7 @@ import com.example.data.model.HotspotProxyRuntimeState
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.LiveNetworkTelemetry
 import com.example.data.model.ManagedApp
+import com.example.data.model.NetGateThemeStyle
 import com.example.data.model.SiteConnectionRecord
 import com.example.data.model.SiteTrafficFilter
 import com.example.data.model.SniProxyPreset
@@ -1408,6 +1409,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun setThemeMode(mode: ThemeMode) {
         viewModelScope.launch { preferences.setThemeMode(mode) }
+    }
+
+    fun setThemeStyle(style: NetGateThemeStyle) {
+        viewModelScope.launch {
+            preferences.setThemeStyle(style)
+            _snackbarMessages.tryEmit("Theme style: ${style.title}")
+        }
     }
 
     fun cycleThemeMode() {

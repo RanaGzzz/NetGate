@@ -29,6 +29,48 @@ enum class ThemeMode(val label: String) {
     DARK("Night")
 }
 
+enum class NetGateThemeStyle(
+    val title: String,
+    val subtitle: String,
+    val badgeLabel: String,
+    val cornerRadiusBoostDp: Float,
+    val springDampingRatio: Float,
+    val springStiffness: Float
+) {
+    NETGATE_DEFAULT(
+        title = "Cyber Slate",
+        subtitle = "Signature emerald glass with ambient cyber aurora rings",
+        badgeLabel = "Classic",
+        cornerRadiusBoostDp = 0f,
+        springDampingRatio = 0.85f,
+        springStiffness = 420f
+    ),
+    LIQUID_GLASS(
+        title = "Liquid Glass",
+        subtitle = "Lens refraction sheen, rainbow dispersion rim, corner glints & liquid-stretch springs",
+        badgeLabel = "Refractive",
+        cornerRadiusBoostDp = 6f,
+        springDampingRatio = 0.56f,
+        springStiffness = 460f
+    ),
+    MATERIAL_3_EXPRESSIVE(
+        title = "Material 3 Expressive",
+        subtitle = "High-chroma tonal containers, sculptural pills & joyful bouncy spring physics",
+        badgeLabel = "Bouncy",
+        cornerRadiusBoostDp = 8f,
+        springDampingRatio = 0.68f,
+        springStiffness = 380f
+    ),
+    MATERIAL_YOU_LITE(
+        title = "Material You Lite",
+        subtitle = "Wallpaper-adaptive pastel tones, low-overhead surfaces & crisp snappy motion",
+        badgeLabel = "Lite",
+        cornerRadiusBoostDp = 2f,
+        springDampingRatio = 0.96f,
+        springStiffness = 620f
+    )
+}
+
 enum class BlurEngineStyle(
     val title: String,
     val subtitle: String,
@@ -513,6 +555,7 @@ data class FirewallPreferencesState(
     val defaultBlockWifiForNewRules: Boolean = false,
     val defaultBlockDataForNewRules: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val themeStyle: NetGateThemeStyle = NetGateThemeStyle.NETGATE_DEFAULT,
     val useDynamicColor: Boolean = true,
     val websiteFilterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
     val websiteBypassPackages: Set<String> = emptySet(),

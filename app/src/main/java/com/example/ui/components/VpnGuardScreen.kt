@@ -1100,7 +1100,9 @@ private fun VpnGuardProfileCard(
                 OutlinedButton(
                     onClick = onDownloadConf,
                     shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedButton.colorsOrNull(isDark)
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (isDark) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.45f)
+                    )
                 ) {
                     Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(17.dp))
                     Spacer(modifier = Modifier.width(5.dp))
@@ -1119,11 +1121,6 @@ private fun VpnGuardProfileCard(
         }
     }
 }
-
-@Composable
-private fun OutlinedButton.Companion.colorsOrNull(isDark: Boolean) = ButtonDefaults.outlinedButtonColors(
-    containerColor = if (isDark) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.45f)
-)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

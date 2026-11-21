@@ -102,6 +102,7 @@ import com.example.R
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
+import com.example.data.model.NetGateThemeStyle
 import com.example.data.model.ThemeMode
 import com.example.ui.components.AppDetailBottomSheet
 import com.example.ui.components.AppRuleRow
@@ -118,6 +119,9 @@ import com.example.ui.components.SpeedTestContent
 import com.example.ui.components.VpnGuardContent
 import com.example.ui.theme.BlurEngine.blurEngineModalDepth
 import com.example.ui.theme.LocalIsDarkTheme
+import com.example.ui.theme.LocalOverlayLiquidState
+import com.example.ui.theme.LocalThemeStyle
+import io.github.fletchmckee.liquid.liquefiable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -436,33 +440,81 @@ fun FirewallScreen(
                     }
 
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        val activeStyle = LocalThemeStyle.current
+                        val overlayLiquidState = LocalOverlayLiquidState.current
                         AnimatedContent(
                             targetState = uiState.currentDestination,
                             transitionSpec = {
                                 val forward = AppDestination.entries.indexOf(targetState) >=
                                     AppDestination.entries.indexOf(initialState)
-                                val enter = slideInHorizontally(
-                                    animationSpec = tween(250, easing = FastOutSlowInEasing),
-                                    initialOffsetX = { fullWidth -> if (forward) fullWidth / 6 else -fullWidth / 6 }
-                                ) + fadeIn(
-                                    animationSpec = tween(210, easing = FastOutSlowInEasing)
-                                ) + scaleIn(
-                                    initialScale = 0.975f,
-                                    animationSpec = tween(250, easing = FastOutSlowInEasing)
-                                )
-                                val exit = slideOutHorizontally(
-                                    animationSpec = tween(200, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { fullWidth -> if (forward) -fullWidth / 7 else fullWidth / 7 }
-                                ) + fadeOut(
-                                    animationSpec = tween(160, easing = FastOutSlowInEasing)
-                                ) + scaleOut(
-                                    targetScale = 0.985f,
-                                    animationSpec = tween(200, easing = FastOutSlowInEasing)
-                                )
-                                (enter togetherWith exit).using(SizeTransform(clip = false))
+                                when (activeStyle) {
+                                    NetGateThemeStyle.MATERIAL_YOU_LITE -> {
+                                        (fadeIn(tween(150)) togetherWith fadeOut(tween(110)))
+                                            .using(SizeTransform(clip = false))
+                                    }
+                                    NetGateThemeStyle.LIQUID_GLASS,
+                                    NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> {
+                                        val motionSlide = spring<androidx.compose.ui.unit.IntOffset>(
+                                            dampingRatio = activeStyle.springDampingRatio,
+                                            stiffness = activeStyle.springStiffness
+                                        )
+                                        val motionScale = spring<Float>(
+                                            dampingRatio = activeStyle.springDampingRatio,
+                                            stiffness = activeStyle.springStiffness
+                                        )
+                                        val enter = slideInHorizontally(
+                                            animationSpec = motionSlide,
+                                            initialOffsetX = { fullWidth -> if (forward) fullWidth / 5 else -fullWidth / 5 }
+                                        ) + fadeIn(
+                                            animationSpec = tween(190, easing = FastOutSlowInEasing)
+                                        ) + scaleIn(
+                                            initialScale = 0.955f,
+                                            animationSpec = motionScale
+                                        )
+                                        val exit = slideOutHorizontally(
+                                            animationSpec = tween(180, easing = FastOutSlowInEasing),
+                                            targetOffsetX = { fullWidth -> if (forward) -fullWidth / 7 else fullWidth / 7 }
+                                        ) + fadeOut(
+                                            animationSpec = tween(140, easing = FastOutSlowInEasing)
+                                        ) + scaleOut(
+                                            targetScale = 0.98f,
+                                            animationSpec = tween(180, easing = FastOutSlowInEasing)
+                                        )
+                                        (enter togetherWith exit).using(SizeTransform(clip = false))
+                                    }
+                                    NetGateThemeStyle.NETGATE_DEFAULT -> {
+                                        val enter = slideInHorizontally(
+                                            animationSpec = tween(250, easing = FastOutSlowInEasing),
+                                            initialOffsetX = { fullWidth -> if (forward) fullWidth / 6 else -fullWidth / 6 }
+                                        ) + fadeIn(
+                                            animationSpec = tween(210, easing = FastOutSlowInEasing)
+                                        ) + scaleIn(
+                                            initialScale = 0.975f,
+                                            animationSpec = tween(250, easing = FastOutSlowInEasing)
+                                        )
+                                        val exit = slideOutHorizontally(
+                                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                            targetOffsetX = { fullWidth -> if (forward) -fullWidth / 7 else fullWidth / 7 }
+                                        ) + fadeOut(
+                                            animationSpec = tween(160, easing = FastOutSlowInEasing)
+                                        ) + scaleOut(
+                                            targetScale = 0.985f,
+                                            animationSpec = tween(200, easing = FastOutSlowInEasing)
+                                        )
+                                        (enter togetherWith exit).using(SizeTransform(clip = false))
+                                    }
+                                }
                             },
                             label = "destination_shared_axis",
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (activeStyle == NetGateThemeStyle.LIQUID_GLASS && overlayLiquidState != null) {
+                                        Modifier.liquefiable(overlayLiquidState)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                         ) { destination ->
                             when (destination) {
                                 AppDestination.DATA_USAGE -> {
@@ -845,6 +897,7 @@ fun FirewallScreen(
         FirewallSettingsSheet(
             preferences = uiState.preferences,
             onThemeModeChange = viewModel::setThemeMode,
+            onThemeStyleChange = viewModel::setThemeStyle,
             onToggleDynamicColor = viewModel::setUseDynamicColor,
             onBlurStyleChange = viewModel::setBlurEngineStyle,
             onToggleBlurAnimation = viewModel::setBlurAnimationEnabled,

@@ -14,6 +14,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.AppDestination
+import com.example.data.model.NetGateThemeStyle
 import com.example.service.NetGateVpnService
 import com.example.service.NetworkMonitorService
 import com.example.service.SystemNetworkMonitor
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
 
             NetGateTheme(
                 themeMode = uiState.preferences.themeMode,
+                themeStyle = uiState.preferences.themeStyle,
                 dynamicColor = uiState.preferences.useDynamicColor,
                 blurEngineStyle = uiState.preferences.blurEngineStyle,
                 blurAnimationEnabled = uiState.preferences.isBlurAnimationEnabled
@@ -158,9 +161,19 @@ class MainActivity : ComponentActivity() {
 
                 var showStartupAnimation by rememberSaveable { mutableStateOf(true) }
                 var startupReplayNonce by remember { mutableIntStateOf(0) }
+                val activeThemeStyle = uiState.preferences.themeStyle
                 val contentScale by animateFloatAsState(
                     targetValue = if (showStartupAnimation) 0.965f else 1f,
-                    animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+                    animationSpec = if (activeThemeStyle == NetGateThemeStyle.LIQUID_GLASS ||
+                        activeThemeStyle == NetGateThemeStyle.MATERIAL_3_EXPRESSIVE
+                    ) {
+                        spring(
+                            dampingRatio = activeThemeStyle.springDampingRatio,
+                            stiffness = activeThemeStyle.springStiffness
+                        )
+                    } else {
+                        tween(durationMillis = 360, easing = FastOutSlowInEasing)
+                    },
                     label = "startupContentRevealScale"
                 )
 
