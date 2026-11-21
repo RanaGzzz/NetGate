@@ -59,6 +59,14 @@ import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.UsageChartMode
 import com.example.data.model.UsageFilterCategory
 import com.example.data.model.UsageTimeRange
+import com.example.data.model.VpnGateServer
+import com.example.data.model.VpnGateSortMode
+import com.example.data.model.VpnGuardProfile
+import com.example.data.model.VpnGuardProviderType
+import com.example.data.model.VpnGuardRoutingMode
+import com.example.data.model.VpnGuardRuntimeState
+import com.example.data.model.VpnGuardSubTab
+import com.example.data.model.VpnGuardUiState
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.model.WifiIdleStatus
@@ -75,8 +83,12 @@ import com.example.service.HotspotProxyService
 import com.example.service.NetGateVpnService
 import com.example.service.NetworkMonitorService
 import com.example.service.SystemNetworkMonitor
+import com.example.service.VpnGateClient
+import com.example.service.VpnGuardManager
 import com.example.service.VpnRuntimeState
+import com.example.service.WarpConfigGenerator
 import com.example.service.WifiAutomationManager
+import com.example.service.WireGuardConfigHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -199,6 +211,7 @@ data class FirewallUiState(
     val liveTelemetry: LiveNetworkTelemetry = LiveNetworkTelemetry(),
     val hotspotProxyState: HotspotProxyRuntimeState = HotspotProxyRuntimeState(),
     val wifiIdleStatus: WifiIdleStatus = WifiIdleStatus(),
+    val vpnGuardState: VpnGuardUiState = VpnGuardUiState(),
     val nowMillis: Long = System.currentTimeMillis()
 ) {
     val effectiveNetworkType: ActiveNetworkType
@@ -274,6 +287,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val showLiveSitesFeedFlow = MutableStateFlow(true)
     private val securityAuditReportFlow = MutableStateFlow(DeviceSecurityAuditReport())
     private val isSyncingAdListsFlow = MutableStateFlow(false)
+
+    private val vpnGuardSubTabFlow = MutableStateFlow(VpnGuardSubTab.PROFILES)
+    private val selectedVpnGuardProfileIdFlow = MutableStateFlow<String?>(null)
+    private val isGeneratingWarpFlow = MutableStateFlow(false)
+    private val vpnGateServersFlow = MutableStateFlow<List<VpnGateServer>>(emptyList())
+    private val isLoadingVpnGateFlow = MutableStateFlow(false)
+    private val vpnGateErrorFlow = MutableStateFlow<String?>(null)
+    private val vpnGateLastFetchedAtFlow = MutableStateFlow(0L)
+    private val vpnGateSearchQueryFlow = MutableStateFlow("")
+    private val vpnGateSortModeFlow = MutableStateFlow(VpnGateSortMode.SCORE)
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
@@ -658,6 +681,61 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         hotspot to idle
     }
 
+    private val vpnGateControlFlow = combine(
+        vpnGateServersFlow,
+        isLoadingVpnGateFlow,
+        vpnGateErrorFlow,
+        vpnGateLastFetchedAtFlow,
+        combine(vpnGateSearchQueryFlow, vpnGateSortModeFlow) { q, s -> q to s }
+    ) { servers, loading, err, fetchedAt, (query, sort) ->
+        VpnGateSnapshot(servers, loading, err, fetchedAt, query, sort)
+    }
+
+    private val vpnGuardUiFlow = combine(
+        vpnGuardSubTabFlow,
+        repository.vpnGuardProfilesFlow,
+        selectedVpnGuardProfileIdFlow,
+        isGeneratingWarpFlow,
+        combine(vpnGateControlFlow, VpnGuardManager.runtimeState) { gate, runtime -> gate to runtime }
+    ) { subTab, profiles, selectedId, generatingWarp, (gate, runtime) ->
+        val resolvedSelectedId = selectedId?.takeIf { id -> profiles.any { it.id == id } }
+            ?: runtime.activeProfileId?.takeIf { id -> profiles.any { it.id == id } }
+            ?: profiles.firstOrNull()?.id
+
+        val q = gate.searchQuery.trim().lowercase()
+        val filteredServers = gate.servers
+            .filter { server ->
+                q.isEmpty() ||
+                    server.countryLong.lowercase().contains(q) ||
+                    server.countryShort.lowercase().contains(q) ||
+                    server.hostName.lowercase().contains(q) ||
+                    server.ip.lowercase().contains(q) ||
+                    server.operatorName.lowercase().contains(q)
+            }
+            .let { list ->
+                when (gate.sortMode) {
+                    VpnGateSortMode.SCORE -> list.sortedByDescending { it.score }
+                    VpnGateSortMode.SPEED -> list.sortedByDescending { it.speedBps }
+                    VpnGateSortMode.PING -> list.sortedBy { if (it.pingMs <= 0) Int.MAX_VALUE else it.pingMs }
+                    VpnGateSortMode.SESSIONS -> list.sortedBy { it.numVpnSessions }
+                }
+            }
+
+        VpnGuardUiState(
+            selectedSubTab = subTab,
+            profiles = profiles,
+            selectedProfileId = resolvedSelectedId,
+            isGeneratingWarp = generatingWarp,
+            vpnGateServers = filteredServers,
+            isLoadingVpnGate = gate.isLoading,
+            vpnGateError = gate.errorMessage,
+            vpnGateLastFetchedAt = gate.lastFetchedAt,
+            vpnGateSearchQuery = gate.searchQuery,
+            vpnGateSortMode = gate.sortMode,
+            runtimeState = runtime
+        )
+    }
+
     val uiState: StateFlow<FirewallUiState> = combine(
         baseDataFlow,
         uiInteractionFlow,
@@ -668,9 +746,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             usageStateFlow,
             websiteAndAdRepoFlow,
             SystemNetworkMonitor.telemetryFlow,
-            hotspotAndIdleFlow
-        ) { dest, usage, webAndAd, liveTelemetry, (hotspot, idle) ->
-            TailSnapshot(dest, usage, webAndAd, liveTelemetry, hotspot, idle)
+            combine(hotspotAndIdleFlow, vpnGuardUiFlow) { hi, vg -> hi to vg }
+        ) { dest, usage, webAndAd, liveTelemetry, (hi, vpnGuard) ->
+            TailSnapshot(dest, usage, webAndAd, liveTelemetry, hi.first, hi.second, vpnGuard)
         }
     ) { base, interaction, connDetails, sheets, tail ->
         val destination = tail.destination
@@ -679,6 +757,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val liveTelemetry = tail.liveTelemetry
         val hotspotState = tail.hotspotProxyState
         val idleStatus = tail.wifiIdleStatus
+        val vpnGuardState = tail.vpnGuardState
         val managedApps = base.managedApps
         val filtered = base.filteredApps
 
@@ -768,6 +847,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             liveTelemetry = liveTelemetry,
             hotspotProxyState = hotspotState,
             wifiIdleStatus = idleStatus,
+            vpnGuardState = vpnGuardState,
             nowMillis = base.nowMillis
         )
     }.stateIn(
@@ -813,6 +893,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 refreshConnectionDetails()
                 if (dnsCheckStateFlow.value.checkedAtMs == 0L) {
                     runDnsCheck()
+                }
+            }
+            AppDestination.VPN_GUARD -> {
+                if (vpnGuardSubTabFlow.value == VpnGuardSubTab.VPNGATE && vpnGateServersFlow.value.isEmpty()) {
+                    refreshVpnGateServers()
                 }
             }
             else -> Unit
@@ -1096,6 +1181,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun onFirewallPermissionGranted() {
         viewModelScope.launch {
+            if (VpnGuardManager.runtimeState.value.isConnectedOrConnecting) {
+                VpnGuardManager.disconnect(getApplication(), restoreFirewallIfPaused = false)
+            }
             preferences.setFirewallEnabled(true)
             NetGateVpnService.startOrReload(getApplication())
             _snackbarMessages.tryEmit("NetGate Firewall active")
@@ -1826,6 +1914,200 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun selectVpnGuardSubTab(tab: VpnGuardSubTab) {
+        vpnGuardSubTabFlow.value = tab
+        if (tab == VpnGuardSubTab.VPNGATE && vpnGateServersFlow.value.isEmpty() && !isLoadingVpnGateFlow.value) {
+            refreshVpnGateServers()
+        }
+    }
+
+    fun selectVpnGuardProfile(profileId: String) {
+        selectedVpnGuardProfileIdFlow.value = profileId
+    }
+
+    fun importWireGuardConfig(
+        rawText: String,
+        nameHint: String = "",
+        routingMode: VpnGuardRoutingMode = VpnGuardRoutingMode.WHOLE_SYSTEM,
+        targetPackages: Set<String> = emptySet()
+    ) {
+        viewModelScope.launch {
+            val res = WireGuardConfigHelper.parseToProfile(
+                rawConfig = rawText,
+                nameHint = nameHint,
+                routingModeOverride = if (routingMode != VpnGuardRoutingMode.WHOLE_SYSTEM || targetPackages.isNotEmpty()) {
+                    routingMode
+                } else {
+                    null
+                },
+                targetPackagesOverride = if (targetPackages.isNotEmpty()) targetPackages else null
+            )
+            res.onSuccess { profile ->
+                repository.saveVpnGuardProfile(profile)
+                selectedVpnGuardProfileIdFlow.value = profile.id
+                _snackbarMessages.tryEmit("Imported ${profile.name} (${profile.routingMode.title})")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Invalid WireGuard .conf file")
+            }
+        }
+    }
+
+    fun generateWarpProfile(
+        profileName: String = "Cloudflare WARP",
+        routingMode: VpnGuardRoutingMode = VpnGuardRoutingMode.WHOLE_SYSTEM,
+        targetPackages: Set<String> = emptySet(),
+        autoConnect: Boolean = false
+    ) {
+        if (isGeneratingWarpFlow.value) return
+        viewModelScope.launch {
+            isGeneratingWarpFlow.value = true
+            val result = WarpConfigGenerator.generateLiveWarpProfile(
+                profileName = profileName.ifBlank { "Cloudflare WARP" },
+                routingMode = routingMode,
+                targetPackages = targetPackages
+            )
+            isGeneratingWarpFlow.value = false
+            result.onSuccess { profile ->
+                repository.saveVpnGuardProfile(profile)
+                selectedVpnGuardProfileIdFlow.value = profile.id
+                if (autoConnect) {
+                    connectVpnGuardProfile(profile)
+                } else {
+                    _snackbarMessages.tryEmit("Generated Cloudflare WARP WireGuard .conf — ready to Connect or Download")
+                }
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Unable to generate WARP config right now")
+            }
+        }
+    }
+
+    fun generateWireGuardKeypairTemplate(profileName: String = "Custom WireGuard") {
+        viewModelScope.launch {
+            val (confText, pubKey) = WireGuardConfigHelper.generateTemplateConfig()
+            val parsed = WireGuardConfigHelper.parseToProfile(
+                rawConfig = confText,
+                nameHint = profileName,
+                providerHint = VpnGuardProviderType.CUSTOM_WIREGUARD
+            )
+            parsed.onSuccess { profile ->
+                repository.saveVpnGuardProfile(profile)
+                selectedVpnGuardProfileIdFlow.value = profile.id
+                _snackbarMessages.tryEmit("Created new keypair profile (PubKey: ${pubKey.take(10)}…)")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Failed to create WireGuard template")
+            }
+        }
+    }
+
+    fun updateVpnGuardProfileRouting(
+        profileId: String,
+        routingMode: VpnGuardRoutingMode,
+        targetPackages: Set<String>
+    ) {
+        viewModelScope.launch {
+            if (routingMode != VpnGuardRoutingMode.WHOLE_SYSTEM && targetPackages.isEmpty()) {
+                _snackbarMessages.tryEmit("Pick at least one app for ${routingMode.title}")
+                return@launch
+            }
+            repository.updateVpnGuardRouting(profileId, routingMode, targetPackages)
+            val updated = uiState.value.vpnGuardState.profiles.firstOrNull { it.id == profileId }
+                ?.copy(routingMode = routingMode, targetPackages = targetPackages)
+            val runtime = VpnGuardManager.runtimeState.value
+            if (updated != null && runtime.activeProfileId == profileId && runtime.isConnectedOrConnecting) {
+                VpnGuardManager.connect(getApplication(), updated)
+                _snackbarMessages.tryEmit("Reconnected VPN Guard with ${routingMode.title}")
+            } else {
+                _snackbarMessages.tryEmit("Routing updated to ${routingMode.title}")
+            }
+        }
+    }
+
+    fun deleteVpnGuardProfile(profileId: String) {
+        viewModelScope.launch {
+            val runtime = VpnGuardManager.runtimeState.value
+            if (runtime.activeProfileId == profileId && runtime.isConnectedOrConnecting) {
+                VpnGuardManager.disconnect(getApplication(), restoreFirewallIfPaused = false)
+            }
+            repository.deleteVpnGuardProfile(profileId)
+            _snackbarMessages.tryEmit("Removed VPN Guard profile")
+        }
+    }
+
+    fun connectVpnGuardProfile(profile: VpnGuardProfile) {
+        viewModelScope.launch {
+            if (profile.routingMode != VpnGuardRoutingMode.WHOLE_SYSTEM && profile.targetPackages.isEmpty()) {
+                _snackbarMessages.tryEmit("Select at least 1 app before connecting in ${profile.routingMode.title} mode")
+                return@launch
+            }
+            val wasFirewallEnabled = uiState.value.preferences.isFirewallEnabled
+            if (wasFirewallEnabled) {
+                preferences.setFirewallEnabled(false)
+            }
+            val result = VpnGuardManager.connect(getApplication(), profile)
+            result.onSuccess {
+                repository.markVpnGuardConnected(profile.id)
+                val scopeMsg = when (profile.routingMode) {
+                    VpnGuardRoutingMode.WHOLE_SYSTEM -> "Whole System"
+                    VpnGuardRoutingMode.SELECTED_APPS -> "${profile.targetPackages.size} selected app(s)"
+                    VpnGuardRoutingMode.EXCLUDE_APPS -> "All except ${profile.targetPackages.size} app(s)"
+                }
+                _snackbarMessages.tryEmit("VPN Guard connected (${profile.name} • $scopeMsg)")
+            }.onFailure { err ->
+                if (wasFirewallEnabled && android.net.VpnService.prepare(getApplication()) == null) {
+                    preferences.setFirewallEnabled(true)
+                    NetGateVpnService.startOrReload(getApplication())
+                }
+                _snackbarMessages.tryEmit(err.message ?: "VPN Guard connection failed")
+            }
+        }
+    }
+
+    fun disconnectVpnGuard(restoreFirewall: Boolean = false) {
+        viewModelScope.launch {
+            VpnGuardManager.disconnect(getApplication(), restoreFirewallIfPaused = restoreFirewall)
+            if (restoreFirewall) {
+                preferences.setFirewallEnabled(true)
+                _snackbarMessages.tryEmit("VPN Guard disconnected — NetGate Firewall restored")
+            } else {
+                _snackbarMessages.tryEmit("VPN Guard disconnected")
+            }
+        }
+    }
+
+    fun refreshVpnGateServers(force: Boolean = false) {
+        if (isLoadingVpnGateFlow.value) return
+        if (!force && vpnGateServersFlow.value.isNotEmpty() &&
+            System.currentTimeMillis() - vpnGateLastFetchedAtFlow.value < 60_000L
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            isLoadingVpnGateFlow.value = true
+            vpnGateErrorFlow.value = null
+            val res = VpnGateClient.fetchLiveServers()
+            isLoadingVpnGateFlow.value = false
+            res.onSuccess { servers ->
+                vpnGateServersFlow.value = servers
+                vpnGateLastFetchedAtFlow.value = System.currentTimeMillis()
+                _snackbarMessages.tryEmit("Loaded ${servers.size} live VPNGate servers")
+            }.onFailure { err ->
+                vpnGateErrorFlow.value = err.message ?: "Failed to fetch live VPNGate servers"
+            }
+        }
+    }
+
+    fun setVpnGateSearchQuery(query: String) {
+        vpnGateSearchQueryFlow.value = query
+    }
+
+    fun setVpnGateSortMode(mode: VpnGateSortMode) {
+        vpnGateSortModeFlow.value = mode
+    }
+
+    fun notifyVpnGuardMessage(message: String) {
+        _snackbarMessages.tryEmit(message)
+    }
+
     private fun formatCompactCount(count: Int): String {
         return when {
             count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
@@ -1884,13 +2166,23 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val historicalTotals: HistoricalUsageTotals
     )
 
+    private data class VpnGateSnapshot(
+        val servers: List<VpnGateServer>,
+        val isLoading: Boolean,
+        val errorMessage: String?,
+        val lastFetchedAt: Long,
+        val searchQuery: String,
+        val sortMode: VpnGateSortMode
+    )
+
     private data class TailSnapshot(
         val destination: AppDestination,
         val dataUsage: DataUsageUiState,
         val webAndAd: Triple<List<WebsiteRuleItem>, List<AdFilterListItem>, Boolean>,
         val liveTelemetry: LiveNetworkTelemetry,
         val hotspotProxyState: HotspotProxyRuntimeState,
-        val wifiIdleStatus: WifiIdleStatus
+        val wifiIdleStatus: WifiIdleStatus,
+        val vpnGuardState: VpnGuardUiState
     )
 
     private data class SiteControlsSnapshot(

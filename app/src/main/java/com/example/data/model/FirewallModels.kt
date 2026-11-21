@@ -594,7 +594,8 @@ enum class AppDestination(val label: String) {
     DATA_USAGE("Data Usage"),
     SPEED_TEST("Speed Test"),
     DNS("1.1.1.1 DNS"),
-    HOTSPOT("Hotspot & Wi-Fi")
+    HOTSPOT("Hotspot & Wi-Fi"),
+    VPN_GUARD("VPN Guard")
 }
 
 data class HotspotClientInfo(
@@ -1022,5 +1023,122 @@ fun countryCodeToFlagEmoji(code: String): String {
     val second = Character.codePointAt(clean, 1) - 'A'.code + 0x1F1E6
     return String(Character.toChars(first)) + String(Character.toChars(second))
 }
+
+enum class VpnGuardSubTab(val label: String) {
+    PROFILES("WireGuard & WARP"),
+    VPNGATE("VPNGate Live"),
+    PROVIDERS("Open-Source VPNs")
+}
+
+enum class VpnGuardRoutingMode(val title: String, val subtitle: String) {
+    WHOLE_SYSTEM(
+        title = "Whole System",
+        subtitle = "Routes all device apps through the VPN tunnel"
+    ),
+    SELECTED_APPS(
+        title = "Selected Apps",
+        subtitle = "Split-tunnel: only selected apps (e.g. WhatsApp) use VPN"
+    ),
+    EXCLUDE_APPS(
+        title = "Exclude Apps",
+        subtitle = "All apps use VPN except selected local or banking apps"
+    )
+}
+
+enum class VpnGuardProviderType(val label: String) {
+    CUSTOM_WIREGUARD("WireGuard"),
+    CLOUDFLARE_WARP("Cloudflare WARP"),
+    PROTON_VPN("Proton VPN"),
+    WINDSCRIBE("Windscribe"),
+    MULLVAD_OR_OTHER("Open-Source VPN")
+}
+
+enum class VpnGuardConnectionState(val label: String) {
+    DISCONNECTED("Disconnected"),
+    CONNECTING("Connecting…"),
+    CONNECTED("Connected"),
+    DISCONNECTING("Disconnecting…"),
+    ERROR("Error")
+}
+
+data class VpnGuardProfile(
+    val id: String,
+    val name: String,
+    val providerType: VpnGuardProviderType = VpnGuardProviderType.CUSTOM_WIREGUARD,
+    val rawConfig: String,
+    val endpointHost: String = "",
+    val interfaceAddresses: String = "",
+    val dnsServers: String = "1.1.1.1",
+    val mtu: Int = 1280,
+    val routingMode: VpnGuardRoutingMode = VpnGuardRoutingMode.WHOLE_SYSTEM,
+    val targetPackages: Set<String> = emptySet(),
+    val createdAt: Long = System.currentTimeMillis(),
+    val lastConnectedAt: Long = 0L
+)
+
+data class VpnGuardRuntimeState(
+    val connectionState: VpnGuardConnectionState = VpnGuardConnectionState.DISCONNECTED,
+    val activeProfileId: String? = null,
+    val activeProfileName: String = "",
+    val endpoint: String = "",
+    val tunnelAddresses: String = "",
+    val routingMode: VpnGuardRoutingMode = VpnGuardRoutingMode.WHOLE_SYSTEM,
+    val routedPackagesCount: Int = 0,
+    val rxBytes: Long = 0L,
+    val txBytes: Long = 0L,
+    val rxSpeedBytesPerSec: Long = 0L,
+    val txSpeedBytesPerSec: Long = 0L,
+    val connectedSinceMs: Long = 0L,
+    val errorMessage: String? = null,
+    val pausedLocalFirewallForVpn: Boolean = false
+) {
+    val isConnectedOrConnecting: Boolean
+        get() = connectionState == VpnGuardConnectionState.CONNECTED ||
+            connectionState == VpnGuardConnectionState.CONNECTING
+}
+
+enum class VpnGateSortMode(val label: String) {
+    SCORE("Best Score"),
+    SPEED("Fastest"),
+    PING("Lowest Ping"),
+    SESSIONS("Least Busy")
+}
+
+data class VpnGateServer(
+    val hostName: String,
+    val ip: String,
+    val score: Long,
+    val pingMs: Int,
+    val speedBps: Long,
+    val countryLong: String,
+    val countryShort: String,
+    val numVpnSessions: Int,
+    val uptimeMs: Long,
+    val totalUsers: Long,
+    val totalTrafficBytes: Long,
+    val logType: String,
+    val operatorName: String,
+    val message: String,
+    val ovpnConfig: String
+) {
+    val countryFlag: String get() = countryCodeToFlagEmoji(countryShort)
+    val speedMbpsText: String
+        get() = if (speedBps <= 0L) "N/A" else String.format(java.util.Locale.US, "%.1f Mbps", speedBps / 1_000_000.0)
+}
+
+data class VpnGuardUiState(
+    val selectedSubTab: VpnGuardSubTab = VpnGuardSubTab.PROFILES,
+    val profiles: List<VpnGuardProfile> = emptyList(),
+    val selectedProfileId: String? = null,
+    val isGeneratingWarp: Boolean = false,
+    val vpnGateServers: List<VpnGateServer> = emptyList(),
+    val isLoadingVpnGate: Boolean = false,
+    val vpnGateError: String? = null,
+    val vpnGateLastFetchedAt: Long = 0L,
+    val vpnGateSearchQuery: String = "",
+    val vpnGateSortMode: VpnGateSortMode = VpnGateSortMode.SCORE,
+    val runtimeState: VpnGuardRuntimeState = VpnGuardRuntimeState()
+)
+
 
 

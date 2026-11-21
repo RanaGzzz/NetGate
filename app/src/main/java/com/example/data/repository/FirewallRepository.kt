@@ -31,6 +31,9 @@ import com.example.data.local.AppTrafficUsageEntity
 import com.example.data.local.AppTrafficWithRuleTuple
 import com.example.data.local.ConnectionHistoryDao
 import com.example.data.local.FirewallPreferences
+import com.example.data.local.NetGateDatabase
+import com.example.data.local.VpnGuardProfileDao
+import com.example.data.local.VpnGuardProfileEntity
 import com.example.data.local.WebsiteRuleDao
 import com.example.data.local.WebsiteRuleEntity
 import com.example.data.local.WebsiteRuleType
@@ -48,6 +51,8 @@ import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
 import com.example.data.model.SiteConnectionRecord
+import com.example.data.model.VpnGuardProfile
+import com.example.data.model.VpnGuardRoutingMode
 import com.example.data.model.WebsiteRuleItem
 import com.example.data.network.DnsConnectionChecker
 import com.example.data.network.DnsLeakTester
@@ -76,8 +81,12 @@ class FirewallRepository(
     private val appTimerDao: AppTimerDao,
     private val adFilterListDao: AdFilterListDao,
     private val connectionHistoryDao: ConnectionHistoryDao,
-    val preferences: FirewallPreferences
+    val preferences: FirewallPreferences,
+    vpnGuardProfileDao: VpnGuardProfileDao? = null
 ) {
+    private val guardProfileDao: VpnGuardProfileDao by lazy {
+        vpnGuardProfileDao ?: NetGateDatabase.getInstance(context).vpnGuardProfileDao()
+    }
     val rulesFlow: Flow<List<AppNetworkRuleEntity>> = ruleDao.observeAllRules()
     val appTimersFlow: Flow<List<AppCountdownTimer>> = appTimerDao.observeAllTimers()
         .map { entities ->
@@ -119,6 +128,35 @@ class FirewallRepository(
                 )
             }
         }
+
+    val vpnGuardProfilesFlow: Flow<List<VpnGuardProfile>>
+        get() = guardProfileDao.observeAllProfiles().map { list ->
+            list.map { it.toModel() }
+        }
+
+    suspend fun saveVpnGuardProfile(profile: VpnGuardProfile) {
+        guardProfileDao.upsertProfile(VpnGuardProfileEntity.fromModel(profile))
+    }
+
+    suspend fun updateVpnGuardRouting(
+        profileId: String,
+        routingMode: VpnGuardRoutingMode,
+        targetPackages: Set<String>
+    ) {
+        guardProfileDao.updateRoutingScope(
+            id = profileId,
+            routingMode = routingMode.name,
+            packagesCsv = targetPackages.map { it.trim() }.filter { it.isNotEmpty() }.sorted().joinToString(",")
+        )
+    }
+
+    suspend fun markVpnGuardConnected(profileId: String, timestampMs: Long = System.currentTimeMillis()) {
+        guardProfileDao.markConnectedAt(profileId, timestampMs)
+    }
+
+    suspend fun deleteVpnGuardProfile(profileId: String) {
+        guardProfileDao.deleteProfile(profileId)
+    }
     val trafficSummaryFlow: Flow<DataUsageSummary> = trafficUsageDao.observeBlockedVsAllowedSummary()
         .map { tuple ->
             DataUsageSummary(

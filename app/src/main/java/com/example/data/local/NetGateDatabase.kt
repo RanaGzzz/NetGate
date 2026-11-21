@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AppTrafficHistoryEntity::class,
         AppTimerEntity::class,
         AdFilterListEntity::class,
-        ConnectionEventEntity::class
+        ConnectionEventEntity::class,
+        VpnGuardProfileEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class NetGateDatabase : RoomDatabase() {
@@ -27,6 +28,7 @@ abstract class NetGateDatabase : RoomDatabase() {
     abstract fun appTimerDao(): AppTimerDao
     abstract fun adFilterListDao(): AdFilterListDao
     abstract fun connectionHistoryDao(): ConnectionHistoryDao
+    abstract fun vpnGuardProfileDao(): VpnGuardProfileDao
 
     companion object {
         @Volatile
@@ -166,6 +168,30 @@ abstract class NetGateDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `vpn_guard_profiles` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `providerType` TEXT NOT NULL,
+                        `rawConfig` TEXT NOT NULL,
+                        `endpointHost` TEXT NOT NULL,
+                        `interfaceAddresses` TEXT NOT NULL,
+                        `dnsServers` TEXT NOT NULL,
+                        `mtu` INTEGER NOT NULL,
+                        `routingMode` TEXT NOT NULL,
+                        `targetPackagesCsv` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `lastConnectedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): NetGateDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -179,7 +205,8 @@ abstract class NetGateDatabase : RoomDatabase() {
                         MIGRATION_3_4,
                         MIGRATION_4_5,
                         MIGRATION_5_6,
-                        MIGRATION_6_7
+                        MIGRATION_6_7,
+                        MIGRATION_7_8
                     )
                     .build()
                     .also { INSTANCE = it }

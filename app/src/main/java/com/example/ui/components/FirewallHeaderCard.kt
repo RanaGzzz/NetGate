@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SignalCellularOff
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiLock
 import androidx.compose.material.icons.rounded.WifiOff
@@ -85,6 +86,8 @@ fun FirewallHeaderCard(
     liveTelemetry: LiveNetworkTelemetry = LiveNetworkTelemetry(),
     isGlobalWifiBlocked: Boolean = false,
     isHotspotProxyActive: Boolean = false,
+    isVpnGuardActive: Boolean = false,
+    vpnGuardProfileLabel: String = "",
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onOpenDnsProtection: () -> Unit,
@@ -92,6 +95,7 @@ fun FirewallHeaderCard(
     onOpenAdBlocker: () -> Unit = {},
     onOpenNetworkMonitor: () -> Unit = {},
     onOpenHotspot: () -> Unit = {},
+    onOpenVpnGuard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -592,6 +596,58 @@ fun FirewallHeaderCard(
                             modifier = Modifier.size(16.dp)
                         )
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val vpnAccent = if (isVpnGuardActive) EmeraldPrimary else MaterialTheme.colorScheme.secondary
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = vpnAccent.copy(alpha = if (isDark) 0.14f else 0.10f),
+                border = BorderStroke(1.dp, vpnAccent.copy(alpha = 0.36f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenVpnGuard)
+                    .testTag("header_vpn_guard_strip")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.VpnLock,
+                            contentDescription = "Open VPN Guard",
+                            tint = vpnAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isVpnGuardActive) {
+                                "VPN Guard Connected • $vpnGuardProfileLabel"
+                            } else {
+                                "VPN Guard • WireGuard, WARP & VPNGate Split-Tunnel"
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (isVpnGuardActive) EmeraldPrimary else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = "Open VPN Guard",
+                        tint = vpnAccent,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
 

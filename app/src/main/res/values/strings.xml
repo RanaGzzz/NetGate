@@ -32,4 +32,9 @@
     <string name="hotspot_proxy_channel_description">Shares filtering or active VPN over Hotspot and tracks connected proxy devices</string>
     <string name="wifi_automation_channel_name">Wi-Fi Timer &amp; Idle Lock</string>
     <string name="wifi_automation_channel_description">Alerts when Wi-Fi timer expires or auto-lock pauses Wi-Fi traffic</string>
+    <string name="nav_vpn_guard">VPN Guard</string>
+    <string name="vpn_guard_title">VPN Guard</string>
+    <string name="vpn_guard_subtitle">WireGuard, WARP, VPNGate &amp; Split-Tunnel</string>
+    <string name="vpn_guard_channel_name">NetGate VPN Guard</string>
+    <string name="vpn_guard_channel_description">Keeps external WireGuard or WARP tunnel active with per-app or system routing</string>
 </resources>

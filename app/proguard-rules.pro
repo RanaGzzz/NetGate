@@ -19,3 +19,11 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+-keep class com.wireguard.android.** { *; }
+-keep class com.wireguard.config.** { *; }
+-keep class com.wireguard.crypto.** { *; }
+-dontwarn com.wireguard.android.**
+-keepclasseswithmembernames class * {
+    native <methods>;
+}

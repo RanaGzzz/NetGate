@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
@@ -30,12 +32,14 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -71,6 +75,7 @@ fun FloatingFrostedNavBar(
     onSelectSpeedTest: () -> Unit,
     onSelectDnsProtection: () -> Unit,
     onSelectHotspot: () -> Unit = {},
+    onSelectVpnGuard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -135,6 +140,7 @@ fun FloatingFrostedNavBar(
     val tabs = listOf(
         NavTabSpec(AppDestination.FIREWALL, Icons.Rounded.Shield, "Firewall", "nav_tab_firewall", onSelectFirewall),
         NavTabSpec(AppDestination.WEBSITES, Icons.Rounded.Public, "Website Blocker", "nav_tab_websites", onSelectWebsites),
+        NavTabSpec(AppDestination.VPN_GUARD, Icons.Rounded.VpnLock, "VPN Guard", "floating_nav_vpn_guard", onSelectVpnGuard),
         NavTabSpec(AppDestination.DATA_USAGE, Icons.Rounded.BarChart, "Data Usage", "nav_tab_data_usage", onSelectDataUsage),
         NavTabSpec(AppDestination.SPEED_TEST, Icons.Rounded.Speed, "Speed Test", "floating_nav_speed", onSelectSpeedTest),
         NavTabSpec(AppDestination.DNS, Icons.Rounded.Dns, "1.1.1.1 DNS Protection", "floating_nav_dns", onSelectDnsProtection),
@@ -143,12 +149,13 @@ fun FloatingFrostedNavBar(
     val selectedIndex = tabs.indexOfFirst { it.destination == currentDestination }.coerceAtLeast(0)
     val activeAccent = MaterialTheme.colorScheme.primary
     val activeSecondary = MaterialTheme.colorScheme.secondary
+    val scrollState = rememberScrollState()
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
@@ -157,7 +164,7 @@ fun FloatingFrostedNavBar(
             shadowElevation = 14.dp,
             border = BorderStroke(1.dp, outerBorderBrush),
             modifier = Modifier
-                .widthIn(max = 520.dp)
+                .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .testTag("floating_frosted_nav_bar")
         ) {
@@ -168,7 +175,14 @@ fun FloatingFrostedNavBar(
                     .padding(horizontal = 6.dp, vertical = 6.dp)
             ) {
                 val gap = 2.dp
-                val tabWidth = ((maxWidth - gap * (tabs.size - 1)) / tabs.size).coerceAtLeast(48.dp)
+                val minRequiredWidth = 48.dp * tabs.size + gap * (tabs.size - 1)
+                val needsScroll = maxWidth < minRequiredWidth
+                val tabWidth = if (needsScroll) {
+                    48.dp
+                } else {
+                    (maxWidth - gap * (tabs.size - 1)) / tabs.size
+                }
+                val contentWidth = if (needsScroll) minRequiredWidth else maxWidth
                 val targetIndicatorOffset = (tabWidth + gap) * selectedIndex
                 val indicatorOffset by animateDpAsState(
                     targetValue = targetIndicatorOffset,
@@ -184,49 +198,67 @@ fun FloatingFrostedNavBar(
                     label = "floatingNavIndicatorAlpha"
                 )
 
-                // Gliding neon-glass active pill indicator
-                Box(
-                    modifier = Modifier
-                        .offset(x = indicatorOffset)
-                        .width(tabWidth)
-                        .height(48.dp)
-                        .graphicsLayer { alpha = indicatorAlpha }
-                        .clip(indicatorShape)
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    activeAccent.copy(alpha = if (isDark) 0.28f else 0.18f),
-                                    activeSecondary.copy(alpha = if (isDark) 0.18f else 0.11f)
-                                )
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    activeAccent.copy(alpha = if (isDark) 0.65f else 0.50f),
-                                    activeSecondary.copy(alpha = if (isDark) 0.35f else 0.25f)
-                                )
-                            ),
-                            shape = indicatorShape
-                        )
-                )
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                LaunchedEffect(selectedIndex, needsScroll, contentWidth) {
+                    if (needsScroll && scrollState.maxValue > 0) {
+                        val targetPx = with(density) { ((tabWidth + gap) * selectedIndex - maxWidth / 2 + tabWidth / 2).toPx() }
+                        scrollState.animateScrollTo(targetPx.toInt().coerceIn(0, scrollState.maxValue))
+                    }
+                }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = if (needsScroll) {
+                        Modifier.horizontalScroll(scrollState)
+                    } else {
+                        Modifier.fillMaxWidth()
+                    }
                 ) {
-                    tabs.forEach { tab ->
-                        FloatingNavItem(
-                            icon = tab.icon,
-                            contentDescription = tab.contentDescription,
-                            selected = !isConnectionInfoOpen && currentDestination == tab.destination,
-                            onClick = tab.onClick,
+                    Box(modifier = Modifier.width(contentWidth)) {
+                        // Gliding neon-glass active pill indicator
+                        Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .testTag(tab.testTag)
+                                .offset(x = indicatorOffset)
+                                .width(tabWidth)
+                                .height(48.dp)
+                                .graphicsLayer { alpha = indicatorAlpha }
+                                .clip(indicatorShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            activeAccent.copy(alpha = if (isDark) 0.28f else 0.18f),
+                                            activeSecondary.copy(alpha = if (isDark) 0.18f else 0.11f)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            activeAccent.copy(alpha = if (isDark) 0.65f else 0.50f),
+                                            activeSecondary.copy(alpha = if (isDark) 0.35f else 0.25f)
+                                        )
+                                    ),
+                                    shape = indicatorShape
+                                )
                         )
+
+                        Row(
+                            modifier = Modifier.width(contentWidth),
+                            horizontalArrangement = Arrangement.spacedBy(gap),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            tabs.forEach { tab ->
+                                FloatingNavItem(
+                                    icon = tab.icon,
+                                    contentDescription = tab.contentDescription,
+                                    selected = !isConnectionInfoOpen && currentDestination == tab.destination,
+                                    onClick = tab.onClick,
+                                    modifier = Modifier
+                                        .width(tabWidth)
+                                        .testTag(tab.testTag)
+                                )
+                            }
+                        }
                     }
                 }
             }
