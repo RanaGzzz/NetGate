@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 class VpnGuardService : Service() {
 
@@ -38,39 +39,66 @@ class VpnGuardService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                serviceScope.launch {
-                    VpnGuardManager.disconnect(applicationContext, restoreFirewallIfPaused = false)
+                if (!isForegroundStarted.get()) {
+                    promoteForegroundSafely(buildNotification(this, VpnGuardManager.runtimeState.value))
                 }
+                pendingStop.set(false)
+                isForegroundStarted.set(false)
+                VpnGuardManager.disconnectAsync(applicationContext, restoreFirewallIfPaused = false)
+                stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_UPDATE_NOTIFICATION -> {
-                val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                mgr?.notify(NOTIFICATION_ID, buildNotification(this, VpnGuardManager.runtimeState.value))
+                if (!isForegroundStarted.get()) {
+                    promoteForegroundSafely(buildNotification(this, VpnGuardManager.runtimeState.value))
+                } else {
+                    runCatching {
+                        val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        mgr?.notify(NOTIFICATION_ID, buildNotification(this, VpnGuardManager.runtimeState.value))
+                    }
+                }
                 return START_STICKY
             }
             else -> {
                 val notification = buildNotification(this, VpnGuardManager.runtimeState.value)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(
-                        NOTIFICATION_ID,
-                        notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                    )
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
+                val promoted = promoteForegroundSafely(notification)
+                isForegroundStarted.set(promoted)
+                if (pendingStop.getAndSet(false) || !promoted) {
+                    isForegroundStarted.set(false)
+                    stopSelf()
+                    return START_NOT_STICKY
                 }
                 return START_STICKY
             }
         }
     }
 
+    private fun promoteForegroundSafely(notification: Notification): Boolean {
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
     override fun onDestroy() {
+        isForegroundStarted.set(false)
+        pendingStop.set(false)
         serviceScope.cancel()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
         }
         super.onDestroy()
     }
@@ -82,27 +110,39 @@ class VpnGuardService : Service() {
         private const val ACTION_STOP = "com.example.action.VPN_GUARD_STOP"
         private const val ACTION_UPDATE_NOTIFICATION = "com.example.action.VPN_GUARD_UPDATE"
 
+        private val isForegroundStarted = AtomicBoolean(false)
+        private val pendingStop = AtomicBoolean(false)
+
         fun start(context: Context) {
+            pendingStop.set(false)
             val intent = Intent(context, VpnGuardService::class.java).apply {
                 action = ACTION_START
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
             }
         }
 
         fun updateNotification(context: Context, state: VpnGuardRuntimeState) {
             if (state.connectionState != VpnGuardConnectionState.CONNECTED) return
-            createNotificationChannel(context)
-            val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            mgr?.notify(NOTIFICATION_ID, buildNotification(context, state))
+            if (!isForegroundStarted.get()) return
+            runCatching {
+                createNotificationChannel(context)
+                val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                mgr?.notify(NOTIFICATION_ID, buildNotification(context, state))
+            }
         }
 
         fun stop(context: Context) {
-            runCatching {
-                context.stopService(Intent(context, VpnGuardService::class.java))
+            pendingStop.set(true)
+            if (isForegroundStarted.get()) {
+                runCatching {
+                    context.stopService(Intent(context, VpnGuardService::class.java))
+                }
             }
         }
 

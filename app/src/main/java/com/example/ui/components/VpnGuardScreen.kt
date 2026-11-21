@@ -92,6 +92,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -153,7 +154,7 @@ fun VpnGuardContent(
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     var pendingConnectProfile by remember { mutableStateOf<VpnGuardProfile?>(null) }
-    var pendingWarpConnectAfterPermission by remember { mutableStateOf(false) }
+    var pendingWarpConnectAfterPermission by rememberSaveable { mutableStateOf(false) }
     var pendingExportContent by remember { mutableStateOf<String?>(null) }
 
     var showPasteDialog by remember { mutableStateOf(false) }

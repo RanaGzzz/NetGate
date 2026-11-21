@@ -171,6 +171,32 @@ object WireGuardConfigHelper {
         return baseLines.joinToString("\n").trim() + "\n"
     }
 
+    fun replaceEndpointHost(rawConfig: String, resolvedIp: String): String {
+        val cleanIp = resolvedIp.trim()
+        if (cleanIp.isEmpty()) return rawConfig
+        val formattedHost = if (cleanIp.contains(':') && !cleanIp.startsWith("[")) "[$cleanIp]" else cleanIp
+        return rawConfig
+            .replace("\r\n", "\n")
+            .lines()
+            .joinToString("\n") { line ->
+                val trimmed = line.trim()
+                val eqIdx = trimmed.indexOf('=')
+                if (eqIdx > 0 && trimmed.substring(0, eqIdx).trim().equals("Endpoint", ignoreCase = true)) {
+                    val value = trimmed.substring(eqIdx + 1).trim()
+                    val parsedPort = when {
+                        value.startsWith("[") && value.contains("]:") -> value.substringAfter("]:")
+                        value.startsWith("[") -> "2408"
+                        value.contains(':') -> value.substringAfterLast(':')
+                        else -> "2408"
+                    }.trim()
+                    val port = if (parsedPort.isBlank() || parsedPort == "0") "2408" else parsedPort
+                    "Endpoint = $formattedHost:$port"
+                } else {
+                    line
+                }
+            }
+    }
+
     fun buildWireGuardConfig(
         profile: VpnGuardProfile
     ): Result<Config> = runCatching {

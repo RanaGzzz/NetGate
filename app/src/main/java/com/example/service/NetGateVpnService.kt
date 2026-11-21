@@ -2084,7 +2084,15 @@ class NetGateVpnService : VpnService() {
             val intent = Intent(context, NetGateVpnService::class.java).apply {
                 action = ACTION_STOP
             }
-            context.startService(intent)
+            val started = runCatching {
+                context.startService(intent)
+                true
+            }.getOrDefault(false)
+            if (!started) {
+                runCatching {
+                    context.stopService(Intent(context, NetGateVpnService::class.java))
+                }
+            }
         }
 
         fun flushDnsAndAutopilotCache(context: Context) {

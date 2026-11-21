@@ -14,13 +14,17 @@ import com.example.data.model.VpnGateServer
 import com.example.data.model.VpnGuardProfile
 import com.example.data.model.VpnGuardProviderType
 import com.example.data.model.VpnGuardRoutingMode
+import com.example.data.model.VpnGuardConnectionState
 import com.example.data.model.VpnGuardSubTab
 import com.example.data.model.VpnGuardUiState
 import com.example.service.VpnGateClient
+import com.example.service.VpnGuardManager
+import com.example.service.VpnGuardService
 import com.example.service.WarpConfigGenerator
 import com.example.service.WireGuardConfigHelper
 import com.example.ui.components.VpnGuardContent
 import com.example.ui.theme.NetGateTheme
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -29,7 +33,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowVpnService
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -229,5 +235,73 @@ class VpnGuardTest {
         composeRule.onNodeWithTag("vpn_guard_screen").performScrollToIndex(1)
         composeRule.onNodeWithTag("vpn_guard_tab_vpngate").performScrollTo().performClick()
         assertEquals(VpnGuardSubTab.VPNGATE, activeTab)
+    }
+
+    @Test
+    fun `warp registration json normalizes zero port to 2408`() {
+        val (privKey, _) = WireGuardConfigHelper.generateKeyPair()
+        val sampleZeroPortJson = """
+            {
+              "id": "test-zero-port",
+              "config": {
+                "interface": {
+                  "addresses": {
+                    "v4": "172.16.0.2"
+                  }
+                },
+                "peers": [
+                  {
+                    "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+                    "endpoint": {
+                      "v4": "162.159.192.1:0",
+                      "host": "engage.cloudflareclient.com:0"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val profile = WarpConfigGenerator.parseWarpRegistrationJson(
+            jsonText = sampleZeroPortJson,
+            privateKeyBase64 = privKey
+        ).getOrThrow()
+
+        assertEquals("engage.cloudflareclient.com:2408", profile.endpointHost)
+        assertTrue(profile.rawConfig.contains("Endpoint = engage.cloudflareclient.com:2408"))
+    }
+
+    @Test
+    fun `replaceEndpointHost swaps host cleanly while preserving port`() {
+        val (baseConf, _) = WireGuardConfigHelper.generateTemplateConfig("engage.cloudflareclient.com:2408")
+        val v4Swapped = WireGuardConfigHelper.replaceEndpointHost(baseConf, "162.159.192.1")
+        assertTrue(v4Swapped.contains("Endpoint = 162.159.192.1:2408"))
+
+        val v6Swapped = WireGuardConfigHelper.replaceEndpointHost(baseConf, "2606:4700:d0::a29f:c001")
+        assertTrue(v6Swapped.contains("Endpoint = [2606:4700:d0::a29f:c001]:2408"))
+    }
+
+    @Test
+    fun `vpn guard connect with uninstalled split-tunnel apps fails cleanly without crashing`() = runBlocking {
+        ShadowVpnService.setPrepareResult(null)
+        val context = RuntimeEnvironment.getApplication()
+        val (conf, _) = WireGuardConfigHelper.generateTemplateConfig("162.159.192.1:2408")
+        val profile = WireGuardConfigHelper.parseToProfile(
+            rawConfig = conf,
+            nameHint = "WhatsApp Split Test",
+            routingModeOverride = VpnGuardRoutingMode.SELECTED_APPS,
+            targetPackagesOverride = setOf("com.nonexistent.uninstalled.whatsapp.clone")
+        ).getOrThrow()
+
+        val result = VpnGuardManager.connect(context, profile)
+        assertTrue(result.isFailure)
+        val runtime = VpnGuardManager.runtimeState.value
+        assertEquals(VpnGuardConnectionState.ERROR, runtime.connectionState)
+        assertFalse(runtime.errorMessage.isNullOrBlank())
+
+        // Stopping VpnGuardService cleanly even when never foregrounded must never throw
+        VpnGuardService.stop(context)
+        VpnGuardManager.disconnect(context, restoreFirewallIfPaused = false)
+        assertEquals(VpnGuardConnectionState.DISCONNECTED, VpnGuardManager.runtimeState.value.connectionState)
     }
 }

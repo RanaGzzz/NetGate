@@ -27,17 +27,48 @@ object WarpConfigGenerator {
 
     private val dohFallbackDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            val system = runCatching { Dns.SYSTEM.lookup(hostname) }.getOrNull().orEmpty()
+            val system = runCatching { Dns.SYSTEM.lookup(hostname) }
+                .getOrNull()
+                .orEmpty()
+                .filterNot { it.isLoopbackAddress || it.isAnyLocalAddress || it.isSiteLocalAddress }
             if (system.isNotEmpty()) return system
             val dohIps = AdBlockFilterEngine.resolveViaDoh(
                 domain = hostname,
                 dohUrl = "https://1.1.1.1/dns-query"
             )
             if (dohIps.isNotEmpty()) {
-                return dohIps.mapNotNull { runCatching { InetAddress.getByName(it) }.getOrNull() }
+                val parsed = dohIps.mapNotNull { runCatching { InetAddress.getByName(it) }.getOrNull() }
+                if (parsed.isNotEmpty()) return parsed
             }
-            return system
+            return runCatching { Dns.SYSTEM.lookup(hostname) }.getOrNull().orEmpty()
         }
+    }
+
+    /**
+     * Resolves a WireGuard peer host using system DNS first, falling back to 1.1.1.1 DoH
+     * (and known Cloudflare WARP anycast IPs if DNS is blocked locally).
+     */
+    fun resolveHostForWireGuard(host: String): String? {
+        val clean = host.trim().removeSurrounding("[", "]")
+        if (clean.isEmpty()) return null
+        val system = runCatching { InetAddress.getAllByName(clean).toList() }
+            .getOrNull()
+            .orEmpty()
+            .filterNot { it.isLoopbackAddress || it.isAnyLocalAddress || it.isSiteLocalAddress }
+        if (system.isNotEmpty()) {
+            return null // System DNS works natively; GoBackend can keep the hostname directly
+        }
+        val dohIps = AdBlockFilterEngine.resolveViaDoh(
+            domain = clean,
+            dohUrl = "https://1.1.1.1/dns-query"
+        )
+        if (dohIps.isNotEmpty()) {
+            return dohIps.first()
+        }
+        if (clean.equals("engage.cloudflareclient.com", ignoreCase = true)) {
+            return "162.159.192.1"
+        }
+        return null
     }
 
     private val client: OkHttpClient by lazy {
@@ -125,9 +156,10 @@ object WarpConfigGenerator {
         val endpointHostRaw = endpointObj?.optString("host", "").orEmpty().trim()
         val endpointV4Raw = endpointObj?.optString("v4", "").orEmpty().trim()
         val endpoint = when {
-            endpointHostRaw.isNotBlank() && endpointHostRaw.contains(':') -> endpointHostRaw
+            endpointHostRaw.isNotBlank() && !endpointHostRaw.endsWith(":0") && endpointHostRaw.contains(':') -> endpointHostRaw
+            endpointHostRaw.isNotBlank() && endpointHostRaw.endsWith(":0") -> "${endpointHostRaw.removeSuffix(":0")}:2408"
             endpointHostRaw.isNotBlank() -> "$endpointHostRaw:2408"
-            endpointV4Raw.isNotBlank() && !endpointV4Raw.endsWith(":0") -> endpointV4Raw
+            endpointV4Raw.isNotBlank() && !endpointV4Raw.endsWith(":0") && endpointV4Raw.contains(':') -> endpointV4Raw
             endpointV4Raw.isNotBlank() -> "${endpointV4Raw.substringBefore(':')}:2408"
             else -> DEFAULT_WARP_ENDPOINT
         }
