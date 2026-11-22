@@ -109,3 +109,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - **Architecture:** MVVM, Repository pattern, Kotlin Coroutines, `StateFlow`
 - **Storage:** Room Database, Jetpack DataStore Preferences
 - **Networking & System:** Android `VpnService`, local `ServerSocket` SNI/Hotspot proxies, `ConnectivityManager`, `NetworkStatsManager`, `TrafficStats`, `WifiManager`, `AlarmManager`
+
+## References and third-party licenses
+
+These projects were consulted as references during development:
+
+| Project | License |
+|---|---|
+| [Shroudly](https://github.com/umutxyp/Shroudly) | [MIT](https://github.com/umutxyp/Shroudly/blob/main/LICENSE) |
+| [blur-engine](https://github.com/MrSluffy/blur-engine) | [Apache-2.0](https://github.com/MrSluffy/blur-engine/blob/development/LICENSE) |
+| [blockads-android](https://github.com/pass-with-high-score/blockads-android) | [GPL-3.0](https://github.com/pass-with-high-score/blockads-android/blob/main/LICENSE) |
+| [liquid](https://github.com/FletchMcKee/liquid) | [Apache-2.0](https://github.com/FletchMcKee/liquid/blob/trunk/LICENSE) |
+
+These licenses govern their respective projects. If code from any of them is included in or adapted for NetGate, retain applicable notices and comply with that code's license; attribution alone may not satisfy the license terms. In particular, distributing a derivative that includes GPL-3.0-covered code may require licensing the derivative under GPL-3.0 and providing its corresponding source.
+
+NetGate does not currently include a `LICENSE` file, so this repository does not specify an explicit license for its own code. The third-party licenses listed above do not grant a license to NetGate.
