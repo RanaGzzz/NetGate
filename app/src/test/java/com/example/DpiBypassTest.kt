@@ -147,11 +147,11 @@ class DpiBypassTest {
     fun `autopilot resolves default SNI split, escalates to micro chunks on failure, and flushes cleanly`() {
         val cfg = DpiBypassConfig(mode = DpiBypassMode.AUTOPILOT)
         val host = "Example.ORG."
-        assertEquals(DpiStrategy.SNI_MIDPOINT_SPLIT, DpiBypassEngine.resolveStrategy(host, cfg))
+        assertEquals(DpiStrategy.TLS_RECORD_SPLIT, DpiBypassEngine.resolveStrategy(host, cfg))
 
-        val escalated = DpiBypassEngine.escalateOnFailure(host, DpiStrategy.SNI_MIDPOINT_SPLIT)
-        assertEquals(DpiStrategy.MICRO_CHUNKS, escalated)
-        assertEquals(DpiStrategy.MICRO_CHUNKS, DpiBypassEngine.resolveStrategy("example.org", cfg))
+        val escalated = DpiBypassEngine.escalateOnFailure(host, DpiStrategy.TLS_RECORD_SPLIT)
+        assertEquals(DpiStrategy.SNI_MIDPOINT_SPLIT, escalated)
+        assertEquals(DpiStrategy.SNI_MIDPOINT_SPLIT, DpiBypassEngine.resolveStrategy("example.org", cfg))
         assertEquals(1, DpiBypassEngine.getAutopilotLearnedCount())
 
         assertNull(DpiBypassEngine.escalateOnFailure(host, DpiStrategy.MICRO_CHUNKS))
@@ -406,7 +406,15 @@ class DpiBypassTest {
             protectSocket = { true },
             evaluateRequest = { _, _ -> ProxyFilterDecision(allow = true, reason = "OK") },
             resolveTargetAddresses = { listOf(InetAddress.getByName("127.0.0.1")) },
-            dpiBypassConfigProvider = { DpiBypassConfig(mode = DpiBypassMode.AUTOPILOT, fragmentDelayMs = 0) },
+            // Single-record probing: TLS record splitting is covered separately, this test targets
+            // full multi-KB ClientHello assembly before SNI-split segmentation.
+            dpiBypassConfigProvider = {
+                DpiBypassConfig(
+                    mode = DpiBypassMode.AUTOPILOT,
+                    fragmentDelayMs = 0,
+                    splitTlsRecords = false
+                )
+            },
             onRequestLogged = { _, _ -> }
         )
         assertTrue(proxy.start())

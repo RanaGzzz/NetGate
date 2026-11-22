@@ -16,3 +16,6 @@
 local.properties
 .env
 debug.keystore
+
+# Upload keystore used to sign release builds locally; never commit it
+my-upload-key.jks

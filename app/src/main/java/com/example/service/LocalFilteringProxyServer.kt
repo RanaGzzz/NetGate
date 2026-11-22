@@ -12,10 +12,12 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 data class ProxyFilterDecision(
     val allow: Boolean,
@@ -476,7 +478,7 @@ class LocalFilteringProxyServer(
                 chunkSize = chunkSize,
                 fragmentDelayMs = fragmentDelayMs
             )
-            upstream.soTimeout = 2_400
+            upstream.soTimeout = 1_600
             val serverProbe = ByteArray(4096)
             val probeLen = upstream.getInputStream().read(serverProbe)
             upstream.soTimeout = 0
@@ -492,77 +494,82 @@ class LocalFilteringProxyServer(
         clientOut: OutputStream?
     ): Socket? {
         if (upstreamProxy != null) {
-            val upstream = Socket()
-            return try {
-                if (!protectSocket(upstream)) {
-                    runCatching { upstream.close() }
-                    return null
-                }
-                upstream.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
-                upstream.keepAlive = dpiConfig.idleKeepAliveEnabled
-                val (proxyHost, proxyPort) = upstreamProxy
-                val proxyCandidates = resolveCandidateAddresses(proxyHost)
-                var connected = false
-                if (proxyCandidates.isNotEmpty()) {
-                    for (addr in proxyCandidates) {
-                        val candidate = Socket()
-                        if (!protectSocket(candidate)) {
-                            runCatching { candidate.close() }
-                            continue
-                        }
-                        candidate.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
-                        candidate.keepAlive = dpiConfig.idleKeepAliveEnabled
-                        val ok = runCatching {
-                            candidate.connect(InetSocketAddress(addr, proxyPort), 5_000)
-                        }.isSuccess
-                        if (ok) {
-                            runCatching { upstream.close() }
-                            val upstreamOut = candidate.getOutputStream()
-                            val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
-                                "Host: $connectHost:$targetPort\r\n" +
-                                "Proxy-Connection: keep-alive\r\n\r\n"
-                            upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
-                            upstreamOut.flush()
+            val (proxyHost, proxyPort) = upstreamProxy
+            val proxyCandidates = resolveCandidateAddresses(proxyHost)
 
-                            val proxyRespBytes = readHttpHeaderBlock(candidate.getInputStream())
-                            val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
-                                .substringBefore("\r\n")
-                            if (!statusLine.contains(" 200")) {
-                                if (clientOut != null) {
-                                    writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
-                                }
-                                runCatching { candidate.close() }
-                                return null
-                            }
-                            return candidate
-                        } else {
-                            runCatching { candidate.close() }
-                        }
-                    }
+            for (addr in proxyCandidates) {
+                val candidate = Socket()
+                if (!protectSocket(candidate)) {
+                    runCatching { candidate.close() }
+                    continue
                 }
-                if (!connected) {
-                    upstream.connect(InetSocketAddress(proxyHost, proxyPort), 6_000)
-                    val upstreamOut = upstream.getOutputStream()
+                candidate.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
+                candidate.keepAlive = dpiConfig.idleKeepAliveEnabled
+                val connectedOk = runCatching {
+                    candidate.connect(InetSocketAddress(addr, proxyPort), 4_500)
+                }.isSuccess
+                if (!connectedOk) {
+                    runCatching { candidate.close() }
+                    continue
+                }
+
+                val handshakeOk = runCatching {
+                    val upstreamOut = candidate.getOutputStream()
                     val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
                         "Host: $connectHost:$targetPort\r\n" +
                         "Proxy-Connection: keep-alive\r\n\r\n"
                     upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
                     upstreamOut.flush()
 
-                    val proxyRespBytes = readHttpHeaderBlock(upstream.getInputStream())
+                    val proxyRespBytes = readHttpHeaderBlock(candidate.getInputStream())
                     val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
                         .substringBefore("\r\n")
                     if (!statusLine.contains(" 200")) {
                         if (clientOut != null) {
                             writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
                         }
-                        runCatching { upstream.close() }
+                        runCatching { candidate.close() }
                         return null
                     }
+                    true
+                }.getOrDefault(false)
+
+                if (handshakeOk) {
+                    return candidate
                 }
-                upstream
+                runCatching { candidate.close() }
+            }
+
+            // Fallback to hostname-based connect if IP candidates were empty or unreachable
+            val fallbackProxySocket = Socket()
+            return try {
+                if (!protectSocket(fallbackProxySocket)) {
+                    runCatching { fallbackProxySocket.close() }
+                    return null
+                }
+                fallbackProxySocket.tcpNoDelay = dpiConfig.mode != DpiBypassMode.OFF
+                fallbackProxySocket.keepAlive = dpiConfig.idleKeepAliveEnabled
+                fallbackProxySocket.connect(InetSocketAddress(proxyHost, proxyPort), 5_500)
+                val upstreamOut = fallbackProxySocket.getOutputStream()
+                val connectReq = "CONNECT $connectHost:$targetPort HTTP/1.1\r\n" +
+                    "Host: $connectHost:$targetPort\r\n" +
+                    "Proxy-Connection: keep-alive\r\n\r\n"
+                upstreamOut.write(connectReq.toByteArray(Charsets.ISO_8859_1))
+                upstreamOut.flush()
+
+                val proxyRespBytes = readHttpHeaderBlock(fallbackProxySocket.getInputStream())
+                val statusLine = String(proxyRespBytes, Charsets.ISO_8859_1)
+                    .substringBefore("\r\n")
+                if (!statusLine.contains(" 200")) {
+                    if (clientOut != null) {
+                        writeForbiddenResponse(clientOut, "Upstream SNI proxy rejected CONNECT")
+                    }
+                    runCatching { fallbackProxySocket.close() }
+                    return null
+                }
+                fallbackProxySocket
             } catch (_: Exception) {
-                runCatching { upstream.close() }
+                runCatching { fallbackProxySocket.close() }
                 null
             }
         }
@@ -751,9 +758,10 @@ class LocalFilteringProxyServer(
     ) {
         val upstreamIn = upstream.getInputStream()
         val upstreamOut = upstream.getOutputStream()
-        val sentCounter = java.util.concurrent.atomic.AtomicLong(initialBytesSent)
-        val recvCounter = java.util.concurrent.atomic.AtomicLong(initialBytesReceived)
+        val sentCounter = AtomicLong(initialBytesSent)
+        val recvCounter = AtomicLong(initialBytesReceived)
         val abortedByPolicy = AtomicBoolean(false)
+        val relayDoneLatch = CountDownLatch(2)
 
         fun enforceClientQuotaOrBan(): Boolean {
             if (clientIp.isNotEmpty() && clientBlockReason(clientIp) != null) {
@@ -778,49 +786,65 @@ class LocalFilteringProxyServer(
         }
         if (enforceClientQuotaOrBan()) return
 
-        val c2u = workerExecutor?.submit {
-            copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy) { chunkBytes ->
-                val pending = sentCounter.addAndGet(chunkBytes)
-                if (pending >= 32_768L) {
-                    val flushed = sentCounter.getAndSet(0L)
-                    if (flushed > 0L) {
-                        onTrafficRelayed(host, port, protocol, remoteIp, flushed, 0L, decision)
-                        if (clientIp.isNotEmpty()) {
-                            onClientTraffic(clientIp, host, flushed, 0L, true)
+        workerExecutor?.execute {
+            try {
+                copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy) { chunkBytes ->
+                    val pending = sentCounter.addAndGet(chunkBytes)
+                    if (pending >= 32_768L) {
+                        val flushed = sentCounter.getAndSet(0L)
+                        if (flushed > 0L) {
+                            onTrafficRelayed(host, port, protocol, remoteIp, flushed, 0L, decision)
+                            if (clientIp.isNotEmpty()) {
+                                onClientTraffic(clientIp, host, flushed, 0L, true)
+                            }
                         }
+                        enforceClientQuotaOrBan()
                     }
-                    enforceClientQuotaOrBan()
                 }
+                runCatching { upstream.shutdownOutput() }
+            } finally {
+                relayDoneLatch.countDown()
             }
-            runCatching { upstream.shutdownOutput() }
         }
-        try {
-            copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy) { chunkBytes ->
-                val pending = recvCounter.addAndGet(chunkBytes)
-                if (pending >= 32_768L) {
-                    val flushed = recvCounter.getAndSet(0L)
-                    if (flushed > 0L) {
-                        onTrafficRelayed(host, port, protocol, remoteIp, 0L, flushed, decision)
-                        if (clientIp.isNotEmpty()) {
-                            onClientTraffic(clientIp, host, 0L, flushed, true)
+
+        workerExecutor?.execute {
+            try {
+                copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy) { chunkBytes ->
+                    val pending = recvCounter.addAndGet(chunkBytes)
+                    if (pending >= 32_768L) {
+                        val flushed = recvCounter.getAndSet(0L)
+                        if (flushed > 0L) {
+                            onTrafficRelayed(host, port, protocol, remoteIp, 0L, flushed, decision)
+                            if (clientIp.isNotEmpty()) {
+                                onClientTraffic(clientIp, host, 0L, flushed, true)
+                            }
                         }
+                        enforceClientQuotaOrBan()
                     }
-                    enforceClientQuotaOrBan()
                 }
+                runCatching { client.shutdownOutput() }
+            } finally {
+                relayDoneLatch.countDown()
             }
-            runCatching { client.shutdownOutput() }
-        } finally {
-            runCatching { c2u?.get() }
-            val remSent = sentCounter.getAndSet(0L)
-            val remRecv = recvCounter.getAndSet(0L)
-            if (remSent > 0L || remRecv > 0L) {
-                onTrafficRelayed(host, port, protocol, remoteIp, remSent, remRecv, decision)
-                if (clientIp.isNotEmpty()) {
-                    onClientTraffic(clientIp, host, remSent, remRecv, true)
+        }
+
+        workerExecutor?.execute {
+            try {
+                relayDoneLatch.await()
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                val remSent = sentCounter.getAndSet(0L)
+                val remRecv = recvCounter.getAndSet(0L)
+                if (remSent > 0L || remRecv > 0L) {
+                    onTrafficRelayed(host, port, protocol, remoteIp, remSent, remRecv, decision)
+                    if (clientIp.isNotEmpty()) {
+                        onClientTraffic(clientIp, host, remSent, remRecv, true)
+                    }
                 }
+                runCatching { upstream.close() }
+                runCatching { client.close() }
             }
-            runCatching { upstream.close() }
-            runCatching { client.close() }
         }
     }
 

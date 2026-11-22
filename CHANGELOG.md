@@ -1,3 +1,16 @@
+# What's New — NetGate 3.0
+
+### DPI & SNI Hardening
+- **TLS Record Split strategy:** outbound TLS `ClientHello` handshakes can now be re-framed into two
+  separate TLS handshake records split inside the SNI hostname, which defeats middleboxes that only
+  inspect the first record of a connection.
+- **Smarter Autopilot:** per-host strategy cache is LRU-bounded (512 entries) and escalates
+  `TLS Record Split -> SNI Split -> Micro Chunks -> Direct` on handshake timeouts or DPI resets.
+- **Multi-KB ClientHello support:** the local filtering proxy now assembles the complete ClientHello
+  record (including post-quantum key shares) before filtering/segmenting it.
+- **Policy re-checks during relay:** in-flight tunnels are torn down immediately when an app is
+  banned or a daily quota is exhausted, instead of only at connection setup.
+
 # What's New
 
 ### New Features
