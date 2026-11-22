@@ -71,7 +71,6 @@ import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.URL
 import java.util.Calendar
-import javax.net.ssl.HttpsURLConnection
 
 class FirewallRepository(
     private val context: Context,

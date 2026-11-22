@@ -31,7 +31,6 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Icon

@@ -61,7 +61,6 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import android.net.VpnService
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.WifiTethering
@@ -115,7 +114,6 @@ import com.example.ui.components.FloatingFrostedNavBar
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.HotspotAndWifiContent
-import com.example.ui.components.SpeedTestContent
 import com.example.ui.components.VpnGuardContent
 import com.example.ui.theme.BlurEngine.blurEngineModalDepth
 import com.example.ui.theme.LocalIsDarkTheme

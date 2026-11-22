@@ -24,7 +24,6 @@ import com.example.data.local.FirewallPreferences
 import com.example.data.local.NetGateDatabase
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AdFilterListItem
-import com.example.data.model.AppCountdownTimer
 import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
 import com.example.data.model.AppUsageBreakdownItem
@@ -65,7 +64,6 @@ import com.example.data.model.VpnGateSortMode
 import com.example.data.model.VpnGuardProfile
 import com.example.data.model.VpnGuardProviderType
 import com.example.data.model.VpnGuardRoutingMode
-import com.example.data.model.VpnGuardRuntimeState
 import com.example.data.model.VpnGuardSubTab
 import com.example.data.model.VpnGuardUiState
 import com.example.data.model.WebsiteFilterMode

@@ -1,7 +1,5 @@
 package com.example.ui.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -158,7 +156,7 @@ fun DnsProtectionContent(
                         probeState = probeState,
                         onTestCloudflareDoh = onTestCloudflareDoh,
                         onOpenSettings = {
-                            copyToClipboard(context, selectedPreset.hostname)
+                            copyToClipboard(context, "Private DNS Hostname", selectedPreset.hostname)
                             onCopiedHostname(selectedPreset.hostname)
                             openNetworkOrPrivateDnsSettings(context)
                         }
@@ -205,7 +203,7 @@ fun DnsProtectionContent(
                         selectedPreset = selectedPreset,
                         onSelectPreset = { selectedPreset = it },
                         onCopyPreset = { host ->
-                            copyToClipboard(context, host)
+                            copyToClipboard(context, "Private DNS Hostname", host)
                             onCopiedHostname(host)
                         }
                     )
@@ -274,7 +272,7 @@ fun DnsProtectionContent(
                         probeState = probeState,
                         onTestCloudflareDoh = onTestCloudflareDoh,
                         onOpenSettings = {
-                            copyToClipboard(context, selectedPreset.hostname)
+                            copyToClipboard(context, "Private DNS Hostname", selectedPreset.hostname)
                             onCopiedHostname(selectedPreset.hostname)
                             openNetworkOrPrivateDnsSettings(context)
                         }
@@ -284,7 +282,7 @@ fun DnsProtectionContent(
                         selectedPreset = selectedPreset,
                         onSelectPreset = { selectedPreset = it },
                         onCopyPreset = { host ->
-                            copyToClipboard(context, host)
+                            copyToClipboard(context, "Private DNS Hostname", host)
                             onCopiedHostname(host)
                         }
                     )
@@ -1240,11 +1238,6 @@ private fun DnsPresetsList(
             }
         }
     }
-}
-
-private fun copyToClipboard(context: Context, text: String) {
-    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    cm.setPrimaryClip(ClipData.newPlainText("Private DNS Hostname", text))
 }
 
 private fun openNetworkOrPrivateDnsSettings(context: Context) {

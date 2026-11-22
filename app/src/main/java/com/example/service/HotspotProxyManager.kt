@@ -6,13 +6,10 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
-import com.example.data.local.AdFilterListEntity
 import com.example.data.local.WebsiteRuleEntity
-import com.example.data.local.WebsiteRuleType
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HotspotClientInfo
 import com.example.data.model.HotspotProxyRuntimeState
-import com.example.data.model.WebsiteFilterMode
 import com.example.service.proxy.ProxyConfiguration
 import com.example.service.proxy.ProxyCoordinator
 import com.example.service.proxy.ProxyRole

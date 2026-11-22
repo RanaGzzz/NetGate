@@ -24,7 +24,6 @@ import com.example.data.local.AppNetworkRuleEntity
 import com.example.data.local.FirewallPreferences
 import com.example.data.local.NetGateDatabase
 import com.example.data.local.WebsiteRuleEntity
-import com.example.data.local.WebsiteRuleType
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.DnsQueryLogEntry
 import com.example.data.model.DnsQueryStatus
@@ -39,7 +38,6 @@ import com.example.service.dns.DnsEngine
 import com.example.service.dns.DnsOutcome
 import com.example.service.dns.DnsResolutionContext
 import com.example.service.dns.DnsSocketPolicy
-import com.example.service.policy.DomainNormalizer
 import com.example.service.policy.NetworkPolicy
 import com.example.service.policy.NetworkPolicyEngine
 import com.example.service.policy.PolicyContext
@@ -47,7 +45,6 @@ import com.example.service.policy.PolicyDecision
 import com.example.service.proxy.ProxyConfiguration
 import com.example.service.proxy.ProxyCoordinator
 import com.example.service.proxy.ProxyRole
-import com.example.service.proxy.ProxyStartResult
 import com.example.service.session.VpnSessionCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

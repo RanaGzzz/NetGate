@@ -11,7 +11,6 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import com.example.data.model.ManagedApp
 import com.example.data.model.VpnGateServer
-import com.example.data.model.VpnGuardProfile
 import com.example.data.model.VpnGuardProviderType
 import com.example.data.model.VpnGuardRoutingMode
 import com.example.data.model.VpnGuardConnectionState

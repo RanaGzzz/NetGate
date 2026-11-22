@@ -31,15 +31,6 @@ data class SafeRewriteResult(
 )
 
 /**
- * Owner (UID + packages) of an intercepted DNS query, resolved from the socket tuple.
- */
-data class DnsQueryOwner(
-    val uid: Int,
-    val primaryPackage: String,
-    val packages: Array<String>
-)
-
-/**
  * Result of one upstream resolution attempt.
  *
  * [payload] is null when the transport chain finished without a usable answer
