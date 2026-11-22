@@ -105,6 +105,41 @@ class DpiBypassTest {
     }
 
     @Test
+    fun `writeTlsClientHello reframes the handshake into two TLS records split at the SNI`() {
+        val hostname = "blocked.example.com"
+        // Real ClientHellos carry extensions after the SNI block; padding keeps the SNI off the
+        // record boundary, which is required for record re-framing.
+        val clientHello = buildSyntheticTlsClientHello(hostname, extraExtensionPadding = 24)
+        val sniRange = DpiBypassEngine.locateTlsSniRange(clientHello, clientHello.size)!!
+
+        val recorder = RecordingOutputStream()
+        DpiBypassEngine.writeTlsClientHello(
+            output = recorder,
+            packet = clientHello,
+            length = clientHello.size,
+            strategy = DpiStrategy.TLS_RECORD_SPLIT,
+            chunkSize = 4,
+            fragmentDelayMs = 0
+        )
+
+        assertEquals(2, recorder.writeSizes.size)
+        val out = recorder.toByteArray()
+        // Each fragment is a complete TLS handshake record (content type 0x16, TLS 1.x).
+        assertEquals(0x16, out[0].toInt() and 0xFF)
+        val firstLen = ((out[3].toInt() and 0xFF) shl 8) or (out[4].toInt() and 0xFF)
+        val secondStart = 5 + firstLen
+        assertEquals(0x16, out[secondStart].toInt() and 0xFF)
+        val secondLen = ((out[secondStart + 3].toInt() and 0xFF) shl 8) or
+            (out[secondStart + 4].toInt() and 0xFF)
+        assertEquals(out.size, secondStart + 5 + secondLen)
+
+        // The split lands inside the SNI hostname and the handshake body survives intact.
+        assertTrue(firstLen + 5 in (sniRange.first + 1)..(sniRange.last + 1))
+        val reassembled = out.copyOfRange(5, secondStart) + out.copyOfRange(secondStart + 5, out.size)
+        assertArrayEquals(clientHello.copyOfRange(5, clientHello.size), reassembled)
+    }
+
+    @Test
     fun `writeTlsClientHello fragments into deterministic micro chunks`() {
         val clientHello = buildSyntheticTlsClientHello("chat.messaging.net")
         val recorder = RecordingOutputStream()
