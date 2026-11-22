@@ -288,7 +288,10 @@ object DnsPacketFilter {
     }
 
     fun isInternalBypassCanary(domain: String): Boolean {
-        return DOH_BYPASS_DOMAINS.any { matchesDomainRule(domain, it) }
+        val normalized = com.example.service.policy.DomainNormalizer.normalizeHost(domain)
+        if (normalized.isEmpty()) return false
+        return com.example.service.policy.DomainNormalizer.parentDomainSequence(normalized)
+            .any { it in DOH_BYPASS_DOMAINS }
     }
 
     fun shouldBlockDomain(
@@ -298,32 +301,36 @@ object DnsPacketFilter {
     ): Boolean {
         if (mode == WebsiteFilterMode.OFF) return false
 
-        // Always force Firefox / Chrome out of DoH auto-upgrade so they respect NetGate's DNS filter.
-        val normalized = domain.trim().trimEnd('.').lowercase()
-        if (normalized == "use-application-dns.net" || normalized == "_dns.resolver.arpa") {
+        // Always block DoH bypass canaries/endpoints before whitelist checks
+        // so browsers fall back to NetGate's DNS filter.
+        if (isInternalBypassCanary(domain)) {
             return true
         }
 
-        val isWhitelisted = rules.any {
-            it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
-                matchesDomainRule(domain, it.domain)
-        }
-        if (isWhitelisted) return false
+        val normalized = com.example.service.policy.DomainNormalizer.normalizeHost(domain)
+        if (normalized.isEmpty()) return false
 
-        if (DOH_BYPASS_DOMAINS.any { matchesDomainRule(domain, it) }) {
-            return true
-        }
-
-        return when (mode) {
-            WebsiteFilterMode.OFF -> false
-            WebsiteFilterMode.BLOCKLIST -> {
-                rules.any {
-                    it.isEnabled && it.ruleType == WebsiteRuleType.BLOCK &&
-                        matchesDomainRule(domain, it.domain)
-                }
+        val whitelist = HashSet<String>()
+        val blocklist = HashSet<String>()
+        for (rule in rules) {
+            if (!rule.isEnabled) continue
+            val cleanRule = com.example.service.policy.DomainNormalizer.normalize(rule.domain)
+                ?: com.example.service.policy.DomainNormalizer.normalizeHost(rule.domain)
+            if (cleanRule.isEmpty()) continue
+            when (rule.ruleType) {
+                WebsiteRuleType.ALLOW -> whitelist.add(cleanRule)
+                WebsiteRuleType.BLOCK -> blocklist.add(cleanRule)
             }
-            WebsiteFilterMode.WHITELIST_ONLY -> true
         }
+
+        for (candidate in com.example.service.policy.DomainNormalizer.parentDomainSequence(normalized)) {
+            val isAllow = candidate in whitelist
+            val isBlock = candidate in blocklist
+            if (isAllow) return false
+            if (isBlock) return true
+        }
+
+        return mode == WebsiteFilterMode.WHITELIST_ONLY
     }
 
     fun parseIpv4UdpDnsQuery(packet: ByteArray, length: Int): ParsedDnsQuery? {

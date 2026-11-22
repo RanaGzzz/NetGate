@@ -887,9 +887,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                     securityAuditReportFlow.value.lastScannedAt == 0L
                 ) {
                     runDeviceSecurityAudit()
+                } else if (dataUsageSubTabFlow.value == DataUsageSubTab.SPEED_TEST) {
+                    refreshConnectionDetails()
                 }
             }
-            AppDestination.SPEED_TEST -> refreshConnectionDetails()
             AppDestination.DNS -> {
                 refreshConnectionDetails()
                 if (dnsCheckStateFlow.value.checkedAtMs == 0L) {
@@ -909,6 +910,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         dataUsageSubTabFlow.value = tab
         if (tab == DataUsageSubTab.SECURITY_AUDIT && securityAuditReportFlow.value.lastScannedAt == 0L) {
             runDeviceSecurityAudit()
+        }
+        if (tab == DataUsageSubTab.SPEED_TEST) {
+            refreshConnectionDetails()
         }
     }
 
@@ -1320,14 +1324,15 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openSpeedTest() {
-        selectDestination(AppDestination.SPEED_TEST)
+        selectDestination(AppDestination.DATA_USAGE)
+        selectDataUsageSubTab(DataUsageSubTab.SPEED_TEST)
     }
 
     fun closeSpeedTest() {
         stopSpeedTest()
         isSpeedTestOpenFlow.value = false
-        if (currentDestinationFlow.value == AppDestination.SPEED_TEST) {
-            selectDestination(AppDestination.FIREWALL)
+        if (dataUsageSubTabFlow.value == DataUsageSubTab.SPEED_TEST) {
+            selectDataUsageSubTab(DataUsageSubTab.OVERVIEW)
         }
     }
 

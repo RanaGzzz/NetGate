@@ -24,13 +24,30 @@ object DomainNormalizer {
             .removePrefix("https://")
             .removePrefix("http://")
 
-        // Strip path, query, fragment, and port
+        // Strip path, query, and fragment
         cleaned = cleaned
             .substringBefore('/')
             .substringBefore('?')
             .substringBefore('#')
-            .substringBefore(':')
-            .removeSurrounding("[", "]") // IPv6 bracket literals if any
+
+        // Handle bracketed IPv6 literals before stripping :port
+        cleaned = if (cleaned.startsWith("[")) {
+            val endBracket = cleaned.indexOf(']')
+            if (endBracket > 0) {
+                cleaned.substring(1, endBracket)
+            } else {
+                cleaned.removeSurrounding("[", "]")
+            }
+        } else {
+            val firstColon = cleaned.indexOf(':')
+            if (firstColon >= 0 && firstColon == cleaned.lastIndexOf(':')) {
+                cleaned.substring(0, firstColon)
+            } else {
+                cleaned
+            }
+        }
+
+        cleaned = cleaned
             .removePrefix("*.")
             .removePrefix("www.")
             .trim('.')
@@ -44,15 +61,46 @@ object DomainNormalizer {
     }
 
     /**
-     * Fast normalization for queried hostnames (e.g., from DNS packets or HTTP CONNECT).
-     * Trims whitespace, removes trailing dot and surrounding brackets, and lowercases.
+     * Canonicalizes queried hostnames across DNS packets, HTTP Host/CONNECT headers,
+     * TLS SNI extensions, and DoH canaries.
+     * Trims whitespace, strips optional URI scheme/path/query/fragment, safely removes
+     * IPv6 brackets and single trailing `:port`, removes leading wildcards `*.` and
+     * surrounding dots, and lowercases while preserving valid `_`-prefixed DNS service
+     * labels (e.g., `_dns.resolver.arpa`).
      */
     fun normalizeHost(rawHost: String): String {
-        return rawHost
-            .trim()
-            .removeSurrounding("[", "]")
-            .trimEnd('.')
-            .lowercase()
+        var cleaned = rawHost.trim().lowercase()
+        if (cleaned.isEmpty()) return ""
+
+        val schemeIdx = cleaned.indexOf("://")
+        if (schemeIdx in 1..15) {
+            cleaned = cleaned.substring(schemeIdx + 3)
+        }
+
+        cleaned = cleaned
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+
+        cleaned = if (cleaned.startsWith("[")) {
+            val endBracket = cleaned.indexOf(']')
+            if (endBracket > 0) {
+                cleaned.substring(1, endBracket)
+            } else {
+                cleaned.removeSurrounding("[", "]")
+            }
+        } else {
+            val firstColon = cleaned.indexOf(':')
+            if (firstColon >= 0 && firstColon == cleaned.lastIndexOf(':')) {
+                cleaned.substring(0, firstColon)
+            } else {
+                cleaned
+            }
+        }
+
+        return cleaned
+            .removePrefix("*.")
+            .trim('.')
     }
 
     /**

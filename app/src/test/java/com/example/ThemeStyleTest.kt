@@ -106,7 +106,6 @@ class ThemeStyleTest {
                         onSelectFirewall = {},
                         onSelectWebsites = {},
                         onSelectDataUsage = {},
-                        onSelectSpeedTest = {},
                         onSelectDnsProtection = {},
                         onSelectHotspot = {},
                         onSelectVpnGuard = {}

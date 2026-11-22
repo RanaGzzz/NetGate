@@ -18,16 +18,15 @@ object NetworkPolicyEngine {
      * within the given [PolicyContext].
      *
      * Precedence Order:
-     * 1. Hotspot filter bypass check (if Hotspot filtering disabled -> Allow)
-     * 2. Hotspot client IP manual block and data cap evaluation
+     * 1. Hotspot client IP manual block and data cap evaluation (unconditional hotspot client control)
+     * 2. Hotspot Direct Relay bypass check (if Hotspot NetGate filtering is disabled -> Allow)
      * 3. Local firewall UID / package blocking
-     * 4. Explicit website Whitelist check (ALLOW rules override blocklist, YouTube, and AdBlock)
-     * 5. Custom Website Rules (BLOCKLIST or WHITELIST_ONLY lockdown)
-     * 6. Anti-DoH bypass canary checks (forces browsers to use NetGate DNS)
-     * 7. Essential OS & service passthrough (FCM, Payment Gateways, Captive Portals)
-     * 8. YouTube Ad Blocker (domain + URL path)
-     * 9. Ad & Tracker Blocker (hosts/adblock list domains + tracking URL paths)
-     * 10. Default Allow (with context-specific reason)
+     * 4. Anti-DoH bypass canary checks (enforced BEFORE whitelist to prevent DoH bypass)
+     * 5. Specificity-aware Website Rules (more-specific rules win; BLOCKLIST / WHITELIST_ONLY)
+     * 6. Essential OS & service passthrough (FCM, Payment Gateways, Captive Portals)
+     * 7. YouTube Ad Blocker (domain + URL path)
+     * 8. Ad & Tracker Blocker (hosts/adblock list domains + tracking URL paths)
+     * 9. Default Allow (with context-specific reason)
      */
     fun evaluate(
         rawDomain: String,
@@ -39,12 +38,7 @@ object NetworkPolicyEngine {
             return PolicyDecision.Allow(reason = "Empty Host")
         }
 
-        // 1. Hotspot direct relay override
-        if (context.isHotspot && !policy.hotspotApplyNetGateFilters) {
-            return PolicyDecision.Allow(reason = "Hotspot Direct Relay")
-        }
-
-        // 2. Hotspot Client IP & Quota Evaluation
+        // 1. Hotspot Client IP & Quota Evaluation (Enforced even if NetGate content filters are off)
         if (context.isHotspot && !context.clientIp.isNullOrBlank()) {
             val clientBlockReason = evaluateHotspotClientBlock(
                 clientIp = context.clientIp,
@@ -66,6 +60,11 @@ object NetworkPolicyEngine {
             }
         }
 
+        // 2. Hotspot Direct Relay override (Bypasses DoH canary, website, ad, and SafeSearch filtering when disabled)
+        if (context.isHotspot && !policy.hotspotApplyNetGateFilters) {
+            return PolicyDecision.Allow(reason = "Hotspot Direct Relay")
+        }
+
         // 3. Local Firewall UID / Package Blocking
         if (context.isFirewall) {
             val isUidBlocked = context.appUid != null && context.appUid in policy.blockedUids
@@ -79,15 +78,25 @@ object NetworkPolicyEngine {
             }
         }
 
-        // 4. Explicit Whitelist Check
-        val isWhitelisted = policy.isExplicitlyWhitelisted(domain)
+        // 4. Anti-DoH Canary Checks (Enforced before explicit whitelist - Whitelist Security Precedence)
+        if (DnsPacketFilter.isInternalBypassCanary(domain)) {
+            val reason = if (context.isHotspot) "Hotspot DoH Canary" else "DoH Bypass Canary"
+            return PolicyDecision.Block(
+                reason = reason,
+                isAdBlock = false,
+                category = PolicyDecision.BlockCategory.DOH_BYPASS_CANARY
+            )
+        }
 
-        // 5. Website Filter Mode & Blocklist Check
+        // 5. Specificity-aware Website Rule Resolution & Filter Mode
+        val websiteAction = policy.resolveWebsiteRuleAction(domain)
+        val isWhitelisted = websiteAction == NetworkPolicy.ResolvedRuleAction.ALLOW
+
         if (!isWhitelisted && policy.websiteFilterMode != WebsiteFilterMode.OFF) {
             val isBlockedByMode = when (policy.websiteFilterMode) {
                 WebsiteFilterMode.OFF -> false
-                WebsiteFilterMode.BLOCKLIST -> policy.isBlockedByWebsiteRule(domain)
-                WebsiteFilterMode.WHITELIST_ONLY -> true // Whitelist was false above
+                WebsiteFilterMode.BLOCKLIST -> websiteAction == NetworkPolicy.ResolvedRuleAction.BLOCK
+                WebsiteFilterMode.WHITELIST_ONLY -> true // Not explicitly whitelisted above
             }
 
             if (isBlockedByMode) {
@@ -107,16 +116,6 @@ object NetworkPolicyEngine {
                     category = category
                 )
             }
-        }
-
-        // 6. Anti-DoH Canary Checks (for DNS / Firewall)
-        if (!isWhitelisted && DnsPacketFilter.isInternalBypassCanary(domain)) {
-            val reason = if (context.isHotspot) "Hotspot DoH Canary" else "DoH Bypass Canary"
-            return PolicyDecision.Block(
-                reason = reason,
-                isAdBlock = false,
-                category = PolicyDecision.BlockCategory.DOH_BYPASS_CANARY
-            )
         }
 
         // 7. Essential Passthrough (connectivity checks, payment gateways, push)

@@ -635,7 +635,6 @@ enum class AppDestination(val label: String) {
     FIREWALL("Firewall"),
     WEBSITES("Websites"),
     DATA_USAGE("Data Usage"),
-    SPEED_TEST("Speed Test"),
     DNS("1.1.1.1 DNS"),
     HOTSPOT("Hotspot & Wi-Fi"),
     VPN_GUARD("VPN Guard")
@@ -938,7 +937,8 @@ fun formatSingleLineCompactSpeed(bytesPerSec: Long): String {
 enum class DataUsageSubTab(val label: String) {
     OVERVIEW("Live & Usage"),
     SITES_REGIONS("Sites & Regions"),
-    SECURITY_AUDIT("Security Audit")
+    SECURITY_AUDIT("Security Audit"),
+    SPEED_TEST("Speed Test")
 }
 
 enum class SiteTrafficFilter(val label: String) {

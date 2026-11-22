@@ -9,6 +9,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,9 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Speed
+import com.example.data.network.SpeedTestState
+import com.example.ui.components.SpeedTestContent
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -119,6 +124,11 @@ fun DataUsageContent(
     onQuickAllowSite: (String) -> Unit,
     onRunSecurityAudit: () -> Unit,
     onOpenFlaggedSitesFromAudit: () -> Unit,
+    speedTestState: SpeedTestState,
+    activeNetworkLabel: String,
+    onStartSpeedTest: () -> Unit,
+    onStopSpeedTest: () -> Unit,
+    onRunVideoTest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -147,6 +157,23 @@ fun DataUsageContent(
             )
 
             when (state.selectedSubTab) {
+                DataUsageSubTab.SPEED_TEST -> {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = if (isWide) 20.dp else 16.dp, vertical = 8.dp)
+                    ) {
+                        SpeedTestContent(
+                            state = speedTestState,
+                            activeNetworkLabel = activeNetworkLabel,
+                            onStartTest = onStartSpeedTest,
+                            onStopTest = onStopSpeedTest,
+                            onRunVideoTest = onRunVideoTest
+                        )
+                    }
+                }
+
                 DataUsageSubTab.SITES_REGIONS -> {
                     SitesAndRegionsContent(
                         state = state,
@@ -443,59 +470,75 @@ private fun DataUsageSubTabBar(
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        DataUsageSubTab.entries.forEach { tab ->
-            val selected = selectedSubTab == tab
-            val icon = when (tab) {
-                DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart
-                DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public
-                DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security
-            }
-            val badgeText = when (tab) {
-                DataUsageSubTab.OVERVIEW -> null
-                DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
-                DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
-            }
-            val badgeColor = if (tab == DataUsageSubTab.SECURITY_AUDIT && flaggedCount > 0) {
-                BlockedRed
-            } else {
-                MaterialTheme.colorScheme.primary
-            }
-
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
-                } else if (isDark) {
-                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.65f)
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val useWeight = maxWidth >= 560.dp
+        val rowModifier = if (useWeight) {
+            Modifier.fillMaxWidth()
+        } else {
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+        }
+        Row(
+            modifier = rowModifier,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DataUsageSubTab.entries.forEach { tab ->
+                val selected = selectedSubTab == tab
+                val icon = when (tab) {
+                    DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart
+                    DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public
+                    DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security
+                    DataUsageSubTab.SPEED_TEST -> Icons.Rounded.Speed
+                }
+                val badgeText = when (tab) {
+                    DataUsageSubTab.OVERVIEW -> null
+                    DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
+                    DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
+                    DataUsageSubTab.SPEED_TEST -> null
+                }
+                val badgeColor = if (tab == DataUsageSubTab.SECURITY_AUDIT && flaggedCount > 0) {
+                    BlockedRed
                 } else {
-                    MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
-                },
-                border = BorderStroke(
-                    1.dp,
-                    if (selected) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.68f)
+                    MaterialTheme.colorScheme.primary
+                }
+
+                val pillModifier = if (useWeight) {
+                    Modifier.weight(1f)
+                } else {
+                    Modifier.defaultMinSize(minWidth = 104.dp)
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                    } else if (isDark) {
+                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.65f)
                     } else {
-                        MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                    }
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { onSelectSubTab(tab) }
-                    .testTag("data_usage_subtab_${tab.name.lowercase()}")
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        if (selected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.68f)
+                        } else {
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                        }
+                    ),
+                    modifier = pillModifier
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onSelectSubTab(tab) }
+                        .testTag("data_usage_subtab_${tab.name.lowercase()}")
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .then(if (useWeight) Modifier.fillMaxSize() else Modifier.fillMaxHeight())
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = tab.label,
@@ -538,6 +581,7 @@ private fun DataUsageSubTabBar(
             }
         }
     }
+}
 }
 
 @Composable

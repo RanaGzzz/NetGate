@@ -30,14 +30,15 @@ object HotspotPolicyEvaluator {
         bytesSent: Long,
         bytesReceived: Long
     ): String? {
-        if (clientIp in blockedIps) {
-            return "Blocked by NetGate Hotspot Firewall"
-        }
-        val cap = clientCaps[clientIp] ?: 0L
-        if (cap > 0L && (bytesSent + bytesReceived) >= cap) {
-            return "Hotspot Data Cap Reached"
-        }
-        return null
+        return com.example.service.policy.NetworkPolicyEngine.evaluateHotspotClientBlock(
+            clientIp = clientIp,
+            bytesSent = bytesSent,
+            bytesReceived = bytesReceived,
+            policy = com.example.service.policy.NetworkPolicy(
+                hotspotBlockedClientIps = blockedIps,
+                hotspotClientCaps = clientCaps
+            )
+        )
     }
 
     fun isHotspotInterfaceName(rawName: String?): Boolean {
@@ -67,7 +68,15 @@ object HotspotProxyManager {
         var lastSeenAt: Long = System.currentTimeMillis()
     )
 
+    private data class HotspotPolicyBundle(
+        val prefs: FirewallPreferencesState = FirewallPreferencesState(),
+        val websiteRules: List<WebsiteRuleEntity> = emptyList(),
+        val adMatcher: AdBlockMatcherSnapshot = AdBlockMatcherSnapshot.EMPTY,
+        val policy: com.example.service.policy.NetworkPolicy = com.example.service.policy.NetworkPolicy.EMPTY
+    )
+
     private val lock = Any()
+    private val policyLock = Any()
     private var proxyServer: LocalFilteringProxyServer? = null
     private var runningPort: Int = 8890
 
@@ -75,18 +84,7 @@ object HotspotProxyManager {
     private val totalSentCounter = AtomicLong(0L)
     private val totalRecvCounter = AtomicLong(0L)
 
-    @Volatile
-    private var latestPrefs: FirewallPreferencesState = FirewallPreferencesState()
-
-    @Volatile
-    private var latestWebsiteRules: List<WebsiteRuleEntity> = emptyList()
-
-    @Volatile
-    private var latestAdMatcher: AdBlockMatcherSnapshot = AdBlockMatcherSnapshot.EMPTY
-
-    @Volatile
-    private var currentPolicy: com.example.service.policy.NetworkPolicy =
-        com.example.service.policy.NetworkPolicy.EMPTY
+    private val policyBundle = java.util.concurrent.atomic.AtomicReference(HotspotPolicyBundle())
 
     private val _runtimeState = MutableStateFlow(HotspotProxyRuntimeState())
     val runtimeState: StateFlow<HotspotProxyRuntimeState> = _runtimeState.asStateFlow()
@@ -96,34 +94,44 @@ object HotspotProxyManager {
         websiteRules: List<WebsiteRuleEntity>,
         adMatcher: AdBlockMatcherSnapshot
     ) {
-        latestPrefs = prefs
-        latestWebsiteRules = websiteRules
-        latestAdMatcher = adMatcher
-        currentPolicy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
-            prefs = prefs,
-            websiteRules = websiteRules,
-            adMatcher = adMatcher
-        )
+        synchronized(policyLock) {
+            policyBundle.set(
+                HotspotPolicyBundle(
+                    prefs = prefs,
+                    websiteRules = websiteRules,
+                    adMatcher = adMatcher,
+                    policy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
+                        prefs = prefs,
+                        websiteRules = websiteRules,
+                        adMatcher = adMatcher
+                    )
+                )
+            )
+        }
         publishSnapshot()
     }
 
     fun updatePreferencesOnly(prefs: FirewallPreferencesState) {
-        latestPrefs = prefs
-        currentPolicy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
-            prefs = prefs,
-            websiteRules = latestWebsiteRules,
-            adMatcher = latestAdMatcher
-        )
+        synchronized(policyLock) {
+            val prev = policyBundle.get()
+            policyBundle.set(
+                HotspotPolicyBundle(
+                    prefs = prefs,
+                    websiteRules = prev.websiteRules,
+                    adMatcher = prev.adMatcher,
+                    policy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
+                        prefs = prefs,
+                        websiteRules = prev.websiteRules,
+                        adMatcher = prev.adMatcher
+                    )
+                )
+            )
+        }
         publishSnapshot()
     }
 
     fun startOrUpdate(context: Context, prefs: FirewallPreferencesState): Boolean {
-        latestPrefs = prefs
-        currentPolicy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
-            prefs = prefs,
-            websiteRules = latestWebsiteRules,
-            adMatcher = latestAdMatcher
-        )
+        updatePreferencesOnly(prefs)
         val port = prefs.hotspotProxyPort.coerceIn(1024, 65535)
         synchronized(lock) {
             val existing = proxyServer
@@ -197,7 +205,8 @@ object HotspotProxyManager {
         val isNetGateVpn = NetGateVpnService.runtimeState.value.isServiceRunning
         val isRunning = proxyServer?.isRunning == true
 
-        val clients = buildClientsList()
+        val snapshot = policyBundle.get()
+        val clients = buildClientsList(snapshot.prefs)
         _runtimeState.value = HotspotProxyRuntimeState(
             isProxyRunning = isRunning,
             isHotspotInterfaceActive = detected != null,
@@ -205,7 +214,7 @@ object HotspotProxyManager {
             detectedHotspotInterface = detected?.first,
             isExternalVpnActive = isExternalVpn,
             isNetGateVpnActive = isNetGateVpn,
-            activePort = if (isRunning) runningPort else latestPrefs.hotspotProxyPort,
+            activePort = if (isRunning) runningPort else snapshot.prefs.hotspotProxyPort,
             totalRelayedSentBytes = totalSentCounter.get(),
             totalRelayedRecvBytes = totalRecvCounter.get(),
             osTetheringBytes = osTetheringBytes,
@@ -215,14 +224,16 @@ object HotspotProxyManager {
     }
 
     private fun evaluateClientBlock(clientIp: String): String? {
-        val stats = clientStatsMap[clientIp]
+        val cleanIp = clientIp.trim()
+        if (cleanIp.isEmpty()) return null
+        val stats = clientStatsMap[cleanIp]
         val sent = stats?.bytesSent?.get() ?: 0L
         val recv = stats?.bytesReceived?.get() ?: 0L
         return com.example.service.policy.NetworkPolicyEngine.evaluateHotspotClientBlock(
-            clientIp = clientIp,
+            clientIp = cleanIp,
             bytesSent = sent,
             bytesReceived = recv,
-            policy = currentPolicy
+            policy = policyBundle.get().policy
         )
     }
 
@@ -234,7 +245,7 @@ object HotspotProxyManager {
         return com.example.service.policy.NetworkPolicyEngine.evaluate(
             rawDomain = host,
             context = context,
-            policy = currentPolicy
+            policy = policyBundle.get().policy
         ).toProxyFilterDecision()
     }
 
@@ -243,12 +254,12 @@ object HotspotProxyManager {
         return com.example.service.policy.NetworkPolicyEngine.resolveTargetHost(
             rawHost = host,
             context = context,
-            policy = currentPolicy
+            policy = policyBundle.get().policy
         )
     }
 
     private fun provideUpstreamProxy(): Pair<String, Int>? {
-        val prefs = latestPrefs
+        val prefs = policyBundle.get().prefs
         if (!prefs.hotspotApplyNetGateFilters) return null
         return prefs.resolvedUpstreamSniProxy()
     }
@@ -286,8 +297,9 @@ object HotspotProxyManager {
         publishSnapshot()
     }
 
-    private fun buildClientsList(): List<HotspotClientInfo> {
-        val prefs = latestPrefs
+    private fun buildClientsList(
+        prefs: FirewallPreferencesState = policyBundle.get().prefs
+    ): List<HotspotClientInfo> {
         val allIps = (clientStatsMap.keys +
             prefs.hotspotBlockedClientIps +
             prefs.hotspotClientCaps.keys +
@@ -295,6 +307,20 @@ object HotspotProxyManager {
 
         return allIps.map { ip ->
             val stats = clientStatsMap[ip]
+            var reqCount = 0
+            var blkCount = 0
+            var host = ""
+            var firstSeen = 0L
+            var lastSeen = 0L
+            if (stats != null) {
+                synchronized(stats) {
+                    reqCount = stats.requestCount
+                    blkCount = stats.blockedCount
+                    host = stats.lastHost
+                    firstSeen = stats.firstSeenAt
+                    lastSeen = stats.lastSeenAt
+                }
+            }
             HotspotClientInfo(
                 clientIp = ip,
                 label = prefs.hotspotClientLabels[ip].orEmpty(),
@@ -302,11 +328,11 @@ object HotspotProxyManager {
                 dataCapBytes = prefs.hotspotClientCaps[ip] ?: 0L,
                 bytesSent = stats?.bytesSent?.get() ?: 0L,
                 bytesReceived = stats?.bytesReceived?.get() ?: 0L,
-                requestCount = stats?.requestCount ?: 0,
-                blockedCount = stats?.blockedCount ?: 0,
-                lastHost = stats?.lastHost.orEmpty(),
-                firstSeenAt = stats?.firstSeenAt ?: 0L,
-                lastSeenAt = stats?.lastSeenAt ?: 0L
+                requestCount = reqCount,
+                blockedCount = blkCount,
+                lastHost = host,
+                firstSeenAt = firstSeen,
+                lastSeenAt = lastSeen
             )
         }.sortedWith(
             compareByDescending<HotspotClientInfo> { it.totalBytes }
@@ -316,13 +342,14 @@ object HotspotProxyManager {
     }
 
     private fun publishSnapshot(errorMessage: String? = _runtimeState.value.errorMessage) {
+        val snapshot = policyBundle.get()
         val current = _runtimeState.value
         _runtimeState.value = current.copy(
             isProxyRunning = proxyServer?.isRunning == true,
-            activePort = if (proxyServer?.isRunning == true) runningPort else latestPrefs.hotspotProxyPort,
+            activePort = if (proxyServer?.isRunning == true) runningPort else snapshot.prefs.hotspotProxyPort,
             totalRelayedSentBytes = totalSentCounter.get(),
             totalRelayedRecvBytes = totalRecvCounter.get(),
-            clients = buildClientsList(),
+            clients = buildClientsList(snapshot.prefs),
             errorMessage = errorMessage
         )
     }

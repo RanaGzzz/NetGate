@@ -67,6 +67,17 @@ class NetworkPolicyEngineTest {
         )
     }
 
+    @Test
+    fun `DomainNormalizer normalizeHost handles schemes, ports, leading dots, wildcards, underscores, and IPv6 brackets`() {
+        assertEquals("dns.google", DomainNormalizer.normalizeHost("dns.google:443"))
+        assertEquals("mozilla.cloudflare-dns.com", DomainNormalizer.normalizeHost("https://Mozilla.Cloudflare-DNS.com/dns-query?name=test"))
+        assertEquals("use-application-dns.net", DomainNormalizer.normalizeHost(" .USE-APPLICATION-DNS.NET. "))
+        assertEquals("_dns.resolver.arpa", DomainNormalizer.normalizeHost("_DNS.RESOLVER.ARPA."))
+        assertEquals("2001:4860:4860::8888", DomainNormalizer.normalizeHost("[2001:4860:4860::8888]:443"))
+        assertNull(DomainNormalizer.normalize("[2001:4860:4860::8888]:443"))
+        assertNull(DomainNormalizer.normalize("not_a_domain"))
+    }
+
     // =========================================================================
     // 2. PolicyDecision & ProxyFilterDecision Adapter Tests
     // =========================================================================
@@ -188,16 +199,63 @@ class NetworkPolicyEngineTest {
     // =========================================================================
 
     @Test
-    fun `anti-doh canary domains are blocked on DNS to prevent browser bypass`() {
+    fun `anti-doh canary domains normalize mixed case, ports, urls, and subdomains and cannot be bypassed by whitelist`() {
         val policy = NetworkPolicy(
             websiteFilterMode = WebsiteFilterMode.BLOCKLIST,
+            whitelistedDomains = setOf("google.com", "cloudflare-dns.com", "use-application-dns.net"),
             isAdBlockerEnabled = true
         )
 
         val dnsContext = PolicyContext.forFirewall(protocol = "DNS")
-        val canaryDecision = NetworkPolicyEngine.evaluate("use-application-dns.net", dnsContext, policy)
-        assertFalse("DoH canary must be blocked on DNS", canaryDecision.isAllowed)
-        assertEquals(PolicyDecision.BlockCategory.DOH_BYPASS_CANARY, (canaryDecision as PolicyDecision.Block).category)
+        for (rawCanary in listOf(
+            "use-application-dns.net",
+            ".USE-APPLICATION-DNS.NET.",
+            "_dns.resolver.arpa",
+            "dns.google:443",
+            "sub.dns.google.com.",
+            "https://mozilla.cloudflare-dns.com/dns-query"
+        )) {
+            val canaryDecision = NetworkPolicyEngine.evaluate(rawCanary, dnsContext, policy)
+            assertFalse("DoH canary $rawCanary must be blocked", canaryDecision.isAllowed)
+            assertEquals(PolicyDecision.BlockCategory.DOH_BYPASS_CANARY, (canaryDecision as PolicyDecision.Block).category)
+            assertTrue(com.example.service.DnsPacketFilter.isInternalBypassCanary(rawCanary))
+        }
+    }
+
+    @Test
+    fun `specific subdomain block overrides broad parent whitelist while specific allow overrides parent block`() {
+        val policy = NetworkPolicy(
+            websiteFilterMode = WebsiteFilterMode.BLOCKLIST,
+            whitelistedDomains = setOf("example.com", "music.youtube.com"),
+            blockedDomains = setOf("malware.example.com", "youtube.com"),
+            isAdBlockerEnabled = true,
+            isSafeSearchEnabled = true
+        )
+        val context = PolicyContext.forFirewall(protocol = "HTTPS")
+
+        // Specific child BLOCK beats broad parent ALLOW
+        val malwareDecision = NetworkPolicyEngine.evaluate("malware.example.com", context, policy)
+        assertFalse("Specific child block must override parent allow", malwareDecision.isAllowed)
+        assertEquals(PolicyDecision.BlockCategory.WEBSITE_BLOCKLIST, (malwareDecision as PolicyDecision.Block).category)
+
+        val nestedMalwareDecision = NetworkPolicyEngine.evaluate("dl.malware.example.com", context, policy)
+        assertFalse("Nested child under blocked subdomain must be blocked", nestedMalwareDecision.isAllowed)
+
+        // Sibling under parent ALLOW remains allowed
+        val cleanSubDecision = NetworkPolicyEngine.evaluate("docs.example.com", context, policy)
+        assertTrue("Clean subdomain under parent allow remains allowed", cleanSubDecision.isAllowed)
+
+        // Specific child ALLOW beats broad parent BLOCK
+        val musicDecision = NetworkPolicyEngine.evaluate("music.youtube.com", context, policy)
+        assertTrue("Specific child allow must override parent block", musicDecision.isAllowed)
+
+        val otherYtDecision = NetworkPolicyEngine.evaluate("m.youtube.com", context, policy)
+        assertFalse("Other child under blocked parent remains blocked", otherYtDecision.isAllowed)
+
+        // Same specificity precedence inside WHITELIST_ONLY lockdown
+        val lockdownPolicy = policy.copy(websiteFilterMode = WebsiteFilterMode.WHITELIST_ONLY)
+        assertFalse(NetworkPolicyEngine.evaluate("malware.example.com", context, lockdownPolicy).isAllowed)
+        assertTrue(NetworkPolicyEngine.evaluate("docs.example.com", context, lockdownPolicy).isAllowed)
     }
 
     // =========================================================================
@@ -299,18 +357,107 @@ class NetworkPolicyEngineTest {
     }
 
     @Test
-    fun `hotspot bypasses all filtering when hotspotApplyNetGateFilters is disabled`() {
+    fun `hotspot bypasses content and DoH filters when hotspotApplyNetGateFilters is disabled while enforcing client bans and caps`() {
         val policy = NetworkPolicy(
             hotspotApplyNetGateFilters = false,
             hotspotBlockedClientIps = setOf("192.168.43.50"),
+            hotspotClientCaps = mapOf("192.168.43.60" to 1_000L),
             websiteFilterMode = WebsiteFilterMode.BLOCKLIST,
-            blockedDomains = setOf("evil.com")
+            blockedDomains = setOf("evil.com"),
+            isAdBlockerEnabled = true,
+            isSafeSearchEnabled = true
         )
 
-        val context = PolicyContext.forHotspotClient(clientIp = "192.168.43.50")
-        val decision = NetworkPolicyEngine.evaluate("evil.com", context, policy)
-        assertTrue("Hotspot direct relay allows traffic when hotspot filters disabled", decision.isAllowed)
-        assertEquals("Hotspot Direct Relay", decision.reason)
+        // Unbanned client under quota bypasses website blocklist, DoH canaries, and SafeSearch rewrites
+        val normalClient = PolicyContext.forHotspotClient(
+            clientIp = "192.168.43.99",
+            clientBytesSent = 100L,
+            clientBytesReceived = 100L
+        )
+        val siteDecision = NetworkPolicyEngine.evaluate("evil.com", normalClient, policy)
+        assertTrue("Hotspot direct relay allows site filtering bypass when filters disabled", siteDecision.isAllowed)
+        assertEquals("Hotspot Direct Relay", siteDecision.reason)
+
+        val dohDecision = NetworkPolicyEngine.evaluate("dns.google", normalClient, policy)
+        assertTrue("Hotspot direct relay allows DoH endpoint when filters disabled", dohDecision.isAllowed)
+        assertEquals("Hotspot Direct Relay", dohDecision.reason)
+
+        assertEquals("www.google.com", NetworkPolicyEngine.resolveTargetHost("www.google.com", normalClient, policy))
+
+        // Banned client and over-cap client remain blocked even when NetGate content filters are off
+        val bannedClient = PolicyContext.forHotspotClient(clientIp = "192.168.43.50")
+        val bannedDecision = NetworkPolicyEngine.evaluate("evil.com", bannedClient, policy)
+        assertFalse("Banned client remains blocked when filters disabled", bannedDecision.isAllowed)
+        assertEquals(PolicyDecision.BlockCategory.HOTSPOT_CLIENT_BANNED, (bannedDecision as PolicyDecision.Block).category)
+
+        val overCapClient = PolicyContext.forHotspotClient(
+            clientIp = "192.168.43.60",
+            clientBytesSent = 600L,
+            clientBytesReceived = 400L
+        )
+        val capDecision = NetworkPolicyEngine.evaluate("github.com", overCapClient, policy)
+        assertFalse("Over-cap client remains blocked when filters disabled", capDecision.isAllowed)
+        assertEquals(PolicyDecision.BlockCategory.HOTSPOT_DATA_CAP, (capDecision as PolicyDecision.Block).category)
+    }
+
+    @Test
+    fun `hotspot evaluator delegates trimming and quota logic consistently and concurrent snapshot reads remain coherent`() {
+        val reasonBanned = com.example.service.HotspotPolicyEvaluator.evaluateClientBlockReason(
+            clientIp = " 192.168.43.50 ",
+            blockedIps = setOf("192.168.43.50"),
+            clientCaps = emptyMap(),
+            bytesSent = 0L,
+            bytesReceived = 0L
+        )
+        assertEquals("Blocked by NetGate Hotspot Firewall", reasonBanned)
+
+        val reasonQuota = com.example.service.HotspotPolicyEvaluator.evaluateClientBlockReason(
+            clientIp = " 192.168.43.60 ",
+            blockedIps = emptySet(),
+            clientCaps = mapOf("192.168.43.60" to 1024L),
+            bytesSent = 512L,
+            bytesReceived = 512L
+        )
+        assertEquals("Hotspot Data Cap Reached", reasonQuota)
+
+        // Concurrent snapshot swap & read verification
+        val ref = java.util.concurrent.atomic.AtomicReference(
+            NetworkPolicy(
+                websiteFilterMode = WebsiteFilterMode.BLOCKLIST,
+                whitelistedDomains = setOf("example.com"),
+                blockedDomains = setOf("malware.example.com")
+            )
+        )
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val writer = Thread {
+            repeat(500) { i ->
+                val mode = if (i % 2 == 0) WebsiteFilterMode.BLOCKLIST else WebsiteFilterMode.WHITELIST_ONLY
+                ref.set(
+                    NetworkPolicy(
+                        websiteFilterMode = mode,
+                        whitelistedDomains = setOf("example.com"),
+                        blockedDomains = setOf("malware.example.com")
+                    )
+                )
+            }
+        }
+        val readers = List(4) {
+            Thread {
+                runCatching {
+                    val ctx = PolicyContext.forFirewall()
+                    repeat(500) {
+                        val snap = ref.get()
+                        assertTrue(NetworkPolicyEngine.evaluate("docs.example.com", ctx, snap).isAllowed)
+                        assertFalse(NetworkPolicyEngine.evaluate("malware.example.com", ctx, snap).isAllowed)
+                    }
+                }.onFailure { errors.add(it) }
+            }
+        }
+        writer.start()
+        readers.forEach { it.start() }
+        writer.join()
+        readers.forEach { it.join() }
+        assertTrue("Expected zero concurrency errors: $errors", errors.isEmpty())
     }
 
     @Test

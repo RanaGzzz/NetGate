@@ -549,7 +549,12 @@ class ScreenshotGeneratorTest {
                     onQuickBlockSite = {},
                     onQuickAllowSite = {},
                     onRunSecurityAudit = {},
-                    onOpenFlaggedSitesFromAudit = {}
+                    onOpenFlaggedSitesFromAudit = {},
+                    speedTestState = com.example.data.network.SpeedTestState(),
+                    activeNetworkLabel = "Wi-Fi",
+                    onStartSpeedTest = {},
+                    onStopSpeedTest = {},
+                    onRunVideoTest = {}
                 )
             }
         }
@@ -714,7 +719,6 @@ class ScreenshotGeneratorTest {
                         onSelectFirewall = {},
                         onSelectWebsites = {},
                         onSelectDataUsage = {},
-                        onSelectSpeedTest = {},
                         onSelectDnsProtection = {}
                     )
                 }

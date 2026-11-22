@@ -252,6 +252,9 @@ class LocalFilteringProxyServer(
                     if (!sniDecision.allow) {
                         onRequestLogged(sniHost, sniDecision)
                         onTrafficRelayed(sniHost, targetPort, "HTTPS", remoteIp, peekLen.toLong(), 0L, sniDecision)
+                        if (clientIp.isNotEmpty()) {
+                            onClientTraffic(clientIp, sniHost, peekLen.toLong(), 0L, false)
+                        }
                         runCatching { upstream.close() }
                         runCatching { client.close() }
                         return
@@ -719,6 +722,17 @@ class LocalFilteringProxyServer(
         val upstreamOut = upstream.getOutputStream()
         val sentCounter = java.util.concurrent.atomic.AtomicLong(initialBytesSent)
         val recvCounter = java.util.concurrent.atomic.AtomicLong(initialBytesReceived)
+        val abortedByPolicy = AtomicBoolean(false)
+
+        fun enforceClientQuotaOrBan(): Boolean {
+            if (clientIp.isNotEmpty() && clientBlockReason(clientIp) != null) {
+                abortedByPolicy.set(true)
+                runCatching { upstream.close() }
+                runCatching { client.close() }
+                return true
+            }
+            return false
+        }
 
         // Emit initial connection registration immediately for live UI visibility
         if (initialBytesSent > 0L || initialBytesReceived > 0L) {
@@ -731,9 +745,10 @@ class LocalFilteringProxyServer(
                 }
             }
         }
+        if (enforceClientQuotaOrBan()) return
 
         val c2u = workerExecutor?.submit {
-            copyStreamWithProgress(clientIn, upstreamOut) { chunkBytes ->
+            copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy) { chunkBytes ->
                 val pending = sentCounter.addAndGet(chunkBytes)
                 if (pending >= 32_768L) {
                     val flushed = sentCounter.getAndSet(0L)
@@ -743,12 +758,13 @@ class LocalFilteringProxyServer(
                             onClientTraffic(clientIp, host, flushed, 0L, true)
                         }
                     }
+                    enforceClientQuotaOrBan()
                 }
             }
             runCatching { upstream.shutdownOutput() }
         }
         try {
-            copyStreamWithProgress(upstreamIn, clientOut) { chunkBytes ->
+            copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy) { chunkBytes ->
                 val pending = recvCounter.addAndGet(chunkBytes)
                 if (pending >= 32_768L) {
                     val flushed = recvCounter.getAndSet(0L)
@@ -758,6 +774,7 @@ class LocalFilteringProxyServer(
                             onClientTraffic(clientIp, host, 0L, flushed, true)
                         }
                     }
+                    enforceClientQuotaOrBan()
                 }
             }
             runCatching { client.shutdownOutput() }
@@ -779,11 +796,12 @@ class LocalFilteringProxyServer(
     private fun copyStreamWithProgress(
         input: InputStream,
         output: OutputStream,
+        aborted: AtomicBoolean,
         onBytes: (Long) -> Unit
     ) {
         val buf = ByteArray(16_384)
         try {
-            while (running.get()) {
+            while (running.get() && !aborted.get()) {
                 val read = input.read(buf)
                 if (read < 0) break
                 output.write(buf, 0, read)

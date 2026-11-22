@@ -32,23 +32,48 @@ data class NetworkPolicy(
     val blockedPackages: Set<String> = emptySet()
 ) {
 
-    /**
-     * Checks if [domain] is explicitly whitelisted in website rules.
-     * An explicit whitelist rule overrides blocklists, ad filters, and YouTube blocks.
-     */
-    fun isExplicitlyWhitelisted(domain: String): Boolean {
-        if (whitelistedDomains.isEmpty()) return false
-        val clean = DomainNormalizer.normalizeHost(domain)
-        return DomainNormalizer.matchesAny(clean, whitelistedDomains)
+    enum class ResolvedRuleAction {
+        ALLOW,
+        BLOCK
     }
 
     /**
-     * Checks if [domain] is in the custom website blocklist.
+     * Resolves the most-specific enabled website rule matching [domain] by walking from exact host
+     * up through parent domains.
+     *
+     * Security precedence:
+     * - A more-specific [WebsiteRuleType.BLOCK] (e.g. `malware.example.com`) overrides a broader
+     *   parent [WebsiteRuleType.ALLOW] (`example.com`).
+     * - A more-specific [WebsiteRuleType.ALLOW] (e.g. `music.youtube.com`) overrides a broader
+     *   parent [WebsiteRuleType.BLOCK] (`youtube.com`).
+     * - On an exact same-domain tie, [WebsiteRuleType.ALLOW] wins.
+     */
+    fun resolveWebsiteRuleAction(domain: String): ResolvedRuleAction? {
+        if (whitelistedDomains.isEmpty() && blockedDomains.isEmpty()) return null
+        val clean = DomainNormalizer.normalizeHost(domain)
+        if (clean.isEmpty()) return null
+        for (candidate in DomainNormalizer.parentDomainSequence(clean)) {
+            val isAllow = candidate in whitelistedDomains
+            val isBlock = candidate in blockedDomains
+            if (isAllow) return ResolvedRuleAction.ALLOW
+            if (isBlock) return ResolvedRuleAction.BLOCK
+        }
+        return null
+    }
+
+    /**
+     * Checks if [domain] resolves to an explicit website whitelist rule without being
+     * overridden by a more-specific block rule.
+     */
+    fun isExplicitlyWhitelisted(domain: String): Boolean {
+        return resolveWebsiteRuleAction(domain) == ResolvedRuleAction.ALLOW
+    }
+
+    /**
+     * Checks if [domain] resolves to a custom website block rule.
      */
     fun isBlockedByWebsiteRule(domain: String): Boolean {
-        if (blockedDomains.isEmpty()) return false
-        val clean = DomainNormalizer.normalizeHost(domain)
-        return DomainNormalizer.matchesAny(clean, blockedDomains)
+        return resolveWebsiteRuleAction(domain) == ResolvedRuleAction.BLOCK
     }
 
     companion object {

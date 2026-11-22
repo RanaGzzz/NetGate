@@ -82,7 +82,6 @@ fun FloatingFrostedNavBar(
     onSelectFirewall: () -> Unit,
     onSelectWebsites: () -> Unit,
     onSelectDataUsage: () -> Unit,
-    onSelectSpeedTest: () -> Unit,
     onSelectDnsProtection: () -> Unit,
     onSelectHotspot: () -> Unit = {},
     onSelectVpnGuard: () -> Unit = {},
@@ -205,7 +204,6 @@ fun FloatingFrostedNavBar(
         NavTabSpec(AppDestination.WEBSITES, Icons.Rounded.Public, "Website Blocker", "nav_tab_websites", onSelectWebsites),
         NavTabSpec(AppDestination.VPN_GUARD, Icons.Rounded.VpnLock, "VPN Guard", "floating_nav_vpn_guard", onSelectVpnGuard),
         NavTabSpec(AppDestination.DATA_USAGE, Icons.Rounded.BarChart, "Data Usage", "nav_tab_data_usage", onSelectDataUsage),
-        NavTabSpec(AppDestination.SPEED_TEST, Icons.Rounded.Speed, "Speed Test", "floating_nav_speed", onSelectSpeedTest),
         NavTabSpec(AppDestination.DNS, Icons.Rounded.Dns, "1.1.1.1 DNS Protection", "floating_nav_dns", onSelectDnsProtection),
         NavTabSpec(AppDestination.HOTSPOT, Icons.Rounded.WifiTethering, "Hotspot & Wi-Fi", "floating_nav_hotspot", onSelectHotspot)
     )

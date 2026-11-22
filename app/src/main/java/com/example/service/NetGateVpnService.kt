@@ -226,8 +226,8 @@ class NetGateVpnService : VpnService() {
     @Volatile
     private var isSelfDisallowedOnTunnel: Boolean = false
 
-    @Volatile
-    private var currentPolicy: NetworkPolicy = NetworkPolicy.EMPTY
+    private val policyLock = Any()
+    private val policyRef = java.util.concurrent.atomic.AtomicReference(NetworkPolicy.EMPTY)
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
     private var lastAdMatcherSignature: String? = null
@@ -401,36 +401,6 @@ class NetGateVpnService : VpnService() {
                 RulesSnapshot(appRules, websiteRules, adFilterLists, prefs)
             }.collectLatest { snapshot ->
                 val prefs = snapshot.prefs
-                latestFullPreferences = prefs
-                latestRules = snapshot.appRules
-                latestWebsiteRules = snapshot.websiteRules
-                latestWebsiteFilterMode = prefs.websiteFilterMode
-                latestBypassPackages = prefs.websiteBypassPackages
-                latestIsAdBlockerEnabled = prefs.isAdBlockerEnabled
-                latestIsEssentialPassthroughEnabled = prefs.isEssentialPassthroughEnabled
-                latestUseDohUpstream = prefs.useDohUpstream
-                latestUpstreamDnsTitle = prefs.selectedUpstreamDns.title
-                latestDohUrl = prefs.resolvedDohUrl()
-                latestUdpDnsServers = prefs.resolvedUdpDnsServers()
-                latestIsHttpsProxyEnabled = prefs.isHttpsProxyEnabled
-                latestHttpsProxyPort = prefs.httpsProxyPort.coerceIn(1024, 65535)
-                latestStripTrackingParams = prefs.isProxyStripTrackingParams
-                latestIsSafeSearchEnabled = prefs.isSafeSearchEnabled
-                latestYoutubeRestrictedMode = prefs.youtubeRestrictedMode
-                latestIsYoutubeAdBlockEnabled = prefs.isYoutubeAdBlockEnabled
-                latestSniProxyPreset = prefs.sniProxyPreset
-                latestCustomSniProxyHost = prefs.customSniProxyHost.trim()
-                latestCustomSniProxyPort = prefs.customSniProxyPort.coerceIn(1, 65535)
-                latestIsDeepMonitorEnabled = prefs.isDeepMonitorEnabled
-                latestGlobalWifiBlocked = prefs.globalWifiBlocked
-                latestDpiBypassMode = prefs.dpiBypassMode
-                latestDpiFragmentChunkSize = prefs.dpiFragmentChunkSize
-                latestDpiFragmentDelayMs = prefs.dpiFragmentDelayMs
-                latestDpiIdleKeepAliveEnabled = prefs.dpiIdleKeepAliveEnabled
-                latestBlockQuicForDpiBypass = prefs.blockQuicForDpiBypass
-                latestAntiDnsPoisonEnabled = prefs.antiDnsPoisonEnabled
-                latestDnsTransportMode = prefs.dnsTransportMode
-
                 val desiredAdSig = if (!prefs.isAdBlockerEnabled && !prefs.isYoutubeAdBlockEnabled) {
                     "OFF"
                 } else {
@@ -439,11 +409,14 @@ class NetGateVpnService : VpnService() {
                         .sortedBy { it.id }
                         .joinToString("|") { "${it.id}:${it.lastSyncedAt}:${it.domainCount}" }
                 }
-                if (desiredAdSig != lastAdMatcherSignature) {
-                    lastAdMatcherSignature = desiredAdSig
+
+                var rebuiltAdMatcher: AdBlockMatcherSnapshot? = null
+                var rebuiltAdCount = 0
+                val adMatcherChanged = desiredAdSig != lastAdMatcherSignature
+                if (adMatcherChanged) {
                     if (!prefs.isAdBlockerEnabled) {
-                        latestAdMatcherSnapshot = AdBlockMatcherSnapshot.EMPTY
-                        latestLoadedAdDomainsCount = 0
+                        rebuiltAdMatcher = AdBlockMatcherSnapshot.EMPTY
+                        rebuiltAdCount = 0
                     } else {
                         val built = withContext(Dispatchers.IO) {
                             AdBlockFilterEngine.buildMatcherSnapshot(
@@ -451,18 +424,58 @@ class NetGateVpnService : VpnService() {
                                 snapshot.adFilterLists
                             )
                         }
-                        latestAdMatcherSnapshot = built
-                        latestLoadedAdDomainsCount = built.totalBlockedCount
+                        rebuiltAdMatcher = built
+                        rebuiltAdCount = built.totalBlockedCount
                     }
                 }
 
-                currentPolicy = NetworkPolicy.fromPreferencesAndRules(
-                    prefs = prefs,
-                    websiteRules = snapshot.websiteRules,
-                    adMatcher = latestAdMatcherSnapshot,
-                    blockedUids = latestBlockedUids,
-                    blockedPackages = latestBlockedPackages
-                )
+                synchronized(policyLock) {
+                    latestFullPreferences = prefs
+                    latestRules = snapshot.appRules
+                    latestWebsiteRules = snapshot.websiteRules
+                    latestWebsiteFilterMode = prefs.websiteFilterMode
+                    latestBypassPackages = prefs.websiteBypassPackages
+                    latestIsAdBlockerEnabled = prefs.isAdBlockerEnabled
+                    latestIsEssentialPassthroughEnabled = prefs.isEssentialPassthroughEnabled
+                    latestUseDohUpstream = prefs.useDohUpstream
+                    latestUpstreamDnsTitle = prefs.selectedUpstreamDns.title
+                    latestDohUrl = prefs.resolvedDohUrl()
+                    latestUdpDnsServers = prefs.resolvedUdpDnsServers()
+                    latestIsHttpsProxyEnabled = prefs.isHttpsProxyEnabled
+                    latestHttpsProxyPort = prefs.httpsProxyPort.coerceIn(1024, 65535)
+                    latestStripTrackingParams = prefs.isProxyStripTrackingParams
+                    latestIsSafeSearchEnabled = prefs.isSafeSearchEnabled
+                    latestYoutubeRestrictedMode = prefs.youtubeRestrictedMode
+                    latestIsYoutubeAdBlockEnabled = prefs.isYoutubeAdBlockEnabled
+                    latestSniProxyPreset = prefs.sniProxyPreset
+                    latestCustomSniProxyHost = prefs.customSniProxyHost.trim()
+                    latestCustomSniProxyPort = prefs.customSniProxyPort.coerceIn(1, 65535)
+                    latestIsDeepMonitorEnabled = prefs.isDeepMonitorEnabled
+                    latestGlobalWifiBlocked = prefs.globalWifiBlocked
+                    latestDpiBypassMode = prefs.dpiBypassMode
+                    latestDpiFragmentChunkSize = prefs.dpiFragmentChunkSize
+                    latestDpiFragmentDelayMs = prefs.dpiFragmentDelayMs
+                    latestDpiIdleKeepAliveEnabled = prefs.dpiIdleKeepAliveEnabled
+                    latestBlockQuicForDpiBypass = prefs.blockQuicForDpiBypass
+                    latestAntiDnsPoisonEnabled = prefs.antiDnsPoisonEnabled
+                    latestDnsTransportMode = prefs.dnsTransportMode
+
+                    if (adMatcherChanged && rebuiltAdMatcher != null) {
+                        lastAdMatcherSignature = desiredAdSig
+                        latestAdMatcherSnapshot = rebuiltAdMatcher
+                        latestLoadedAdDomainsCount = rebuiltAdCount
+                    }
+
+                    policyRef.set(
+                        NetworkPolicy.fromPreferencesAndRules(
+                            prefs = prefs,
+                            websiteRules = snapshot.websiteRules,
+                            adMatcher = latestAdMatcherSnapshot,
+                            blockedUids = latestBlockedUids,
+                            blockedPackages = latestBlockedPackages
+                        )
+                    )
+                }
 
                 rebuildTunnel(forceRebuild = false)
             }
@@ -608,26 +621,37 @@ class NetGateVpnService : VpnService() {
     }.getOrDefault(false)
 
     private suspend fun rebuildTunnel(forceRebuild: Boolean) = tunnelMutex.withLock {
-        val prefs = latestFullPreferences
+        val prefs: FirewallPreferencesState
+        val rulesSnapshot: List<AppNetworkRuleEntity>
+        val websiteMode: WebsiteFilterMode
+        val adBlockEnabled: Boolean
+        synchronized(policyLock) {
+            prefs = latestFullPreferences
+            rulesSnapshot = latestRules
+            websiteMode = latestWebsiteFilterMode
+            adBlockEnabled = latestIsAdBlockerEnabled
+        }
         val netType = currentNetworkType
-        val websiteMode = latestWebsiteFilterMode
-        val adBlockEnabled = latestIsAdBlockerEnabled
 
         val plan = PerAppFirewallEngine.buildTunnelPlan(
             networkType = netType,
-            rules = latestRules,
+            rules = rulesSnapshot,
             preferences = prefs,
             selfPackageName = packageName,
             isPackageInstalled = ::isPackageInstalled,
             resolvePackageUid = ::resolvePackageUid
         )
 
-        latestBlockedPackages = plan.blockedPackages.toSet()
-        latestBlockedUids = plan.blockedUids
-        currentPolicy = currentPolicy.copy(
-            blockedUids = latestBlockedUids,
-            blockedPackages = latestBlockedPackages
-        )
+        synchronized(policyLock) {
+            latestBlockedPackages = plan.blockedPackages.toSet()
+            latestBlockedUids = plan.blockedUids
+            policyRef.set(
+                policyRef.get().copy(
+                    blockedUids = latestBlockedUids,
+                    blockedPackages = latestBlockedPackages
+                )
+            )
+        }
 
         // If TUN configuration hasn't changed (e.g. only upstream DNS, rule lists, or UID blocks in hybrid mode),
         // keep existing TUN running seamlessly and refresh state + notification.
@@ -924,7 +948,7 @@ class NetGateVpnService : VpnService() {
         return NetworkPolicyEngine.resolveTargetHost(
             rawHost = host,
             context = PolicyContext.forFirewall(protocol = "HTTPS"),
-            policy = currentPolicy
+            policy = policyRef.get()
         )
     }
 
@@ -1045,7 +1069,7 @@ class NetGateVpnService : VpnService() {
         return NetworkPolicyEngine.evaluate(
             rawDomain = host,
             context = PolicyContext.forFirewall(pathAndQuery = pathAndQuery, protocol = "HTTPS"),
-            policy = currentPolicy
+            policy = policyRef.get()
         ).toProxyFilterDecision()
     }
 
@@ -1204,8 +1228,9 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun isProxyClientSocketBlocked(client: java.net.Socket): Boolean {
-        val blockedUids = latestBlockedUids
-        val blockedPkgs = latestBlockedPackages
+        val policy = policyRef.get()
+        val blockedUids = policy.blockedUids
+        val blockedPkgs = policy.blockedPackages
         if ((blockedUids.isEmpty() && blockedPkgs.isEmpty()) || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return false
         }
@@ -1264,6 +1289,7 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun handleDnsQuery(query: ParsedDnsQuery, output: FileOutputStream) {
+        val policy = policyRef.get()
         val isCanary = DnsPacketFilter.isInternalBypassCanary(query.domain)
         val owner = if (!isCanary) resolveDnsQueryOwner(query) else null
         val ownerPackage = owner?.primaryPackage.orEmpty()
@@ -1275,7 +1301,7 @@ class NetGateVpnService : VpnService() {
         val decision = NetworkPolicyEngine.evaluate(
             rawDomain = query.domain,
             context = policyContext,
-            policy = currentPolicy
+            policy = policy
         )
 
         if (decision is PolicyDecision.Block) {
@@ -1380,7 +1406,7 @@ class NetGateVpnService : VpnService() {
         val safeRewrite = NetworkPolicyEngine.resolveSafeSearchRewrite(
             rawHost = query.domain,
             context = policyContext,
-            policy = currentPolicy
+            policy = policy
         )
 
         if (safeRewrite != null) {

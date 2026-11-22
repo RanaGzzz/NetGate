@@ -214,7 +214,6 @@ fun FirewallScreen(
                                         text = when (destination) {
                                             AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_title)
                                             AppDestination.WEBSITES -> stringResource(R.string.websites_title)
-                                            AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_title)
                                             AppDestination.DNS -> stringResource(R.string.dns_title)
                                             AppDestination.HOTSPOT -> stringResource(R.string.hotspot_title)
                                             AppDestination.VPN_GUARD -> stringResource(R.string.vpn_guard_title)
@@ -226,7 +225,6 @@ fun FirewallScreen(
                                         text = when (destination) {
                                             AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_subtitle)
                                             AppDestination.WEBSITES -> stringResource(R.string.websites_subtitle)
-                                            AppDestination.SPEED_TEST -> stringResource(R.string.speed_test_subtitle)
                                             AppDestination.DNS -> stringResource(R.string.dns_subtitle)
                                             AppDestination.HOTSPOT -> stringResource(R.string.hotspot_subtitle)
                                             AppDestination.VPN_GUARD -> stringResource(R.string.vpn_guard_subtitle)
@@ -292,10 +290,10 @@ fun FirewallScreen(
                                             viewModel.refreshDataUsage()
                                             if (uiState.dataUsageState.selectedSubTab == com.example.data.model.DataUsageSubTab.SECURITY_AUDIT) {
                                                 viewModel.runDeviceSecurityAudit()
+                                            } else if (uiState.dataUsageState.selectedSubTab == com.example.data.model.DataUsageSubTab.SPEED_TEST) {
+                                                viewModel.refreshConnectionDetails()
                                             }
                                         }
-                                        AppDestination.SPEED_TEST ->
-                                            viewModel.refreshConnectionDetails()
                                         AppDestination.DNS -> {
                                             viewModel.refreshConnectionDetails()
                                             viewModel.runDnsCheck()
@@ -317,7 +315,7 @@ fun FirewallScreen(
                                     imageVector = Icons.Rounded.Refresh,
                                     contentDescription = when (uiState.currentDestination) {
                                         AppDestination.DATA_USAGE -> "Sync data usage"
-                                        AppDestination.SPEED_TEST, AppDestination.DNS -> "Refresh connection status"
+                                        AppDestination.DNS -> "Refresh connection status"
                                         AppDestination.HOTSPOT -> "Refresh hotspot status"
                                         AppDestination.VPN_GUARD -> "Refresh VPNGate servers"
                                         AppDestination.FIREWALL, AppDestination.WEBSITES -> "Refresh installed apps"
@@ -387,18 +385,6 @@ fun FirewallScreen(
                                 },
                                 label = { Text(stringResource(R.string.nav_data_usage)) },
                                 modifier = Modifier.testTag("nav_rail_data_usage")
-                            )
-                            NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.SPEED_TEST,
-                                onClick = { viewModel.selectDestination(AppDestination.SPEED_TEST) },
-                                icon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Speed,
-                                        contentDescription = stringResource(R.string.nav_speed_test)
-                                    )
-                                },
-                                label = { Text(stringResource(R.string.nav_speed_test)) },
-                                modifier = Modifier.testTag("nav_rail_speed_test")
                             )
                             NavigationRailItem(
                                 selected = uiState.currentDestination == AppDestination.DNS,
@@ -518,6 +504,12 @@ fun FirewallScreen(
                         ) { destination ->
                             when (destination) {
                                 AppDestination.DATA_USAGE -> {
+                                    val activeNetLabel = when (uiState.effectiveNetworkType) {
+                                        ActiveNetworkType.WIFI -> "Wi-Fi"
+                                        ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
+                                        ActiveNetworkType.OTHER -> "Ethernet / Other"
+                                        ActiveNetworkType.NONE -> "Offline"
+                                    }
                                     DataUsageContent(
                                         state = uiState.dataUsageState,
                                         liveTelemetry = uiState.liveTelemetry,
@@ -549,7 +541,12 @@ fun FirewallScreen(
                                         onQuickBlockSite = viewModel::quickBlockSiteFromMonitor,
                                         onQuickAllowSite = viewModel::quickAllowSiteFromMonitor,
                                         onRunSecurityAudit = viewModel::runDeviceSecurityAudit,
-                                        onOpenFlaggedSitesFromAudit = viewModel::openFlaggedSitesFromAudit
+                                        onOpenFlaggedSitesFromAudit = viewModel::openFlaggedSitesFromAudit,
+                                        speedTestState = uiState.speedTestState,
+                                        activeNetworkLabel = activeNetLabel,
+                                        onStartSpeedTest = viewModel::startSpeedTest,
+                                        onStopSpeedTest = viewModel::stopSpeedTest,
+                                        onRunVideoTest = viewModel::startVideoPlaybackTest
                                     )
                                 }
 
@@ -596,21 +593,7 @@ fun FirewallScreen(
                                     )
                                 }
 
-                                AppDestination.SPEED_TEST -> {
-                                    val activeNetLabel = when (uiState.effectiveNetworkType) {
-                                        ActiveNetworkType.WIFI -> "Wi-Fi"
-                                        ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
-                                        ActiveNetworkType.OTHER -> "Ethernet / Other"
-                                        ActiveNetworkType.NONE -> "Offline"
-                                    }
-                                    SpeedTestContent(
-                                        state = uiState.speedTestState,
-                                        activeNetworkLabel = activeNetLabel,
-                                        onStartTest = viewModel::startSpeedTest,
-                                        onStopTest = viewModel::stopSpeedTest,
-                                        onRunVideoTest = viewModel::startVideoPlaybackTest
-                                    )
-                                }
+
 
                                 AppDestination.DNS -> {
                                     DnsProtectionContent(
@@ -830,7 +813,6 @@ fun FirewallScreen(
                             onSelectFirewall = { viewModel.selectDestination(AppDestination.FIREWALL) },
                             onSelectWebsites = { viewModel.selectDestination(AppDestination.WEBSITES) },
                             onSelectDataUsage = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
-                            onSelectSpeedTest = { viewModel.selectDestination(AppDestination.SPEED_TEST) },
                             onSelectDnsProtection = { viewModel.selectDestination(AppDestination.DNS) },
                             onSelectHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) },
                             onSelectVpnGuard = { viewModel.selectDestination(AppDestination.VPN_GUARD) }
