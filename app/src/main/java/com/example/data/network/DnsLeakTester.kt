@@ -1,9 +1,6 @@
 package com.example.data.network
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.os.Build
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DnsLeakCheckItem
 import com.example.data.model.DnsLeakCheckStatus
@@ -14,8 +11,6 @@ import com.example.service.AdBlockFilterEngine
 import com.example.service.VpnRuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.Inet6Address
-import java.net.InetAddress
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
@@ -27,37 +22,12 @@ object DnsLeakTester {
         vpnState: VpnRuntimeState,
         connectionDetails: ConnectionDetails
     ): DnsLeakTestState = withContext(Dispatchers.IO) {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        val vpnDnsList = mutableListOf<String>()
-        val physicalDnsList = mutableListOf<String>()
-        var hasVpnIpv6Dns = false
-        var hasVpnHttpProxy = false
-
-        if (cm != null) {
-            @Suppress("DEPRECATION")
-            val allNetworks = runCatching { cm.allNetworks }.getOrDefault(emptyArray())
-            for (net in allNetworks) {
-                val caps = cm.getNetworkCapabilities(net) ?: continue
-                val lp = runCatching { cm.getLinkProperties(net) }.getOrNull() ?: continue
-                val dnsHosts = lp.dnsServers.mapNotNull { it.hostAddress }.distinct()
-                val isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
-                    !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-
-                if (isVpn) {
-                    vpnDnsList.addAll(dnsHosts)
-                    if (lp.dnsServers.any { it is Inet6Address } ||
-                        dnsHosts.any { it.contains(':') }
-                    ) {
-                        hasVpnIpv6Dns = true
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && lp.httpProxy != null) {
-                        hasVpnHttpProxy = true
-                    }
-                } else if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                    physicalDnsList.addAll(dnsHosts)
-                }
-            }
-        }
+        // Shared network/DNS enumeration; the leak test stays an independent diagnostic feature.
+        val snapshot = NetworkSnapshotProvider.shared.snapshot(context)
+        val vpnDnsList = snapshot.vpnDnsServers()
+        val physicalDnsList = snapshot.physicalDnsServers()
+        val hasVpnIpv6Dns = snapshot.hasVpnIpv6Dns
+        val hasVpnHttpProxy = snapshot.hasVpnHttpProxy
 
         val dohUrl = prefs.resolvedDohUrl()
         val (dohLatencyMs, dohValid) = probeDohWireformat(dohUrl)

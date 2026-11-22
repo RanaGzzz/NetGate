@@ -5,8 +5,6 @@ import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
@@ -17,6 +15,7 @@ import com.example.data.model.SecurityAuditAction
 import com.example.data.model.SecurityAuditCheckItem
 import com.example.data.model.SecurityAuditStatus
 import com.example.data.model.SiteConnectionRecord
+import com.example.data.network.NetworkSnapshotProvider
 import java.io.File
 import java.net.InetAddress
 
@@ -367,9 +366,8 @@ object SecurityAuditEngine {
     }
 
     private fun checkVpnProxyAndRootIntegrity(context: Context): Pair<SecurityAuditCheckItem, Int> {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        val activeCaps = cm?.activeNetwork?.let { runCatching { cm.getNetworkCapabilities(it) }.getOrNull() }
-        val vpnActive = activeCaps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        val snapshot = NetworkSnapshotProvider.shared.snapshot(context)
+        val vpnActive = snapshot.activeNetwork?.capabilities?.hasVpnTransport == true
         val netGateRunning = NetGateVpnService.runtimeState.value.isServiceRunning
         val foreignVpn = vpnActive && !netGateRunning
 

@@ -2,11 +2,9 @@ package com.example.service
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import android.net.TrafficStats
 import com.example.data.model.ActiveNetworkType
+import com.example.data.network.NetworkSnapshotProvider
 import com.example.data.model.LiveNetworkTelemetry
 import com.example.data.model.ThroughputSample
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -322,20 +320,14 @@ object SystemNetworkMonitor {
     )
 
     private fun readSystemNetworkCounters(context: Context): CounterSnapshot {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        val physicalNetwork = findBestPhysicalNetwork(cm)
-        val caps = physicalNetwork?.let { runCatching { cm?.getNetworkCapabilities(it) }.getOrNull() }
-        val linkProps = physicalNetwork?.let { runCatching { cm?.getLinkProperties(it) }.getOrNull() }
+        // The 1 s cadence is unchanged; the shared cache only collapses duplicate captures taken
+        // within the same tick. TrafficStats remains the only counter source here
+        // (NetworkStatsManager stays hotspot-only).
+        val snapshot = NetworkSnapshotProvider.shared.snapshot(context)
+        val physicalNetwork = snapshot.activePhysicalNetwork()
+        val networkType = snapshot.activeNetworkType()
 
-        val networkType = when {
-            caps == null -> ActiveNetworkType.NONE
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> ActiveNetworkType.WIFI
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> ActiveNetworkType.MOBILE_DATA
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> ActiveNetworkType.OTHER
-            else -> ActiveNetworkType.OTHER
-        }
-
-        val iface = linkProps?.interfaceName?.takeIf { it.isNotBlank() && !it.startsWith("tun") }
+        val iface = physicalNetwork?.interfaceName?.takeIf { it.isNotBlank() && !it.startsWith("tun") }
         val ifaceRx = if (iface != null) {
             runCatching { TrafficStats.getRxBytes(iface) }.getOrDefault(TrafficStats.UNSUPPORTED.toLong())
         } else {
@@ -367,38 +359,6 @@ object SystemNetworkMonitor {
             networkType = networkType,
             interfaceName = resolvedIface
         )
-    }
-
-    @Suppress("DEPRECATION")
-    private fun findBestPhysicalNetwork(cm: ConnectivityManager?): Network? {
-        if (cm == null) return null
-        val active = cm.activeNetwork
-        val activeCaps = active?.let { runCatching { cm.getNetworkCapabilities(it) }.getOrNull() }
-        if (active != null && activeCaps != null &&
-            activeCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
-            activeCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        ) {
-            return active
-        }
-
-        val candidates = runCatching { cm.allNetworks.toList() }.getOrDefault(emptyList())
-        var cellularFallback: Network? = null
-        var otherFallback: Network? = null
-        for (net in candidates) {
-            val caps = runCatching { cm.getNetworkCapabilities(net) }.getOrNull() ?: continue
-            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
-            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
-            when {
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> return net
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
-                    if (cellularFallback == null) cellularFallback = net
-                }
-                else -> {
-                    if (otherFallback == null) otherFallback = net
-                }
-            }
-        }
-        return cellularFallback ?: otherFallback
     }
 
     fun currentLocalDayKey(timestampMs: Long): Long {

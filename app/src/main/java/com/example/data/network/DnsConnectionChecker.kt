@@ -1,8 +1,6 @@
 package com.example.data.network
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import com.example.data.model.ActiveNetworkType
 import com.example.data.model.ConnectionDetails
 import com.example.data.model.DnsCheckState
@@ -86,27 +84,10 @@ object DnsConnectionChecker {
         vpnState: VpnRuntimeState,
         connectionDetails: ConnectionDetails
     ): DnsCheckState = withContext(Dispatchers.IO) {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        val vpnDnsList = mutableListOf<String>()
-        val physicalDnsList = mutableListOf<String>()
-
-        if (cm != null) {
-            @Suppress("DEPRECATION")
-            val allNetworks = runCatching { cm.allNetworks }.getOrDefault(emptyArray())
-            for (net in allNetworks) {
-                val caps = cm.getNetworkCapabilities(net) ?: continue
-                val lp = runCatching { cm.getLinkProperties(net) }.getOrNull() ?: continue
-                val dnsHosts = lp.dnsServers.mapNotNull { it.hostAddress }.distinct()
-                val isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
-                    !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-
-                if (isVpn) {
-                    vpnDnsList.addAll(dnsHosts)
-                } else if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                    physicalDnsList.addAll(dnsHosts)
-                }
-            }
-        }
+        // Shared network/DNS enumeration: VPN vs physical interfaces are separated by the snapshot.
+        val snapshot = NetworkSnapshotProvider.shared.snapshot(context)
+        val vpnDnsList = snapshot.vpnDnsServers()
+        val physicalDnsList = snapshot.physicalDnsServers()
 
         val combinedPhysical = (physicalDnsList + connectionDetails.dnsServers).distinct()
 
