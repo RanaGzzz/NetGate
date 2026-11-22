@@ -84,6 +84,10 @@ object HotspotProxyManager {
     @Volatile
     private var latestAdMatcher: AdBlockMatcherSnapshot = AdBlockMatcherSnapshot.EMPTY
 
+    @Volatile
+    private var currentPolicy: com.example.service.policy.NetworkPolicy =
+        com.example.service.policy.NetworkPolicy.EMPTY
+
     private val _runtimeState = MutableStateFlow(HotspotProxyRuntimeState())
     val runtimeState: StateFlow<HotspotProxyRuntimeState> = _runtimeState.asStateFlow()
 
@@ -95,16 +99,31 @@ object HotspotProxyManager {
         latestPrefs = prefs
         latestWebsiteRules = websiteRules
         latestAdMatcher = adMatcher
+        currentPolicy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
+            prefs = prefs,
+            websiteRules = websiteRules,
+            adMatcher = adMatcher
+        )
         publishSnapshot()
     }
 
     fun updatePreferencesOnly(prefs: FirewallPreferencesState) {
         latestPrefs = prefs
+        currentPolicy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
+            prefs = prefs,
+            websiteRules = latestWebsiteRules,
+            adMatcher = latestAdMatcher
+        )
         publishSnapshot()
     }
 
     fun startOrUpdate(context: Context, prefs: FirewallPreferencesState): Boolean {
         latestPrefs = prefs
+        currentPolicy = com.example.service.policy.NetworkPolicy.fromPreferencesAndRules(
+            prefs = prefs,
+            websiteRules = latestWebsiteRules,
+            adMatcher = latestAdMatcher
+        )
         val port = prefs.hotspotProxyPort.coerceIn(1024, 65535)
         synchronized(lock) {
             val existing = proxyServer
@@ -196,77 +215,36 @@ object HotspotProxyManager {
     }
 
     private fun evaluateClientBlock(clientIp: String): String? {
-        val prefs = latestPrefs
         val stats = clientStatsMap[clientIp]
         val sent = stats?.bytesSent?.get() ?: 0L
         val recv = stats?.bytesReceived?.get() ?: 0L
-        return HotspotPolicyEvaluator.evaluateClientBlockReason(
+        return com.example.service.policy.NetworkPolicyEngine.evaluateHotspotClientBlock(
             clientIp = clientIp,
-            blockedIps = prefs.hotspotBlockedClientIps,
-            clientCaps = prefs.hotspotClientCaps,
             bytesSent = sent,
-            bytesReceived = recv
+            bytesReceived = recv,
+            policy = currentPolicy
         )
     }
 
     private fun evaluateRequestForHotspot(host: String, pathAndQuery: String?): ProxyFilterDecision {
-        val prefs = latestPrefs
-        if (!prefs.hotspotApplyNetGateFilters) {
-            return ProxyFilterDecision(allow = true, reason = "Hotspot Direct Relay")
-        }
-
-        val domain = host.trim().trimEnd('.').lowercase()
-        val rules = latestWebsiteRules
-        val mode = prefs.websiteFilterMode
-        val isWhitelisted = rules.any {
-            it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
-                DnsPacketFilter.matchesDomainRule(domain, it.domain)
-        }
-
-        if (!isWhitelisted && mode != WebsiteFilterMode.OFF) {
-            if (DnsPacketFilter.shouldBlockDomain(domain, mode, rules)) {
-                val reason = if (mode == WebsiteFilterMode.WHITELIST_ONLY) {
-                    "Hotspot Whitelist Lockdown"
-                } else {
-                    "Hotspot Website Blocklist"
-                }
-                return ProxyFilterDecision(allow = false, reason = reason, isAdBlock = false)
-            }
-        }
-
-        val adMatcher = latestAdMatcher
-        if (prefs.isEssentialPassthroughEnabled && adMatcher.isEssentialPassthrough(domain)) {
-            return ProxyFilterDecision(allow = true, reason = "Hotspot Passthrough")
-        }
-
-        if (!isWhitelisted && prefs.isYoutubeAdBlockEnabled) {
-            if (AdBlockFilterEngine.isYoutubeAdDomain(domain) ||
-                AdBlockFilterEngine.isYoutubeAdUrlPath(pathAndQuery)
-            ) {
-                return ProxyFilterDecision(allow = false, reason = "Hotspot YouTube Ad Block", isAdBlock = true)
-            }
-        }
-
-        if (!isWhitelisted && prefs.isAdBlockerEnabled) {
-            if (adMatcher.isBlockedByAdFilter(domain) ||
-                AdBlockFilterEngine.isAdOrTrackerUrlPath(pathAndQuery)
-            ) {
-                return ProxyFilterDecision(allow = false, reason = "Hotspot Ad Blocker", isAdBlock = true)
-            }
-        }
-
-        return ProxyFilterDecision(allow = true, reason = "Hotspot Proxy Allowed")
+        val context = com.example.service.policy.PolicyContext.forHotspot(
+            clientIp = "",
+            pathAndQuery = pathAndQuery
+        )
+        return com.example.service.policy.NetworkPolicyEngine.evaluate(
+            rawDomain = host,
+            context = context,
+            policy = currentPolicy
+        ).toProxyFilterDecision()
     }
 
     private fun resolveTargetHostForHotspot(host: String): String {
-        val prefs = latestPrefs
-        if (!prefs.hotspotApplyNetGateFilters) return host
-        val rewrite = DnsPacketFilter.resolveSafeSearchAlias(
-            domain = host,
-            safeSearchEnabled = prefs.isSafeSearchEnabled,
-            youtubeRestrictedMode = prefs.youtubeRestrictedMode
+        val context = com.example.service.policy.PolicyContext.forHotspot(clientIp = "")
+        return com.example.service.policy.NetworkPolicyEngine.resolveTargetHost(
+            rawHost = host,
+            context = context,
+            policy = currentPolicy
         )
-        return rewrite?.aliasDomain ?: host
     }
 
     private fun provideUpstreamProxy(): Pair<String, Int>? {

@@ -280,31 +280,11 @@ object DnsPacketFilter {
     }
 
     fun normalizeDomainInput(raw: String): String? {
-        var cleaned = raw.trim().lowercase()
-        if (cleaned.isEmpty()) return null
-
-        cleaned = cleaned
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .substringBefore('/')
-            .substringBefore('?')
-            .substringBefore('#')
-            .substringBefore(':')
-            .removePrefix("*.")
-            .removePrefix("www.")
-            .trim('.')
-
-        if (cleaned.length !in 3..253 || !cleaned.contains('.')) return null
-        val labels = cleaned.split('.')
-        if (labels.size < 2 || labels.any { !LABEL_REGEX.matches(it) }) return null
-        return cleaned
+        return com.example.service.policy.DomainNormalizer.normalize(raw)
     }
 
     fun matchesDomainRule(queriedDomain: String, ruleDomain: String): Boolean {
-        val q = queriedDomain.trim().trimEnd('.').lowercase()
-        val r = ruleDomain.trim().trimEnd('.').lowercase()
-        if (q.isEmpty() || r.isEmpty()) return false
-        return q == r || q.endsWith(".$r")
+        return com.example.service.policy.DomainNormalizer.matchesRule(queriedDomain, ruleDomain)
     }
 
     fun isInternalBypassCanary(domain: String): Boolean {

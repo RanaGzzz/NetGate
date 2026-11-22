@@ -35,6 +35,11 @@ import com.example.data.model.SniProxyPreset
 import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.YouTubeRestrictedMode
+import com.example.service.policy.DomainNormalizer
+import com.example.service.policy.NetworkPolicy
+import com.example.service.policy.NetworkPolicyEngine
+import com.example.service.policy.PolicyContext
+import com.example.service.policy.PolicyDecision
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -220,6 +225,9 @@ class NetGateVpnService : VpnService() {
 
     @Volatile
     private var isSelfDisallowedOnTunnel: Boolean = false
+
+    @Volatile
+    private var currentPolicy: NetworkPolicy = NetworkPolicy.EMPTY
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
     private var lastAdMatcherSignature: String? = null
@@ -448,6 +456,14 @@ class NetGateVpnService : VpnService() {
                     }
                 }
 
+                currentPolicy = NetworkPolicy.fromPreferencesAndRules(
+                    prefs = prefs,
+                    websiteRules = snapshot.websiteRules,
+                    adMatcher = latestAdMatcherSnapshot,
+                    blockedUids = latestBlockedUids,
+                    blockedPackages = latestBlockedPackages
+                )
+
                 rebuildTunnel(forceRebuild = false)
             }
         }
@@ -608,6 +624,10 @@ class NetGateVpnService : VpnService() {
 
         latestBlockedPackages = plan.blockedPackages.toSet()
         latestBlockedUids = plan.blockedUids
+        currentPolicy = currentPolicy.copy(
+            blockedUids = latestBlockedUids,
+            blockedPackages = latestBlockedPackages
+        )
 
         // If TUN configuration hasn't changed (e.g. only upstream DNS, rule lists, or UID blocks in hybrid mode),
         // keep existing TUN running seamlessly and refresh state + notification.
@@ -901,12 +921,11 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun resolveProxyTargetHost(host: String): String {
-        val rewrite = DnsPacketFilter.resolveSafeSearchAlias(
-            domain = host,
-            safeSearchEnabled = latestIsSafeSearchEnabled,
-            youtubeRestrictedMode = latestYoutubeRestrictedMode
+        return NetworkPolicyEngine.resolveTargetHost(
+            rawHost = host,
+            context = PolicyContext.forFirewall(protocol = "HTTPS"),
+            policy = currentPolicy
         )
-        return rewrite?.aliasDomain ?: host
     }
 
     private fun resolveProxyTargetAddresses(host: String): List<InetAddress> {
@@ -1023,55 +1042,11 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun evaluateProxyRequest(host: String, pathAndQuery: String?): ProxyFilterDecision {
-        val domain = host.trim().trimEnd('.').lowercase()
-        val websiteRules = latestWebsiteRules
-        val websiteMode = latestWebsiteFilterMode
-        val isExplicitlyWhitelisted = websiteRules.any {
-            it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
-                DnsPacketFilter.matchesDomainRule(domain, it.domain)
-        }
-
-        if (!isExplicitlyWhitelisted && websiteMode != WebsiteFilterMode.OFF) {
-            val blockedBySiteRule = DnsPacketFilter.shouldBlockDomain(
-                domain = domain,
-                mode = websiteMode,
-                rules = websiteRules
-            )
-            if (blockedBySiteRule) {
-                val reason = if (websiteMode == WebsiteFilterMode.WHITELIST_ONLY) {
-                    "Whitelist Lockdown"
-                } else {
-                    "Website Blocklist"
-                }
-                return ProxyFilterDecision(allow = false, reason = reason, isAdBlock = false)
-            }
-        }
-
-        val adMatcher = latestAdMatcherSnapshot
-        val isPassthrough = latestIsEssentialPassthroughEnabled &&
-            adMatcher.isEssentialPassthrough(domain)
-        if (isPassthrough) {
-            return ProxyFilterDecision(allow = true, reason = "Essential Passthrough")
-        }
-
-        if (!isExplicitlyWhitelisted && latestIsYoutubeAdBlockEnabled) {
-            if (AdBlockFilterEngine.isYoutubeAdDomain(domain) ||
-                AdBlockFilterEngine.isYoutubeAdUrlPath(pathAndQuery)
-            ) {
-                return ProxyFilterDecision(allow = false, reason = "YouTube Ad Blocker", isAdBlock = true)
-            }
-        }
-
-        if (!isExplicitlyWhitelisted && (latestIsAdBlockerEnabled || latestIsHttpsProxyEnabled)) {
-            if (adMatcher.isBlockedByAdFilter(domain)) {
-                return ProxyFilterDecision(allow = false, reason = "HTTPS Ad/Tracker Domain", isAdBlock = true)
-            }
-            if (AdBlockFilterEngine.isAdOrTrackerUrlPath(pathAndQuery)) {
-                return ProxyFilterDecision(allow = false, reason = "HTTPS Ad/Tracker Path", isAdBlock = true)
-            }
-        }
-
-        return ProxyFilterDecision(allow = true, reason = "SNI Proxy (${latestSniProxyPreset.title})")
+        return NetworkPolicyEngine.evaluate(
+            rawDomain = host,
+            context = PolicyContext.forFirewall(pathAndQuery = pathAndQuery, protocol = "HTTPS"),
+            policy = currentPolicy
+        ).toProxyFilterDecision()
     }
 
     private fun handleProxyLogged(host: String, decision: ProxyFilterDecision) {
@@ -1292,58 +1267,73 @@ class NetGateVpnService : VpnService() {
         val isCanary = DnsPacketFilter.isInternalBypassCanary(query.domain)
         val owner = if (!isCanary) resolveDnsQueryOwner(query) else null
         val ownerPackage = owner?.primaryPackage.orEmpty()
-        val isAppBlockedByUid = owner != null && (
-            owner.uid in latestBlockedUids ||
-                owner.packages.any { it in latestBlockedPackages }
-            )
-        if (isAppBlockedByUid) {
+        val policyContext = PolicyContext.forFirewall(
+            appPackage = ownerPackage.takeIf { it.isNotEmpty() },
+            appUid = owner?.uid,
+            protocol = "DNS"
+        )
+        val decision = NetworkPolicyEngine.evaluate(
+            rawDomain = query.domain,
+            context = policyContext,
+            policy = currentPolicy
+        )
+
+        if (decision is PolicyDecision.Block) {
             sendNxDomain(query, output)
-            if (!isCanary) {
-                blockedDnsCount.incrementAndGet()
-                recordBlockedDomain(query.domain)
-                recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_APP, "App Firewall")
-                if (latestIsDeepMonitorEnabled) {
-                    ConnectionMonitorHub.recordConnection(
-                        context = applicationContext,
-                        domain = query.domain,
-                        remoteIp = "",
-                        remotePort = 53,
-                        protocol = "DNS",
-                        appPackage = ownerPackage,
-                        bytesSent = query.dnsPayload.size.toLong(),
-                        bytesReceived = 0L,
-                        actionStatus = "BLOCKED"
-                    )
-                }
-                publishDnsStatsOnly()
-            }
-            return
-        }
-
-        val websiteRules = latestWebsiteRules
-        val websiteMode = latestWebsiteFilterMode
-        val isExplicitlyWhitelisted = websiteRules.any {
-            it.isEnabled && it.ruleType == WebsiteRuleType.ALLOW &&
-                DnsPacketFilter.matchesDomainRule(query.domain, it.domain)
-        }
-
-        if (!isExplicitlyWhitelisted && websiteMode != WebsiteFilterMode.OFF) {
-            val blockedBySiteRule = DnsPacketFilter.shouldBlockDomain(
-                domain = query.domain,
-                mode = websiteMode,
-                rules = websiteRules
-            )
-            if (blockedBySiteRule) {
-                sendNxDomain(query, output)
-                if (!isCanary) {
-                    blockedDnsCount.incrementAndGet()
-                    recordBlockedDomain(query.domain)
-                    val reason = if (websiteMode == WebsiteFilterMode.WHITELIST_ONLY) {
-                        "Whitelist Lockdown"
-                    } else {
-                        "Website Blocklist"
+            when (decision.category) {
+                PolicyDecision.BlockCategory.APP_FIREWALL -> {
+                    if (!isCanary) {
+                        blockedDnsCount.incrementAndGet()
+                        recordBlockedDomain(query.domain)
+                        recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_APP, decision.reason)
+                        if (latestIsDeepMonitorEnabled) {
+                            ConnectionMonitorHub.recordConnection(
+                                context = applicationContext,
+                                domain = query.domain,
+                                remoteIp = "",
+                                remotePort = 53,
+                                protocol = "DNS",
+                                appPackage = ownerPackage,
+                                bytesSent = query.dnsPayload.size.toLong(),
+                                bytesReceived = 0L,
+                                actionStatus = "BLOCKED"
+                            )
+                        }
+                        publishDnsStatsOnly()
                     }
-                    recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_WEBSITE, reason)
+                }
+                PolicyDecision.BlockCategory.WEBSITE_BLOCKLIST,
+                PolicyDecision.BlockCategory.WHITELIST_LOCKDOWN -> {
+                    if (!isCanary) {
+                        blockedDnsCount.incrementAndGet()
+                        recordBlockedDomain(query.domain)
+                        recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_WEBSITE, decision.reason)
+                        if (latestIsDeepMonitorEnabled) {
+                            ConnectionMonitorHub.recordConnection(
+                                context = applicationContext,
+                                domain = query.domain,
+                                remoteIp = "",
+                                remotePort = 53,
+                                protocol = "DNS",
+                                appPackage = ownerPackage,
+                                bytesSent = query.dnsPayload.size.toLong(),
+                                bytesReceived = 0L,
+                                actionStatus = "BLOCKED"
+                            )
+                        }
+                        publishDnsStatsOnly()
+                    }
+                }
+                PolicyDecision.BlockCategory.DOH_BYPASS_CANARY -> {
+                    // Internal bypass canary dropped silently
+                }
+                PolicyDecision.BlockCategory.YOUTUBE_AD,
+                PolicyDecision.BlockCategory.AD_TRACKER -> {
+                    blockedDnsCount.incrementAndGet()
+                    blockedAdsCount.incrementAndGet()
+                    scheduleFlushLifetimeAds()
+                    recordBlockedDomain(query.domain)
+                    recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, decision.reason)
                     if (latestIsDeepMonitorEnabled) {
                         ConnectionMonitorHub.recordConnection(
                             context = applicationContext,
@@ -1354,80 +1344,24 @@ class NetGateVpnService : VpnService() {
                             appPackage = ownerPackage,
                             bytesSent = query.dnsPayload.size.toLong(),
                             bytesReceived = 0L,
-                            actionStatus = "BLOCKED"
+                            actionStatus = "BLOCKED",
+                            isAdBlocked = true
                         )
                     }
                     publishDnsStatsOnly()
                 }
-                return
+                else -> {
+                    blockedDnsCount.incrementAndGet()
+                    publishDnsStatsOnly()
+                }
             }
-        }
-
-        // Disable Chrome/Firefox auto-DoH probing whenever DNS Proxy is active (Website or Ad Blocker)
-        if (!isExplicitlyWhitelisted && isCanary) {
-            sendNxDomain(query, output)
             return
         }
 
-        val adMatcher = latestAdMatcherSnapshot
-        val isPassthrough = latestIsEssentialPassthroughEnabled &&
-            adMatcher.isEssentialPassthrough(query.domain)
+        val isWhitelisted = (decision as? PolicyDecision.Allow)?.isWhitelisted ?: false
+        val isPassthrough = (decision as? PolicyDecision.Allow)?.isPassthrough ?: false
 
-        if (!isExplicitlyWhitelisted && !isPassthrough && latestIsYoutubeAdBlockEnabled) {
-            if (AdBlockFilterEngine.isYoutubeAdDomain(query.domain)) {
-                sendNxDomain(query, output)
-                blockedDnsCount.incrementAndGet()
-                blockedAdsCount.incrementAndGet()
-                scheduleFlushLifetimeAds()
-                recordBlockedDomain(query.domain)
-                recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, "YouTube Ad Blocker")
-                if (latestIsDeepMonitorEnabled) {
-                    ConnectionMonitorHub.recordConnection(
-                        context = applicationContext,
-                        domain = query.domain,
-                        remoteIp = "",
-                        remotePort = 53,
-                        protocol = "DNS",
-                        appPackage = ownerPackage,
-                        bytesSent = query.dnsPayload.size.toLong(),
-                        bytesReceived = 0L,
-                        actionStatus = "BLOCKED",
-                        isAdBlocked = true
-                    )
-                }
-                publishDnsStatsOnly()
-                return
-            }
-        }
-
-        if (!isExplicitlyWhitelisted && !isPassthrough && latestIsAdBlockerEnabled) {
-            if (adMatcher.isBlockedByAdFilter(query.domain)) {
-                sendNxDomain(query, output)
-                blockedDnsCount.incrementAndGet()
-                blockedAdsCount.incrementAndGet()
-                scheduleFlushLifetimeAds()
-                recordBlockedDomain(query.domain)
-                recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, "Ad & Tracker Filter")
-                if (latestIsDeepMonitorEnabled) {
-                    ConnectionMonitorHub.recordConnection(
-                        context = applicationContext,
-                        domain = query.domain,
-                        remoteIp = "",
-                        remotePort = 53,
-                        protocol = "DNS",
-                        appPackage = ownerPackage,
-                        bytesSent = query.dnsPayload.size.toLong(),
-                        bytesReceived = 0L,
-                        actionStatus = "BLOCKED",
-                        isAdBlocked = true
-                    )
-                }
-                publishDnsStatsOnly()
-                return
-            }
-        }
-
-        if (!isExplicitlyWhitelisted &&
+        if (!isWhitelisted &&
             latestDpiBypassMode != DpiBypassMode.OFF &&
             latestBlockQuicForDpiBypass &&
             DnsPacketFilter.extractQueryType(query) == 65
@@ -1443,15 +1377,11 @@ class NetGateVpnService : VpnService() {
             return
         }
 
-        val safeRewrite = if (!isExplicitlyWhitelisted) {
-            DnsPacketFilter.resolveSafeSearchAlias(
-                domain = query.domain,
-                safeSearchEnabled = latestIsSafeSearchEnabled,
-                youtubeRestrictedMode = latestYoutubeRestrictedMode
-            )
-        } else {
-            null
-        }
+        val safeRewrite = NetworkPolicyEngine.resolveSafeSearchRewrite(
+            rawHost = query.domain,
+            context = policyContext,
+            policy = currentPolicy
+        )
 
         if (safeRewrite != null) {
             val rewrittenPayload = DnsPacketFilter.buildRewrittenQueryPayload(query, safeRewrite.aliasDomain)
