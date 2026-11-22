@@ -35,6 +35,10 @@ import com.example.data.model.SniProxyPreset
 import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.YouTubeRestrictedMode
+import com.example.service.dns.DnsEngine
+import com.example.service.dns.DnsOutcome
+import com.example.service.dns.DnsResolutionContext
+import com.example.service.dns.DnsSocketPolicy
 import com.example.service.policy.DomainNormalizer
 import com.example.service.policy.NetworkPolicy
 import com.example.service.policy.NetworkPolicyEngine
@@ -57,12 +61,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -228,6 +229,7 @@ class NetGateVpnService : VpnService() {
 
     private val policyLock = Any()
     private val policyRef = java.util.concurrent.atomic.AtomicReference(NetworkPolicy.EMPTY)
+    private val dnsEngine = DnsEngine()
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
     private var lastAdMatcherSignature: String? = null
@@ -974,7 +976,7 @@ class NetGateVpnService : VpnService() {
         // Query A (IPv4) first via NetGate's DoH / DoTCP / Anti-Poisoned DNS so blocked/poisoned
         // domains still resolve cleanly and never stall on unreachable IPv6 routes.
         val ipv4Query = buildRawDnsQuery(cleanHost, qType = 1)
-        val aResp = resolveDnsUpstream(ipv4Query, cleanHost).first
+        val aResp = dnsEngine.resolveRaw(ipv4Query, cleanHost, buildDnsResolutionContext()).payload
         if (aResp != null) {
             val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(aResp)
             val safeIps = if (antiPoison && DpiBypassEngine.isLikelyForgedDnsResponse(cleanHost, ips)) {
@@ -989,7 +991,7 @@ class NetGateVpnService : VpnService() {
 
         if (resolved.isEmpty()) {
             val ipv6Query = buildRawDnsQuery(cleanHost, qType = 28)
-            val aaaaResp = resolveDnsUpstream(ipv6Query, cleanHost).first
+            val aaaaResp = dnsEngine.resolveRaw(ipv6Query, cleanHost, buildDnsResolutionContext()).payload
             if (aaaaResp != null) {
                 val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(aaaaResp)
                 val safeIps = if (antiPoison && DpiBypassEngine.isLikelyForgedDnsResponse(cleanHost, ips)) {
@@ -1108,7 +1110,7 @@ class NetGateVpnService : VpnService() {
                         BlockedPacketAction.REJECT_DNS_NXDOMAIN -> {
                             val dnsQuery = DnsPacketFilter.parseUdpDnsQuery(buffer, bytesRead)
                             if (dnsQuery != null) {
-                                sendNxDomain(dnsQuery, output)
+                                writeToTun(dnsEngine.buildBlockedResponse(dnsQuery), output)
                                 recordInterceptedAppPacket(
                                     parsed = parsed,
                                     domainOrHost = dnsQuery.domain,
@@ -1298,20 +1300,78 @@ class NetGateVpnService : VpnService() {
             appUid = owner?.uid,
             protocol = "DNS"
         )
-        val decision = NetworkPolicyEngine.evaluate(
-            rawDomain = query.domain,
-            context = policyContext,
-            policy = policy
+
+        val outcome = dnsEngine.process(
+            query = query,
+            policy = policy,
+            policyContext = policyContext,
+            resolutionContext = buildDnsResolutionContext(),
+            quicDowngradeEnabled = latestDpiBypassMode != DpiBypassMode.OFF &&
+                latestBlockQuicForDpiBypass
         )
 
-        if (decision is PolicyDecision.Block) {
-            sendNxDomain(query, output)
-            when (decision.category) {
-                PolicyDecision.BlockCategory.APP_FIREWALL -> {
-                    if (!isCanary) {
+        val poisonTrips = outcomeAntiPoisonTrips(outcome)
+        if (poisonTrips > 0) {
+            antiDnsPoisonCount.addAndGet(poisonTrips.toLong())
+        }
+
+        when (outcome) {
+            is DnsOutcome.Blocked -> {
+                writeToTun(outcome.responsePacket, output)
+                when (outcome.category) {
+                    PolicyDecision.BlockCategory.APP_FIREWALL -> {
+                        if (!isCanary) {
+                            blockedDnsCount.incrementAndGet()
+                            recordBlockedDomain(query.domain)
+                            recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_APP, outcome.reason)
+                            if (latestIsDeepMonitorEnabled) {
+                                ConnectionMonitorHub.recordConnection(
+                                    context = applicationContext,
+                                    domain = query.domain,
+                                    remoteIp = "",
+                                    remotePort = 53,
+                                    protocol = "DNS",
+                                    appPackage = ownerPackage,
+                                    bytesSent = query.dnsPayload.size.toLong(),
+                                    bytesReceived = 0L,
+                                    actionStatus = "BLOCKED"
+                                )
+                            }
+                            publishDnsStatsOnly()
+                        }
+                    }
+                    PolicyDecision.BlockCategory.WEBSITE_BLOCKLIST,
+                    PolicyDecision.BlockCategory.WHITELIST_LOCKDOWN -> {
+                        if (!isCanary) {
+                            blockedDnsCount.incrementAndGet()
+                            recordBlockedDomain(query.domain)
+                            recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_WEBSITE, outcome.reason)
+                            if (latestIsDeepMonitorEnabled) {
+                                ConnectionMonitorHub.recordConnection(
+                                    context = applicationContext,
+                                    domain = query.domain,
+                                    remoteIp = "",
+                                    remotePort = 53,
+                                    protocol = "DNS",
+                                    appPackage = ownerPackage,
+                                    bytesSent = query.dnsPayload.size.toLong(),
+                                    bytesReceived = 0L,
+                                    actionStatus = "BLOCKED"
+                                )
+                            }
+                            publishDnsStatsOnly()
+                        }
+                    }
+                    PolicyDecision.BlockCategory.DOH_BYPASS_CANARY -> {
+                        // Internal bypass canary dropped silently
+                    }
+                    PolicyDecision.BlockCategory.YOUTUBE_AD,
+                    PolicyDecision.BlockCategory.AD_TRACKER -> {
                         blockedDnsCount.incrementAndGet()
+                        blockedAdsCount.incrementAndGet()
+                        scheduleFlushLifetimeAds()
                         recordBlockedDomain(query.domain)
-                        recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_APP, decision.reason)
+                        recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, outcome.reason)
                         if (latestIsDeepMonitorEnabled) {
                             ConnectionMonitorHub.recordConnection(
                                 context = applicationContext,
@@ -1322,301 +1382,101 @@ class NetGateVpnService : VpnService() {
                                 appPackage = ownerPackage,
                                 bytesSent = query.dnsPayload.size.toLong(),
                                 bytesReceived = 0L,
-                                actionStatus = "BLOCKED"
+                                actionStatus = "BLOCKED",
+                                isAdBlocked = true
                             )
                         }
                         publishDnsStatsOnly()
                     }
-                }
-                PolicyDecision.BlockCategory.WEBSITE_BLOCKLIST,
-                PolicyDecision.BlockCategory.WHITELIST_LOCKDOWN -> {
-                    if (!isCanary) {
+                    else -> {
                         blockedDnsCount.incrementAndGet()
-                        recordBlockedDomain(query.domain)
-                        recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_WEBSITE, decision.reason)
-                        if (latestIsDeepMonitorEnabled) {
-                            ConnectionMonitorHub.recordConnection(
-                                context = applicationContext,
-                                domain = query.domain,
-                                remoteIp = "",
-                                remotePort = 53,
-                                protocol = "DNS",
-                                appPackage = ownerPackage,
-                                bytesSent = query.dnsPayload.size.toLong(),
-                                bytesReceived = 0L,
-                                actionStatus = "BLOCKED"
-                            )
-                        }
                         publishDnsStatsOnly()
                     }
                 }
-                PolicyDecision.BlockCategory.DOH_BYPASS_CANARY -> {
-                    // Internal bypass canary dropped silently
-                }
-                PolicyDecision.BlockCategory.YOUTUBE_AD,
-                PolicyDecision.BlockCategory.AD_TRACKER -> {
-                    blockedDnsCount.incrementAndGet()
-                    blockedAdsCount.incrementAndGet()
-                    scheduleFlushLifetimeAds()
-                    recordBlockedDomain(query.domain)
-                    recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, decision.reason)
-                    if (latestIsDeepMonitorEnabled) {
-                        ConnectionMonitorHub.recordConnection(
-                            context = applicationContext,
-                            domain = query.domain,
-                            remoteIp = "",
-                            remotePort = 53,
-                            protocol = "DNS",
-                            appPackage = ownerPackage,
-                            bytesSent = query.dnsPayload.size.toLong(),
-                            bytesReceived = 0L,
-                            actionStatus = "BLOCKED",
-                            isAdBlocked = true
-                        )
-                    }
-                    publishDnsStatsOnly()
-                }
-                else -> {
-                    blockedDnsCount.incrementAndGet()
-                    publishDnsStatsOnly()
-                }
             }
-            return
-        }
 
-        val isWhitelisted = (decision as? PolicyDecision.Allow)?.isWhitelisted ?: false
-        val isPassthrough = (decision as? PolicyDecision.Allow)?.isPassthrough ?: false
-
-        if (!isWhitelisted &&
-            latestDpiBypassMode != DpiBypassMode.OFF &&
-            latestBlockQuicForDpiBypass &&
-            DnsPacketFilter.extractQueryType(query) == 65
-        ) {
-            // Strip HTTP/3 QUIC SVCB/HTTPS record so browsers downgrade cleanly onto TLS/TCP for SNI DPI bypass.
-            val noDataPacket = DnsPacketFilter.buildNoDataDnsResponsePacket(query)
-            synchronized(tunWriteLock) {
-                runCatching { output.write(noDataPacket) }
+            is DnsOutcome.QuicDowngraded -> {
+                writeToTun(outcome.responsePacket, output)
+                quicStrippedCount.incrementAndGet()
+                recordDnsLog(query.domain, DnsQueryStatus.PASSTHROUGH, "QUIC Downgrade (DPI Bypass)")
+                publishDnsStatsOnly()
             }
-            quicStrippedCount.incrementAndGet()
-            recordDnsLog(query.domain, DnsQueryStatus.PASSTHROUGH, "QUIC Downgrade (DPI Bypass)")
-            publishDnsStatsOnly()
-            return
-        }
 
-        val safeRewrite = NetworkPolicyEngine.resolveSafeSearchRewrite(
-            rawHost = query.domain,
-            context = policyContext,
-            policy = policy
-        )
-
-        if (safeRewrite != null) {
-            val rewrittenPayload = DnsPacketFilter.buildRewrittenQueryPayload(query, safeRewrite.aliasDomain)
-            if (rewrittenPayload != null) {
-                val aliasResponse = resolveDnsUpstream(rewrittenPayload, safeRewrite.aliasDomain).first
-                if (aliasResponse != null) {
-                    val rewrittenAnswer = DnsPacketFilter.buildRewrittenAnswerPayload(query, aliasResponse)
-                    if (rewrittenAnswer != null) {
-                        val responsePacket = DnsPacketFilter.buildDnsResponsePacket(query, rewrittenAnswer)
-                        synchronized(tunWriteLock) {
-                            runCatching { output.write(responsePacket) }
-                        }
-                        safeRewriteCount.incrementAndGet()
-                        allowedDnsCount.incrementAndGet()
-                        recordDnsLog(
-                            query.domain,
-                            DnsQueryStatus.SAFE_REWRITE,
-                            "${safeRewrite.label} (${safeRewrite.aliasDomain})"
-                        )
-                        publishDnsStatsOnly()
-                        return
-                    }
-                }
-            }
-        }
-
-        val (upstreamDnsResponse, upstreamLabel) = resolveDnsUpstream(query.dnsPayload, query.domain)
-
-        if (upstreamDnsResponse != null) {
-            val responsePacket = DnsPacketFilter.buildDnsResponsePacket(query, upstreamDnsResponse)
-            synchronized(tunWriteLock) {
-                runCatching { output.write(responsePacket) }
-            }
-            allowedDnsCount.incrementAndGet()
-            val status = if (isPassthrough) DnsQueryStatus.PASSTHROUGH else DnsQueryStatus.ALLOWED
-            val reason = if (isPassthrough) "Essential Passthrough ($upstreamLabel)" else upstreamLabel
-            recordDnsLog(query.domain, status, reason)
-            if (latestIsDeepMonitorEnabled && !isCanary) {
-                val resolvedIps = DnsPacketFilter.extractResolvedIpsFromDnsResponse(upstreamDnsResponse)
-                val primaryIp = resolvedIps.firstOrNull().orEmpty()
-                ConnectionMonitorHub.recordConnection(
-                    context = applicationContext,
-                    domain = query.domain,
-                    remoteIp = primaryIp,
-                    remotePort = if (latestIsHttpsProxyEnabled || latestDpiBypassMode != DpiBypassMode.OFF) {
-                        latestHttpsProxyPort
-                    } else {
-                        443
-                    },
-                    protocol = "DNS",
-                    appPackage = ownerPackage,
-                    bytesSent = query.dnsPayload.size.toLong(),
-                    bytesReceived = upstreamDnsResponse.size.toLong(),
-                    actionStatus = "ALLOWED"
+            is DnsOutcome.SafeRewrite -> {
+                writeToTun(outcome.responsePacket, output)
+                safeRewriteCount.incrementAndGet()
+                allowedDnsCount.incrementAndGet()
+                recordDnsLog(
+                    query.domain,
+                    DnsQueryStatus.SAFE_REWRITE,
+                    "${outcome.label} (${outcome.aliasDomain})"
                 )
+                publishDnsStatsOnly()
             }
-            publishDnsStatsOnly()
-        }
-    }
 
-    private fun resolveDnsUpstream(dnsPayload: ByteArray, domain: String): Pair<ByteArray?, String> {
-        val antiPoison = latestAntiDnsPoisonEnabled
-        val resolved = when (latestDnsTransportMode) {
-            DnsTransportMode.DNS_OVER_TCP -> {
-                val tcpResp = forwardDnsOverTcp(dnsPayload)
-                if (tcpResp != null && !isPoisoned(domain, tcpResp, antiPoison)) {
-                    tcpResp to "${latestUpstreamDnsTitle} DoTCP"
+            is DnsOutcome.Answered -> {
+                writeToTun(outcome.responsePacket, output)
+                allowedDnsCount.incrementAndGet()
+                val status = if (outcome.isPassthrough) DnsQueryStatus.PASSTHROUGH else DnsQueryStatus.ALLOWED
+                val reason = if (outcome.isPassthrough) {
+                    "Essential Passthrough (${outcome.transportLabel})"
                 } else {
-                    val dohResp = forwardDohWithBackup(dnsPayload)
-                    if (dohResp != null) {
-                        dohResp.first to dohResp.second
-                    } else {
-                        forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
-                    }
+                    outcome.transportLabel
                 }
+                recordDnsLog(query.domain, status, reason)
+                if (latestIsDeepMonitorEnabled && !isCanary) {
+                    val resolvedIps = DnsPacketFilter.extractResolvedIpsFromDnsResponse(outcome.upstreamPayload)
+                    val primaryIp = resolvedIps.firstOrNull().orEmpty()
+                    ConnectionMonitorHub.recordConnection(
+                        context = applicationContext,
+                        domain = query.domain,
+                        remoteIp = primaryIp,
+                        remotePort = if (latestIsHttpsProxyEnabled || latestDpiBypassMode != DpiBypassMode.OFF) {
+                            latestHttpsProxyPort
+                        } else {
+                            443
+                        },
+                        protocol = "DNS",
+                        appPackage = ownerPackage,
+                        bytesSent = query.dnsPayload.size.toLong(),
+                        bytesReceived = outcome.upstreamPayload.size.toLong(),
+                        actionStatus = "ALLOWED"
+                    )
+                }
+                publishDnsStatsOnly()
             }
 
-            DnsTransportMode.UDP_THEN_TCP -> {
-                val udpResp = forwardDnsQuery(dnsPayload)
-                if (udpResp != null && !isPoisoned(domain, udpResp, antiPoison)) {
-                    udpResp to "${latestUpstreamDnsTitle} UDP"
-                } else {
-                    if (udpResp != null) {
-                        antiDnsPoisonCount.incrementAndGet()
-                    }
-                    val dohResp = forwardDohWithBackup(dnsPayload)
-                    if (dohResp != null) {
-                        dohResp.first to "${dohResp.second} (Poison Guard)"
-                    } else {
-                        forwardDnsOverTcp(dnsPayload) to "${latestUpstreamDnsTitle} DoTCP"
-                    }
-                }
-            }
-
-            DnsTransportMode.DOH_WITH_FALLBACK -> {
-                if (latestUseDohUpstream) {
-                    val dohResp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
-                    if (dohResp != null) {
-                        return dohResp to "${latestUpstreamDnsTitle} DoH"
-                    }
-                }
-                val tcpResp = forwardDnsOverTcp(dnsPayload)
-                if (tcpResp != null && !isPoisoned(domain, tcpResp, antiPoison)) {
-                    tcpResp to "${latestUpstreamDnsTitle} DoTCP"
-                } else {
-                    val udpPair = forwardValidatedUdpDns(dnsPayload, domain, antiPoison)
-                    if (udpPair.first != null) {
-                        udpPair
-                    } else {
-                        forwardBackupDohOnly(dnsPayload) ?: udpPair
-                    }
-                }
-            }
+            DnsOutcome.Dropped -> Unit
         }
-        return resolved
     }
 
-    private fun forwardDohWithBackup(dnsPayload: ByteArray): Pair<ByteArray, String>? {
-        val primary = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, latestDohUrl)
-        if (primary != null) {
-            return primary to "${latestUpstreamDnsTitle} DoH"
+    private fun outcomeAntiPoisonTrips(outcome: DnsOutcome): Int {
+        return when (outcome) {
+            is DnsOutcome.SafeRewrite -> outcome.antiPoisonTrips
+            is DnsOutcome.Answered -> outcome.antiPoisonTrips
+            else -> 0
         }
-        return forwardBackupDohOnly(dnsPayload)
     }
 
-    private fun forwardBackupDohOnly(dnsPayload: ByteArray): Pair<ByteArray, String>? {
-        for ((backupLabel, backupUrl) in BACKUP_DOH_ENDPOINTS) {
-            if (backupUrl.equals(latestDohUrl, ignoreCase = true)) continue
-            val resp = AdBlockFilterEngine.forwardDnsOverHttps(dnsPayload, backupUrl)
-            if (resp != null) {
-                return resp to "$backupLabel DoH"
-            }
-        }
-        return null
+    private fun buildDnsResolutionContext(): DnsResolutionContext {
+        return DnsResolutionContext(
+            transportMode = latestDnsTransportMode,
+            useDohUpstream = latestUseDohUpstream,
+            dohUrl = latestDohUrl,
+            upstreamTitle = latestUpstreamDnsTitle,
+            udpDnsServers = latestUdpDnsServers,
+            antiDnsPoisonEnabled = latestAntiDnsPoisonEnabled,
+            socketPolicy = DnsSocketPolicy(
+                protectSocket = { socket -> protect(socket) },
+                protectDatagramSocket = { socket -> protect(socket) },
+                selfDisallowedOnTunnel = isSelfDisallowedOnTunnel
+            )
+        )
     }
 
-    private fun forwardValidatedUdpDns(
-        dnsPayload: ByteArray,
-        domain: String,
-        antiPoison: Boolean
-    ): Pair<ByteArray?, String> {
-        val udpResp = forwardDnsQuery(dnsPayload)
-        if (udpResp != null && isPoisoned(domain, udpResp, antiPoison)) {
-            antiDnsPoisonCount.incrementAndGet()
-            val dohFallback = forwardDohWithBackup(dnsPayload)
-            if (dohFallback != null) {
-                return dohFallback.first to "${dohFallback.second} (Anti-Poison)"
-            }
-            val tcpFallback = forwardDnsOverTcp(dnsPayload)
-            if (tcpFallback != null) {
-                return tcpFallback to "${latestUpstreamDnsTitle} DoTCP"
-            }
-            return null to "${latestUpstreamDnsTitle} Poison Dropped"
-        }
-        return udpResp to "${latestUpstreamDnsTitle} UDP"
-    }
-
-    private fun isPoisoned(domain: String, responseBytes: ByteArray, enabled: Boolean): Boolean {
-        if (!enabled) return false
-        val ips = DnsPacketFilter.extractResolvedIpsFromDnsResponse(responseBytes)
-        return DpiBypassEngine.isLikelyForgedDnsResponse(domain, ips)
-    }
-
-    /**
-     * Resolves DNS using RFC 1035 2-byte length-prefixed framing over TCP port 53 so
-     * DPI / ISP throttles targeting UDP port 53 can still be bypassed reliably.
-     */
-    private fun forwardDnsOverTcp(dnsPayload: ByteArray): ByteArray? {
-        if (dnsPayload.isEmpty() || dnsPayload.size > 65535) return null
-        val candidates = latestUdpDnsServers.ifEmpty { UPSTREAM_DNS_SERVERS }
-        for (upstreamIp in candidates) {
-            var socket: Socket? = null
-            try {
-                socket = Socket()
-                if (!protect(socket) && !isSelfDisallowedOnTunnel) {
-                    socket.close()
-                    continue
-                }
-                socket.tcpNoDelay = true
-                socket.soTimeout = 1800
-                socket.connect(InetSocketAddress(InetAddress.getByName(upstreamIp), 53), 1500)
-                val out = socket.getOutputStream()
-                val frame = ByteArray(2 + dnsPayload.size)
-                frame[0] = ((dnsPayload.size ushr 8) and 0xFF).toByte()
-                frame[1] = (dnsPayload.size and 0xFF).toByte()
-                System.arraycopy(dnsPayload, 0, frame, 2, dnsPayload.size)
-                out.write(frame)
-                out.flush()
-
-                val dataIn = DataInputStream(socket.getInputStream())
-                val respLen = dataIn.readUnsignedShort()
-                if (respLen in 12..65535) {
-                    val resp = ByteArray(respLen)
-                    dataIn.readFully(resp)
-                    return resp
-                }
-            } catch (_: Exception) {
-                // Try next upstream resolver
-            } finally {
-                runCatching { socket?.close() }
-            }
-        }
-        return null
-    }
-
-    private fun sendNxDomain(query: ParsedDnsQuery, output: FileOutputStream) {
-        val blockedPacket = DnsPacketFilter.buildBlockedDnsResponsePacket(query)
+    private fun writeToTun(packet: ByteArray, output: FileOutputStream) {
         synchronized(tunWriteLock) {
-            runCatching { output.write(blockedPacket) }
+            runCatching { output.write(packet) }
         }
     }
 
@@ -1665,34 +1525,6 @@ class NetGateVpnService : VpnService() {
                 packages = packages
             )
         }.getOrNull()
-    }
-
-    private fun forwardDnsQuery(dnsPayload: ByteArray): ByteArray? {
-        val candidates = latestUdpDnsServers.ifEmpty { UPSTREAM_DNS_SERVERS }
-        for (upstreamIp in candidates) {
-            var socket: DatagramSocket? = null
-            try {
-                socket = DatagramSocket()
-                if (!protect(socket) && !isSelfDisallowedOnTunnel) {
-                    socket.close()
-                    continue
-                }
-                socket.soTimeout = 1600
-                val upstreamAddr = InetAddress.getByName(upstreamIp)
-                val outPacket = DatagramPacket(dnsPayload, dnsPayload.size, upstreamAddr, 53)
-                socket.send(outPacket)
-
-                val recvBuf = ByteArray(4096)
-                val inPacket = DatagramPacket(recvBuf, recvBuf.size)
-                socket.receive(inPacket)
-                return recvBuf.copyOf(inPacket.length)
-            } catch (_: Exception) {
-                // Try fallback upstream DNS server
-            } finally {
-                runCatching { socket?.close() }
-            }
-        }
-        return null
     }
 
     private fun recordBlockedDomain(domain: String) {
@@ -1942,10 +1774,6 @@ class NetGateVpnService : VpnService() {
         private const val VIRTUAL_IPV6_DNS_SERVER = "fd00:1:fd00:1:fd00:1:fd00:2"
         private const val PROXY_DNS_CACHE_TTL_MS = 45_000L
         private val UPSTREAM_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")
-        private val BACKUP_DOH_ENDPOINTS = listOf(
-            "Google" to "https://dns.google/dns-query",
-            "Quad9" to "https://dns.quad9.net/dns-query"
-        )
         private val PROXY_BYPASS_HOSTS = listOf(
             "localhost",
             "127.0.0.1",
