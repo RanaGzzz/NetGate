@@ -3,6 +3,9 @@ package com.example.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -604,6 +607,7 @@ private fun HotspotClientsCard(
     onEditClient: (HotspotClientInfo) -> Unit,
     onClearAllStats: () -> Unit
 ) {
+    val context = LocalContext.current
     FrostedSurface(
         shape = RoundedCornerShape(22.dp),
         modifier = Modifier
@@ -673,6 +677,11 @@ private fun HotspotClientsCard(
                     },
                     sub = if (hotspotState.osTetheringBytes >= 0L) "System hotspot total" else "Grant Usage Access",
                     accent = WifiAccent,
+                    onClick = if (hotspotState.osTetheringBytes < 0L) {
+                        { openUsageAccessSettings(context) }
+                    } else {
+                        null
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -732,13 +741,22 @@ private fun HotspotMetricTile(
     value: String,
     sub: String,
     accent: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = accent.copy(alpha = 0.12f),
         border = BorderStroke(1.dp, accent.copy(alpha = 0.30f)),
-        modifier = modifier
+        modifier = modifier.then(
+            if (onClick != null) {
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onClick)
+            } else {
+                Modifier
+            }
+        )
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text(
@@ -1305,4 +1323,24 @@ private fun CustomNumberDialog(
 private fun copyText(context: Context, label: String, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     cm.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+/** Opens Android's Usage Access screen so OS tethering stats can be read. */
+private fun openUsageAccessSettings(context: Context) {
+    val pkgUri = Uri.fromParts("package", context.packageName, null)
+    val candidates = listOf(
+        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply { data = pkgUri },
+        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS),
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkgUri),
+        Intent(Settings.ACTION_SETTINGS)
+    )
+    for (intent in candidates) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent.resolveActivity(context.packageManager) != null) {
+            runCatching {
+                context.startActivity(intent)
+                return
+            }
+        }
+    }
 }

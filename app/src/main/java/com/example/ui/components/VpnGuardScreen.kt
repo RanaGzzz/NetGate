@@ -314,7 +314,8 @@ fun VpnGuardContent(
                             Text(
                                 text = "Load or Generate VPN Configs",
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
@@ -425,7 +426,8 @@ fun VpnGuardContent(
                                 Text(
                                     text = "No WireGuard Profiles Yet",
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
@@ -792,7 +794,8 @@ private fun VpnGuardHeroCard(
                                 VpnGuardConnectionState.DISCONNECTED -> "VPN Guard Ready"
                             },
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = when {

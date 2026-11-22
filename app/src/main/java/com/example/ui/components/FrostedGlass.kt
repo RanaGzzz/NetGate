@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -532,21 +533,25 @@ fun FrostedSurface(
             brush = borderBrush
         )
     ) {
-        Box(
-            modifier = Modifier
-                .then(
-                    if (!useFletchLiquid) {
-                        Modifier.liquidGlassRefractionEdge(
-                            enabled = motionSpec.enableRefractionShader,
-                            shape = shape
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .background(sheenBrush)
-                .then(glintModifier),
-            content = content
-        )
+        CompositionLocalProvider(
+            LocalContentColor provides MaterialTheme.colorScheme.onSurface
+        ) {
+            Box(
+                modifier = Modifier
+                    .then(
+                        if (!useFletchLiquid) {
+                            Modifier.liquidGlassRefractionEdge(
+                                enabled = motionSpec.enableRefractionShader,
+                                shape = shape
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .background(sheenBrush)
+                    .then(glintModifier),
+                content = content
+            )
+        }
     }
 }

@@ -1,3 +1,19 @@
+# What's New — NetGate 3.1
+
+### UI Fixes
+- **Readable card titles:** frosted cards now provide the theme's surface content colour, so titles such as
+  "VPN Guard Ready" and "Load or Generate VPN Configs" are no longer rendered black on dark themes.
+- **DPI Autopilot badge:** the "Autopilot" mode badge no longer wraps or clips; long titles ellipsize instead.
+- **Live network strip:** the speed/usage line in the header now stacks below 340dp so it reads correctly in
+  portrait instead of being squeezed onto one line.
+- **Hotspot usage access:** the OS Tethering tile in the Hotspot & Wi-Fi sheet is now tappable and opens the
+  system Usage Access screen when usage data is unavailable.
+- **Settings:** theme mode and theme style buttons no longer clip their labels; the startup-animation preview
+  button was removed.
+- **Navigation:** the VPN Guard tab uses a distinct key icon, and tabs read "Ad & Website Blocker",
+  "Network & Usage", and "VPN Guard (WireGuard & WARP)".
+- **About card:** Settings now shows the installed app version and links to the project repository.
+
 # What's New — NetGate 3.0
 
 ### DPI & SNI Hardening

@@ -1,11 +1,15 @@
 package com.example.ui.components
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
@@ -47,9 +52,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.data.model.BlurEngineStyle
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.NetGateThemeStyle
@@ -82,6 +89,7 @@ fun FirewallSettingsSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
     val themeStyle = LocalThemeStyle.current
     val isDark = LocalIsDarkTheme.current
     val sheetLiquidState = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) {
@@ -164,9 +172,14 @@ fun FirewallSettingsSheet(
                         .padding(14.dp)
                 ) {
                     Text(
-                        text = "Theme Mode (Day & Night)",
+                        text = "Theme Mode",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Follow system, or force Day or Night appearance",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(
@@ -195,9 +208,10 @@ fun FirewallSettingsSheet(
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     }
                                 ),
+                                contentPadding = PaddingValues(horizontal = 6.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .height(48.dp)
                                     .testTag("theme_mode_${mode.name.lowercase()}")
                             ) {
                                 Icon(
@@ -205,10 +219,13 @@ fun FirewallSettingsSheet(
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(5.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = mode.label,
-                                    style = MaterialTheme.typography.labelLarge
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -306,6 +323,7 @@ fun FirewallSettingsSheet(
                                                 MaterialTheme.colorScheme.onSurfaceVariant
                                             }
                                         ),
+                                        contentPadding = PaddingValues(horizontal = 6.dp),
                                         modifier = Modifier
                                             .weight(1f)
                                             .height(48.dp)
@@ -313,8 +331,10 @@ fun FirewallSettingsSheet(
                                     ) {
                                         Text(
                                             text = style.title,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            maxLines = 1
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -450,25 +470,6 @@ fun FirewallSettingsSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            FilledTonalButton(
-                onClick = onReplayStartupAnimation,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("replay_startup_animation_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Preview Startup Animation")
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
             SettingsSwitchRow(
                 title = "Show System Apps",
                 subtitle = "Include pre-installed Android system apps",
@@ -571,6 +572,62 @@ fun FirewallSettingsSheet(
                 }
             }
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            FrostedSurface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("settings_about_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Text(
+                        text = "About NetGate",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("settings_app_version")
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    FilledTonalButton(
+                        onClick = { openRepository(context) },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("settings_github_link")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "GitHub Repository",
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "github.com/RanaGzzz/NetGate",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedButton(
@@ -600,6 +657,14 @@ fun FirewallSettingsSheet(
             }
         }
     }
+}
+
+private fun openRepository(context: Context) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse("https://github.com/RanaGzzz/NetGate")
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable

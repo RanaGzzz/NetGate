@@ -14,6 +14,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -508,39 +509,78 @@ fun FirewallHeaderCard(
                     .clickable(onClick = onOpenNetworkMonitor)
                     .testTag("header_live_monitor_strip")
             ) {
-                Row(
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MonitorHeart,
-                            contentDescription = "Open live network monitor",
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "↓ ${formatSpeedBytesPerSec(liveTelemetry.downloadBytesPerSec)}  •  ↑ ${formatSpeedBytesPerSec(liveTelemetry.uploadBytesPerSec)}",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    val speedText =
+                        "↓ ${formatSpeedBytesPerSec(liveTelemetry.downloadBytesPerSec)}  •  " +
+                            "↑ ${formatSpeedBytesPerSec(liveTelemetry.uploadBytesPerSec)}"
+                    val usageText = "Today ${formatDataBytes(liveTelemetry.todayTotalBytes)}"
+                    // Portrait phones are too narrow for speeds + usage on one line: stack the
+                    // usage figure under the speed readout instead of squeezing both.
+                    if (maxWidth < 340.dp) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MonitorHeart,
+                                    contentDescription = "Open live network monitor",
+                                    tint = EmeraldPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = speedText,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = usageText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = EmeraldPrimary,
+                                maxLines = 1,
+                                modifier = Modifier.padding(start = 22.dp)
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MonitorHeart,
+                                    contentDescription = "Open live network monitor",
+                                    tint = EmeraldPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = speedText,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = usageText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = EmeraldPrimary,
+                                maxLines = 1
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Today ${formatDataBytes(liveTelemetry.todayTotalBytes)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = EmeraldPrimary,
-                        maxLines = 1
-                    )
                 }
             }
 
