@@ -10,8 +10,11 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class ProxyFilterDecision(
@@ -64,6 +67,10 @@ class LocalFilteringProxyServer(
     private var acceptExecutor: ExecutorService? = null
     private var workerExecutor: ExecutorService? = null
 
+    /** Client sockets of in-flight connections, closed on stop so worker threads cannot linger. */
+    private val activeClients: MutableSet<Socket> =
+        Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
+
     @Volatile
     var boundPort: Int = port
         private set
@@ -96,7 +103,17 @@ class LocalFilteringProxyServer(
                 while (running.get() && !server.isClosed) {
                     try {
                         val client = server.accept()
-                        workerExecutor?.execute { handleClient(client) }
+                        val worker = workerExecutor
+                        if (worker == null) {
+                            runCatching { client.close() }
+                        } else {
+                            activeClients.add(client)
+                            val submitted = runCatching { worker.execute { handleClient(client) } }.isSuccess
+                            if (!submitted) {
+                                activeClients.remove(client)
+                                runCatching { client.close() }
+                            }
+                        }
                     } catch (_: Exception) {
                         if (!running.get()) break
                     }
@@ -115,10 +132,22 @@ class LocalFilteringProxyServer(
         runCatching { serverSocket?.close() }
         serverSocket = null
         boundPort = port
-        runCatching { acceptExecutor?.shutdownNow() }
+
+        // Close every in-flight client so relay loops blocked in read() return immediately.
+        for (client in activeClients.toList()) {
+            runCatching { client.close() }
+        }
+        activeClients.clear()
+
+        val accept = acceptExecutor
         acceptExecutor = null
-        runCatching { workerExecutor?.shutdownNow() }
+        val workers = workerExecutor
         workerExecutor = null
+
+        runCatching { accept?.shutdownNow() }
+        runCatching { workers?.shutdownNow() }
+        runCatching { accept?.awaitTermination(SHUTDOWN_GRACE_MS, TimeUnit.MILLISECONDS) }
+        runCatching { workers?.awaitTermination(SHUTDOWN_GRACE_MS, TimeUnit.MILLISECONDS) }
     }
 
     private fun handleClient(client: Socket) {
@@ -184,6 +213,8 @@ class LocalFilteringProxyServer(
             }
         } catch (_: Exception) {
             runCatching { client.close() }
+        } finally {
+            activeClients.remove(client)
         }
     }
 
@@ -849,6 +880,9 @@ class LocalFilteringProxyServer(
     }
 
     companion object {
+        /** Upper bound for executor termination on stop; never blocks the caller for long. */
+        private const val SHUTDOWN_GRACE_MS = 500L
+
         fun sortIpv4First(addresses: List<InetAddress>): List<InetAddress> {
             if (addresses.size <= 1) return addresses
             val v4 = addresses.filterIsInstance<Inet4Address>()

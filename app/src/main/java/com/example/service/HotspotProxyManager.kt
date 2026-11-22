@@ -13,6 +13,10 @@ import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HotspotClientInfo
 import com.example.data.model.HotspotProxyRuntimeState
 import com.example.data.model.WebsiteFilterMode
+import com.example.service.proxy.ProxyConfiguration
+import com.example.service.proxy.ProxyCoordinator
+import com.example.service.proxy.ProxyRole
+import com.example.service.proxy.ProxyStartResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,8 +81,6 @@ object HotspotProxyManager {
 
     private val lock = Any()
     private val policyLock = Any()
-    private var proxyServer: LocalFilteringProxyServer? = null
-    private var runningPort: Int = 8890
 
     private val clientStatsMap = ConcurrentHashMap<String, MutableClientStats>()
     private val totalSentCounter = AtomicLong(0L)
@@ -132,38 +134,42 @@ object HotspotProxyManager {
 
     fun startOrUpdate(context: Context, prefs: FirewallPreferencesState): Boolean {
         updatePreferencesOnly(prefs)
-        val port = prefs.hotspotProxyPort.coerceIn(1024, 65535)
+        val configuration = ProxyConfiguration.hotspot(
+            port = prefs.hotspotProxyPort,
+            stripTrackingParams = prefs.isProxyStripTrackingParams
+        )
         synchronized(lock) {
-            val existing = proxyServer
-            if (existing != null && existing.isRunning && runningPort == port) {
-                refreshEnvironment(context)
-                return true
+            val result = ProxyCoordinator.instance.start(configuration) { bindPort, config ->
+                LocalFilteringProxyServer(
+                    port = bindPort,
+                    bindHost = config.bindHost,
+                    stripTrackingParams = config.stripTrackingParams,
+                    protectSocket = { true },
+                    clientBlockReason = ::evaluateClientBlock,
+                    evaluateRequest = ::evaluateRequestForHotspot,
+                    resolveTargetHost = ::resolveTargetHostForHotspot,
+                    upstreamProxyProvider = ::provideUpstreamProxy,
+                    onRequestLogged = { _, _ -> },
+                    onClientTraffic = { clientIp, host, bytesSent, bytesReceived, allowed ->
+                        recordClientActivity(clientIp, host, bytesSent, bytesReceived, allowed)
+                    }
+                )
             }
-            stopLocked()
-
-            val server = LocalFilteringProxyServer(
-                port = port,
-                bindHost = "0.0.0.0",
-                stripTrackingParams = prefs.isProxyStripTrackingParams,
-                protectSocket = { true },
-                clientBlockReason = ::evaluateClientBlock,
-                evaluateRequest = ::evaluateRequestForHotspot,
-                resolveTargetHost = ::resolveTargetHostForHotspot,
-                upstreamProxyProvider = ::provideUpstreamProxy,
-                onRequestLogged = { _, _ -> },
-                onClientTraffic = { clientIp, host, bytesSent, bytesReceived, allowed ->
-                    recordClientActivity(clientIp, host, bytesSent, bytesReceived, allowed)
+            if (!result.isRunning) {
+                val message = when (result) {
+                    is ProxyStartResult.PortConflict ->
+                        "Port ${result.port} is already used by the ${result.owner.label} proxy. " +
+                            "Try another port (e.g. 8890 or 8080)."
+                    else ->
+                        "Could not bind Hotspot Proxy on port ${configuration.validatedPort}. " +
+                            "Try another port (e.g. 8890 or 8080)."
                 }
-            )
-            if (!server.start()) {
                 _runtimeState.value = _runtimeState.value.copy(
                     isProxyRunning = false,
-                    errorMessage = "Could not bind Hotspot Proxy on port $port. Try another port (e.g. 8890 or 8080)."
+                    errorMessage = message
                 )
                 return false
             }
-            proxyServer = server
-            runningPort = port
         }
         refreshEnvironment(context)
         return true
@@ -181,8 +187,7 @@ object HotspotProxyManager {
     }
 
     private fun stopLocked() {
-        runCatching { proxyServer?.stop() }
-        proxyServer = null
+        ProxyCoordinator.instance.stop(ProxyRole.HOTSPOT)
     }
 
     fun resetClientStats(clientIp: String) {
@@ -203,7 +208,7 @@ object HotspotProxyManager {
         val isExternalVpn = isExternalVpnConnected(context)
         val osTetheringBytes = queryOsTetheringBytesToday(context)
         val isNetGateVpn = NetGateVpnService.runtimeState.value.isServiceRunning
-        val isRunning = proxyServer?.isRunning == true
+        val isRunning = ProxyCoordinator.instance.isActive(ProxyRole.HOTSPOT)
 
         val snapshot = policyBundle.get()
         val clients = buildClientsList(snapshot.prefs)
@@ -214,7 +219,11 @@ object HotspotProxyManager {
             detectedHotspotInterface = detected?.first,
             isExternalVpnActive = isExternalVpn,
             isNetGateVpnActive = isNetGateVpn,
-            activePort = if (isRunning) runningPort else snapshot.prefs.hotspotProxyPort,
+            activePort = if (isRunning) {
+                ProxyCoordinator.instance.boundPort(ProxyRole.HOTSPOT) ?: snapshot.prefs.hotspotProxyPort
+            } else {
+                snapshot.prefs.hotspotProxyPort
+            },
             totalRelayedSentBytes = totalSentCounter.get(),
             totalRelayedRecvBytes = totalRecvCounter.get(),
             osTetheringBytes = osTetheringBytes,
@@ -344,9 +353,14 @@ object HotspotProxyManager {
     private fun publishSnapshot(errorMessage: String? = _runtimeState.value.errorMessage) {
         val snapshot = policyBundle.get()
         val current = _runtimeState.value
+        val isRunning = ProxyCoordinator.instance.isActive(ProxyRole.HOTSPOT)
         _runtimeState.value = current.copy(
-            isProxyRunning = proxyServer?.isRunning == true,
-            activePort = if (proxyServer?.isRunning == true) runningPort else snapshot.prefs.hotspotProxyPort,
+            isProxyRunning = isRunning,
+            activePort = if (isRunning) {
+                ProxyCoordinator.instance.boundPort(ProxyRole.HOTSPOT) ?: snapshot.prefs.hotspotProxyPort
+            } else {
+                snapshot.prefs.hotspotProxyPort
+            },
             totalRelayedSentBytes = totalSentCounter.get(),
             totalRelayedRecvBytes = totalRecvCounter.get(),
             clients = buildClientsList(snapshot.prefs),

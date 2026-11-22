@@ -44,6 +44,10 @@ import com.example.service.policy.NetworkPolicy
 import com.example.service.policy.NetworkPolicyEngine
 import com.example.service.policy.PolicyContext
 import com.example.service.policy.PolicyDecision
+import com.example.service.proxy.ProxyConfiguration
+import com.example.service.proxy.ProxyCoordinator
+import com.example.service.proxy.ProxyRole
+import com.example.service.proxy.ProxyStartResult
 import com.example.service.session.VpnSessionCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -234,8 +238,6 @@ class NetGateVpnService : VpnService() {
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
     private var lastAdMatcherSignature: String? = null
-    private var proxyServer: LocalFilteringProxyServer? = null
-    private var activeProxySignature: ProxyConfigSignature? = null
 
     private val blockedDnsCount = AtomicLong(0L)
     private val allowedDnsCount = AtomicLong(0L)
@@ -786,7 +788,9 @@ class NetGateVpnService : VpnService() {
                     false
                 }
                 val activeProxyPort = if (proxyActiveNow) {
-                    proxyServer?.boundPort?.takeIf { it in 1024..65535 } ?: plan.httpsProxyPort
+                    ProxyCoordinator.instance.boundPort(ProxyRole.LOCAL_FIREWALL)
+                        ?.takeIf { it in ProxyConfiguration.MIN_PORT..ProxyConfiguration.MAX_PORT }
+                        ?: plan.httpsProxyPort
                 } else {
                     null
                 }
@@ -911,57 +915,52 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun ensureProxyServerStartedLocked(port: Int, stripTracking: Boolean): Boolean {
-        val desired = ProxyConfigSignature(port, stripTracking)
-        val existing = proxyServer
-        if (existing != null && existing.isRunning && activeProxySignature == desired) {
-            return true
-        }
-        stopProxyServerLocked()
-        val server = LocalFilteringProxyServer(
+        val configuration = ProxyConfiguration.localFirewall(
             port = port,
-            stripTrackingParams = stripTracking,
-            protectSocket = { socket -> protect(socket) || isSelfDisallowedOnTunnel },
-            isClientBlocked = ::isProxyClientSocketBlocked,
-            evaluateRequest = ::evaluateProxyRequest,
-            resolveTargetHost = ::resolveProxyTargetHost,
-            resolveTargetAddresses = ::resolveProxyTargetAddresses,
-            upstreamProxyProvider = ::provideUpstreamSniProxy,
-            dpiBypassConfigProvider = {
-                DpiBypassConfig(
-                    mode = latestDpiBypassMode,
-                    chunkSize = latestDpiFragmentChunkSize,
-                    fragmentDelayMs = latestDpiFragmentDelayMs,
-                    idleKeepAliveEnabled = latestDpiIdleKeepAliveEnabled
-                )
-            },
-            onDpiBypassApplied = { _, _ ->
-                dpiBypassedCount.incrementAndGet()
-                publishDnsStatsOnly()
-            },
-            onRequestLogged = ::handleProxyLogged,
-            onTrafficRelayed = { host, targetPort, protocol, remoteIp, bytesSent, bytesReceived, decision ->
-                if (latestIsDeepMonitorEnabled) {
-                    ConnectionMonitorHub.recordConnection(
-                        context = applicationContext,
-                        domain = host,
-                        remoteIp = remoteIp.orEmpty(),
-                        remotePort = targetPort,
-                        protocol = protocol,
-                        bytesSent = bytesSent,
-                        bytesReceived = bytesReceived,
-                        actionStatus = if (decision.allow) "ALLOWED" else "BLOCKED",
-                        isAdBlocked = decision.isAdBlock
-                    )
-                }
-            }
+            stripTrackingParams = stripTracking
         )
-        return if (server.start()) {
-            proxyServer = server
-            activeProxySignature = desired
-            true
-        } else {
-            false
+        val result = ProxyCoordinator.instance.start(configuration) { bindPort, config ->
+            LocalFilteringProxyServer(
+                port = bindPort,
+                bindHost = config.bindHost,
+                stripTrackingParams = config.stripTrackingParams,
+                protectSocket = { socket -> protect(socket) || isSelfDisallowedOnTunnel },
+                isClientBlocked = ::isProxyClientSocketBlocked,
+                evaluateRequest = ::evaluateProxyRequest,
+                resolveTargetHost = ::resolveProxyTargetHost,
+                resolveTargetAddresses = ::resolveProxyTargetAddresses,
+                upstreamProxyProvider = ::provideUpstreamSniProxy,
+                dpiBypassConfigProvider = {
+                    DpiBypassConfig(
+                        mode = latestDpiBypassMode,
+                        chunkSize = latestDpiFragmentChunkSize,
+                        fragmentDelayMs = latestDpiFragmentDelayMs,
+                        idleKeepAliveEnabled = latestDpiIdleKeepAliveEnabled
+                    )
+                },
+                onDpiBypassApplied = { _, _ ->
+                    dpiBypassedCount.incrementAndGet()
+                    publishDnsStatsOnly()
+                },
+                onRequestLogged = ::handleProxyLogged,
+                onTrafficRelayed = { host, targetPort, protocol, remoteIp, bytesSent, bytesReceived, decision ->
+                    if (latestIsDeepMonitorEnabled) {
+                        ConnectionMonitorHub.recordConnection(
+                            context = applicationContext,
+                            domain = host,
+                            remoteIp = remoteIp.orEmpty(),
+                            remotePort = targetPort,
+                            protocol = protocol,
+                            bytesSent = bytesSent,
+                            bytesReceived = bytesReceived,
+                            actionStatus = if (decision.allow) "ALLOWED" else "BLOCKED",
+                            isAdBlocked = decision.isAdBlock
+                        )
+                    }
+                }
+            )
         }
+        return result.isRunning
     }
 
     private fun resolveProxyTargetHost(host: String): String {
@@ -1080,9 +1079,7 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun stopProxyServerLocked() {
-        runCatching { proxyServer?.stop() }
-        proxyServer = null
-        activeProxySignature = null
+        ProxyCoordinator.instance.stop(ProxyRole.LOCAL_FIREWALL)
     }
 
     private fun evaluateProxyRequest(host: String, pathAndQuery: String?): ProxyFilterDecision {
@@ -1577,7 +1574,7 @@ class NetGateVpnService : VpnService() {
         val logSnapshot = synchronized(dnsLogLock) { dnsLogQueue.toList() }
         _runtimeState.value = current.copy(
             isAdBlockerEnabled = latestIsAdBlockerEnabled,
-            isHttpsProxyActive = proxyServer?.isRunning == true,
+            isHttpsProxyActive = ProxyCoordinator.instance.isActive(ProxyRole.LOCAL_FIREWALL),
             httpsProxyPort = latestHttpsProxyPort,
             blockedProxyRequestsCount = blockedProxyCount.get(),
             allowedProxyRequestsCount = allowedProxyCount.get(),
@@ -1619,7 +1616,7 @@ class NetGateVpnService : VpnService() {
             blockedActivePackagesCount = blockedCount,
             websiteFilterMode = websiteMode,
             isAdBlockerEnabled = adBlockEnabled,
-            isHttpsProxyActive = proxyServer?.isRunning == true,
+            isHttpsProxyActive = ProxyCoordinator.instance.isActive(ProxyRole.LOCAL_FIREWALL),
             httpsProxyPort = latestHttpsProxyPort,
             blockedProxyRequestsCount = blockedProxyCount.get(),
             allowedProxyRequestsCount = allowedProxyCount.get(),
@@ -1734,7 +1731,7 @@ class NetGateVpnService : VpnService() {
             ActiveNetworkType.NONE -> "Offline"
         }
 
-        val proxyActive = proxyServer?.isRunning == true
+        val proxyActive = ProxyCoordinator.instance.isActive(ProxyRole.LOCAL_FIREWALL)
         val adSuffix = buildString {
             if (adBlockEnabled) append(" + Ad Blocker")
             if (latestIsYoutubeAdBlockEnabled) append(" + YT Ads")
@@ -1777,11 +1774,6 @@ class NetGateVpnService : VpnService() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
-
-    private data class ProxyConfigSignature(
-        val port: Int,
-        val stripTrackingParams: Boolean
-    )
 
     companion object {
         const val ACTION_START = "com.example.service.ACTION_START"
