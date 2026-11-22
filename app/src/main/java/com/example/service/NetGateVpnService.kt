@@ -44,6 +44,7 @@ import com.example.service.policy.NetworkPolicy
 import com.example.service.policy.NetworkPolicyEngine
 import com.example.service.policy.PolicyContext
 import com.example.service.policy.PolicyDecision
+import com.example.service.session.VpnSessionCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -307,6 +308,15 @@ class NetGateVpnService : VpnService() {
                 startForegroundCompat(
                     buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
                 )
+                // Android allows a single VpnService per profile: if the VPN Guard tunnel owns the
+                // slot (or a transition is in flight) this service must not establish a second one.
+                if (!VpnSessionCoordinator.instance.claimLocalFirewall()) {
+                    serviceScope.launch {
+                        preferences.setFirewallEnabled(false)
+                        stopFirewall()
+                    }
+                    return START_NOT_STICKY
+                }
                 serviceScope.launch { rebuildTunnel(forceRebuild = true) }
                 return START_STICKY
             }
@@ -321,6 +331,13 @@ class NetGateVpnService : VpnService() {
                 startForegroundCompat(
                     buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
                 )
+                if (!VpnSessionCoordinator.instance.claimLocalFirewall()) {
+                    serviceScope.launch {
+                        preferences.setFirewallEnabled(false)
+                        stopFirewall()
+                    }
+                    return START_NOT_STICKY
+                }
                 serviceScope.launch {
                     preferences.setFirewallEnabled(true)
                     recomputeNetworkAndRebuild()
@@ -347,6 +364,7 @@ class NetGateVpnService : VpnService() {
         stopProxyServerLocked()
         closeVpnInterface()
         _runtimeState.value = VpnRuntimeState()
+        VpnSessionCoordinator.instance.releaseLocalFirewall()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -1642,6 +1660,7 @@ class NetGateVpnService : VpnService() {
             activeTunnelSignature = null
         }
         _runtimeState.value = VpnRuntimeState()
+        VpnSessionCoordinator.instance.releaseLocalFirewall()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
