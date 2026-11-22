@@ -75,5 +75,7 @@ yes | sdkmanager --licenses
   ./gradlew :app:testDebugUnitTest -I /tmp/central-mirror.init.gradle
   ```
 
+  To make plain `./gradlew` work everywhere on that machine, install the same script as a user-level init script instead (`~/.gradle/init.d/central-mirror.gradle`). This is machine configuration, not project configuration — nothing is committed and the repository's own repositories stay untouched.
+
 - **Memory.** `gradle.properties` sets `org.gradle.jvmargs=-Xmx4g`. On a small VM (≤3 GB RAM) override per run: `-Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=768m"`, optionally with `--no-parallel --no-configuration-cache`.
 - **CI gap.** `.github/workflows/build-apk.yml` only runs `gradle assembleDebug` against a system Gradle. It does not run tests. Consider switching it to `./gradlew` now that the wrapper is committed, and adding `./gradlew :app:testDebugUnitTest`.
