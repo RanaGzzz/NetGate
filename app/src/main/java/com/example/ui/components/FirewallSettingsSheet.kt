@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
@@ -31,11 +32,13 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Wallpaper
@@ -588,7 +591,7 @@ fun FirewallSettingsSheet(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Rounded.Shield,
+                                        imageVector = style.previewIcon(),
                                         contentDescription = null,
                                         tint = iconPreviewColor(style),
                                         modifier = Modifier.size(24.dp)
@@ -803,6 +806,13 @@ private fun iconPreviewColor(style: AppIconStyle): Color = when (style) {
     AppIconStyle.NEON -> Color(0xFF38BDF8)
     AppIconStyle.VIOLET -> Color(0xFFA78BFA)
     AppIconStyle.AMBER -> Color(0xFFF59E0B)
+}
+
+private fun AppIconStyle.previewIcon() = when (this) {
+    AppIconStyle.EMERALD -> Icons.Rounded.VerifiedUser
+    AppIconStyle.NEON -> Icons.Rounded.Radar
+    AppIconStyle.VIOLET -> Icons.Rounded.Lock
+    AppIconStyle.AMBER -> Icons.Rounded.Bolt
 }
 
 private fun openRepository(context: Context) {

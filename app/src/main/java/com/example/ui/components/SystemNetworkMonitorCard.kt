@@ -1,5 +1,8 @@
 package com.example.ui.components
 
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.CellTower
 import androidx.compose.material.icons.rounded.MonitorHeart
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -39,7 +43,11 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +59,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,10 +70,13 @@ import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.ThroughputSample
 import com.example.data.model.formatDataBytes
 import com.example.data.model.formatSpeedBytesPerSec
+import com.example.service.NetworkMonitorService
 import com.example.ui.theme.DataAccent
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.LocalIsDarkTheme
 import com.example.ui.theme.WarningAmber
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.ui.theme.WifiAccent
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -82,6 +94,14 @@ fun SystemNetworkMonitorCard(
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
+    val context = LocalContext.current
+    var notificationsBlocked by remember { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
+    }
+    LaunchedEffect(isStatusBarSpeedEnabled) {
+        notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
+    }
     val isOnline = telemetry.activeNetworkType != ActiveNetworkType.NONE
     val networkLabel = when (telemetry.activeNetworkType) {
         ActiveNetworkType.WIFI -> "Wi-Fi"
@@ -350,6 +370,40 @@ fun SystemNetworkMonitorCard(
                             ),
                             modifier = Modifier.testTag("status_bar_speed_switch")
                         )
+                    }
+
+                    if (isStatusBarSpeedEnabled && notificationsBlocked) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(WarningAmber.copy(alpha = if (isDark) 0.16f else 0.22f))
+                                .clickable { openNotificationSettings(context) }
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
+                                .testTag("status_bar_notifications_blocked")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = WarningAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Speed icon is hidden by Android",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Notifications are blocked. Tap to allow NetGate notifications.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -644,6 +698,14 @@ private fun LiveThroughputSparkline(
             }
         }
     }
+}
+
+private fun openNotificationSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable

@@ -56,7 +56,7 @@ NetGate runs entirely on the device. It uses Android's local `VpnService`, a use
 
 ## Download
 
-Grab the signed APK from the [latest release](https://github.com/RanaGzzz/NetGate/releases/latest) — download **`netgate-release-3.3.apk`** under **Assets**.
+Grab the signed APK from the [latest release](https://github.com/RanaGzzz/NetGate/releases/latest) — download **`netgate-release-3.4.apk`** under **Assets**.
 
 Requirements: Android 7.0 (API 24) or newer. NetGate uses a local VPN, so Android allows only one active VPN at a time.
 

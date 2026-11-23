@@ -56,10 +56,10 @@ enum class AppIconStyle(
     val subtitle: String,
     val aliasName: String
 ) {
-    EMERALD("Lime", "Signature lime shield with verified badge", "com.example.LauncherEmerald"),
-    NEON("Neon", "Electric cyan shield on midnight blue", "com.example.LauncherNeon"),
-    VIOLET("Violet", "Ultraviolet shield on plum", "com.example.LauncherViolet"),
-    AMBER("Amber", "Warm amber shield on charcoal", "com.example.LauncherAmber")
+    EMERALD("Lime Shield", "Signature lime shield with verified badge", "com.example.LauncherEmerald"),
+    NEON("Neon Signal", "Radar signal rings on midnight blue", "com.example.LauncherNeon"),
+    VIOLET("Violet Lock", "Padlock with keyhole on deep plum", "com.example.LauncherViolet"),
+    AMBER("Amber Bolt", "Lightning bolt inside a hex frame", "com.example.LauncherAmber")
 }
 
 enum class NetGateThemeStyle(

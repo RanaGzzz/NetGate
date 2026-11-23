@@ -901,8 +901,8 @@ class ExampleRobolectricTest {
         )
         com.example.data.model.StatusBarSpeedStyle.entries.forEach { style ->
             val bitmap = com.example.service.StatusBarIconRenderer.renderSpeedBitmap(telemetry, style)
-            assertEquals(72, bitmap.width)
-            assertEquals(72, bitmap.height)
+            assertEquals(96, bitmap.width)
+            assertEquals(96, bitmap.height)
             val icon = com.example.service.StatusBarIconRenderer.createSpeedIcon(telemetry, style)
             assertNotNull(icon)
         }

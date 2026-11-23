@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.local.FirewallPreferences
@@ -67,7 +68,9 @@ class NetworkMonitorService : Service() {
 
         SystemNetworkMonitor.markServiceRunning(true)
         val initialTelemetry = SystemNetworkMonitor.sampleNow(applicationContext)
-        startForegroundCompat(buildNotification(initialTelemetry))
+        if (!startForegroundCompat(buildNotification(initialTelemetry))) {
+            return START_NOT_STICKY
+        }
         startSamplingLoop()
         return START_STICKY
     }
@@ -135,21 +138,37 @@ class NetworkMonitorService : Service() {
         stopSelf()
     }
 
-    private fun startForegroundCompat(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+    private fun startForegroundCompat(notification: Notification): Boolean {
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }.fold(
+            onSuccess = { true },
+            onFailure = { error ->
+                // Most commonly a denied POST_NOTIFICATIONS/FGS policy: the system would never show
+                // the speed icon, so turn the preference back off instead of running invisibly.
+                android.util.Log.w("NetworkMonitorService", "Unable to start speed monitor", error)
+                SystemNetworkMonitor.flushToDisk(applicationContext)
+                SystemNetworkMonitor.markServiceRunning(false)
+                serviceScope.launch {
+                    preferences.setStatusBarSpeedEnabled(false)
+                    stopSelf()
+                }
+                false
+            }
+        )
     }
 
     private fun postNotification(telemetry: LiveNetworkTelemetry) {
         val manager = getSystemService(NotificationManager::class.java) ?: return
-        manager.notify(NOTIFICATION_ID, buildNotification(telemetry))
+        runCatching { manager.notify(NOTIFICATION_ID, buildNotification(telemetry)) }
     }
 
     private fun createNotificationChannel() {
@@ -225,6 +244,8 @@ class NetworkMonitorService : Service() {
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openMonitorIntent)
             .addAction(0, getString(R.string.speed_monitor_stop), stopIntent)
             .build()
@@ -234,8 +255,22 @@ class NetworkMonitorService : Service() {
         const val ACTION_START = "com.example.service.NETWORK_MONITOR_START"
         const val ACTION_STOP = "com.example.service.NETWORK_MONITOR_STOP"
 
-        private const val CHANNEL_ID = "netgate_speed_monitor_channel"
+        const val CHANNEL_ID = "netgate_speed_monitor_channel"
         private const val NOTIFICATION_ID = 4042
+
+        /**
+         * Android hides the status bar icon with the whole notification when the user blocked the
+         * app or this app's speed-monitor channel, so the switch looks enabled while nothing shows.
+         */
+        fun areNotificationsBlocked(context: Context): Boolean {
+            val nm = NotificationManagerCompat.from(context)
+            if (!nm.areNotificationsEnabled()) return true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = nm.getNotificationChannel(CHANNEL_ID)
+                if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) return true
+            }
+            return false
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, NetworkMonitorService::class.java).apply {

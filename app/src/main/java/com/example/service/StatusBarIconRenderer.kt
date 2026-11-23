@@ -18,7 +18,11 @@ import com.example.data.model.formatSingleLineCompactSpeed
  */
 object StatusBarIconRenderer {
 
-    private const val ICON_SIZE_PX = 72
+    /**
+     * Status bars render the small icon at 24dp. Drawing into 96px keeps the digits crisp when
+     * SystemUI downscales the bitmap on 2x/3x displays.
+     */
+    private const val ICON_SIZE_PX = 96
 
     fun renderSpeedBitmap(
         telemetry: LiveNetworkTelemetry,
@@ -52,8 +56,8 @@ object StatusBarIconRenderer {
                     canvas = canvas,
                     text = dlText,
                     centerX = centerX,
-                    baselineY = 30f,
-                    initialTextSize = 27f,
+                    baselineY = 42f,
+                    initialTextSize = 40f,
                     maxWidth = maxTextWidth,
                     paint = primaryPaint
                 )
@@ -61,8 +65,8 @@ object StatusBarIconRenderer {
                     canvas = canvas,
                     text = ulText,
                     centerX = centerX,
-                    baselineY = 63f,
-                    initialTextSize = 26f,
+                    baselineY = 86f,
+                    initialTextSize = 38f,
                     maxWidth = maxTextWidth,
                     paint = secondaryPaint
                 )
@@ -74,8 +78,8 @@ object StatusBarIconRenderer {
                     canvas = canvas,
                     text = badge.valueText,
                     centerX = centerX,
-                    baselineY = 37f,
-                    initialTextSize = 38f,
+                    baselineY = 53f,
+                    initialTextSize = 56f,
                     maxWidth = maxTextWidth,
                     paint = primaryPaint
                 )
@@ -83,8 +87,8 @@ object StatusBarIconRenderer {
                     canvas = canvas,
                     text = badge.unitText,
                     centerX = centerX,
-                    baselineY = 65f,
-                    initialTextSize = 25f,
+                    baselineY = 88f,
+                    initialTextSize = 34f,
                     maxWidth = maxTextWidth,
                     paint = secondaryPaint
                 )
@@ -96,8 +100,8 @@ object StatusBarIconRenderer {
                     canvas = canvas,
                     text = badge.valueText,
                     centerX = centerX,
-                    baselineY = 37f,
-                    initialTextSize = 38f,
+                    baselineY = 52f,
+                    initialTextSize = 54f,
                     maxWidth = maxTextWidth,
                     paint = primaryPaint
                 )
@@ -105,8 +109,8 @@ object StatusBarIconRenderer {
                     canvas = canvas,
                     text = "↓${badge.unitText}",
                     centerX = centerX,
-                    baselineY = 65f,
-                    initialTextSize = 23f,
+                    baselineY = 87f,
+                    initialTextSize = 32f,
                     maxWidth = maxTextWidth,
                     paint = secondaryPaint
                 )
@@ -136,7 +140,7 @@ object StatusBarIconRenderer {
         var size = initialTextSize
         paint.textSize = size
         var measured = paint.measureText(text)
-        while (measured > maxWidth && size > 14f) {
+        while (measured > maxWidth && size > 16f) {
             size -= 1.5f
             paint.textSize = size
             measured = paint.measureText(text)

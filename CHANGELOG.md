@@ -1,3 +1,18 @@
+# What's New — NetGate 3.4
+
+### Interface
+- **Top glass toast:** in-app messages now appear as a Liquid Glass pill at the top of the screen instead of
+  a snackbar at the bottom, so the floating navigation bar and bottom controls stay uncovered. Tap to dismiss.
+- **Distinct app icon styles:** the icon picker no longer recolours the same adaptive shield. It now offers four
+  different designs — Lime Shield, Neon Signal (radar), Violet Lock (padlock) and Amber Bolt — each with its own
+  Android 13 monochrome layer.
+
+### Fixes
+- **Status bar network speed:** the live speed icon appears immediately instead of waiting for Android's
+  foreground-service notification delay, and the glyph is drawn larger so it stays readable in the status bar.
+- If Android blocks notifications, the monitor card now says so and links to the notification settings instead of
+  showing an enabled switch with nothing visible; a refused foreground start now fall back cleanly.
+
 # What's New — NetGate 3.3
 
 ### Branding

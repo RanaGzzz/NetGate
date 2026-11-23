@@ -76,8 +76,6 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -117,6 +115,7 @@ import com.example.ui.components.FirewallSettingsSheet
 import com.example.ui.components.FloatingFrostedNavBar
 import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
+import com.example.ui.components.GlassToast
 import com.example.ui.components.HotspotAndWifiContent
 import com.example.ui.components.VpnGuardContent
 import com.example.ui.theme.BlurEngine.blurEngineModalDepth
@@ -135,14 +134,12 @@ fun FirewallScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(viewModel) {
         viewModel.snackbarMessages.collect { message ->
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(message)
+            GlassToast.show(message)
         }
     }
 
@@ -193,14 +190,6 @@ fun FirewallScreen(
                 contentWindowInsets = WindowInsets.safeDrawing.only(
                     WindowInsetsSides.Top + WindowInsetsSides.Horizontal
                 ),
-                snackbarHost = {
-                    SnackbarHost(
-                        hostState = snackbarHostState,
-                        modifier = Modifier
-                            .navigationBarsPadding()
-                            .padding(bottom = if (!isWideLayout && !uiState.isSelectionMode) 84.dp else 0.dp)
-                    )
-                },
                 topBar = {
                     TopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(

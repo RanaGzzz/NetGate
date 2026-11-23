@@ -38,6 +38,7 @@ import com.example.service.NetworkMonitorService
 import com.example.service.SystemNetworkMonitor
 import com.example.ui.FirewallScreen
 import com.example.ui.FirewallViewModel
+import com.example.ui.components.GlassToastHost
 import com.example.ui.components.StartupSplashOverlay
 import com.example.ui.theme.NetGateTheme
 
@@ -191,6 +192,8 @@ class MainActivity : ComponentActivity() {
                             scaleY = contentScale
                         }
                     )
+
+                    GlassToastHost()
 
                     if (showStartupAnimation) {
                         key(startupReplayNonce) {
