@@ -176,6 +176,7 @@ fun WebsiteBlockerContent(
     onClearDnsLogs: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
     onOpenDnsProtection: () -> Unit,
+    onOpenDpiLogs: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedMainTab by rememberSaveable { mutableStateOf(WebsiteMainTab.AD_BLOCKER) }
@@ -617,7 +618,8 @@ fun WebsiteBlockerContent(
                                             onToggleAntiDnsPoison = onToggleAntiDnsPoison,
                                             onSelectDnsTransportMode = onSelectDnsTransportMode,
                                             onFlushCache = onFlushDpiCache,
-                                            onRequestEnableFirewall = onRequestEnableFirewall
+                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                            onOpenVpnDpiLogs = onOpenDpiLogs
                                         )
                                     }
                                 }
@@ -671,7 +673,8 @@ fun WebsiteBlockerContent(
                                             onToggleAntiDnsPoison = onToggleAntiDnsPoison,
                                             onSelectDnsTransportMode = onSelectDnsTransportMode,
                                             onFlushCache = onFlushDpiCache,
-                                            onRequestEnableFirewall = onRequestEnableFirewall
+                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                            onOpenVpnDpiLogs = onOpenDpiLogs
                                         )
                                     }
                                 }
@@ -705,12 +708,23 @@ fun WebsiteBlockerContent(
                                             style = MaterialTheme.typography.titleMedium,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
-                                        if (state.dnsQueryLogs.isNotEmpty()) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             TextButton(
-                                                onClick = onClearDnsLogs,
-                                                modifier = Modifier.testTag("clear_dns_logs_button")
+                                                onClick = onOpenDpiLogs,
+                                                modifier = Modifier.testTag("dns_tab_open_vpn_dpi_logs_button")
                                             ) {
-                                                Text("Clear (${state.dnsQueryLogs.size})")
+                                                Text("VPN & DPI Logs")
+                                            }
+                                            if (state.dnsQueryLogs.isNotEmpty()) {
+                                                TextButton(
+                                                    onClick = onClearDnsLogs,
+                                                    modifier = Modifier.testTag("clear_dns_logs_button")
+                                                ) {
+                                                    Text("Clear (${state.dnsQueryLogs.size})")
+                                                }
                                             }
                                         }
                                     }

@@ -37,4 +37,6 @@
     <string name="vpn_guard_subtitle">WireGuard, WARP, VPNGate &amp; Split-Tunnel</string>
     <string name="vpn_guard_channel_name">NetGate VPN Guard</string>
     <string name="vpn_guard_channel_description">Keeps external WireGuard or WARP tunnel active with per-app or system routing</string>
+    <string name="widget_name">NetGate Quick Shield</string>
+    <string name="widget_description">Toggle Firewall VPN, DPI Bypass, Ad Blocker, and Hotspot Proxy directly from your home screen</string>
 </resources>

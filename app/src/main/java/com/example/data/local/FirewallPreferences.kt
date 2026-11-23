@@ -88,6 +88,7 @@ class FirewallPreferences(private val context: Context) {
         val BLOCK_QUIC_FOR_DPI_BYPASS = booleanPreferencesKey("block_quic_for_dpi_bypass")
         val ANTI_DNS_POISON_ENABLED = booleanPreferencesKey("anti_dns_poison_enabled")
         val DNS_TRANSPORT_MODE = stringPreferencesKey("dns_transport_mode")
+        val EXCLUDE_FROM_RECENTS = booleanPreferencesKey("exclude_from_recents")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -182,7 +183,8 @@ class FirewallPreferences(private val context: Context) {
             dpiIdleKeepAliveEnabled = prefs[Keys.DPI_IDLE_KEEPALIVE_ENABLED] ?: true,
             blockQuicForDpiBypass = prefs[Keys.BLOCK_QUIC_FOR_DPI_BYPASS] ?: true,
             antiDnsPoisonEnabled = prefs[Keys.ANTI_DNS_POISON_ENABLED] ?: true,
-            dnsTransportMode = dnsTransport
+            dnsTransportMode = dnsTransport,
+            excludeFromRecents = prefs[Keys.EXCLUDE_FROM_RECENTS] ?: false
         )
     }
 
@@ -483,6 +485,10 @@ class FirewallPreferences(private val context: Context) {
                 prefs[Keys.USE_DOH_UPSTREAM] = true
             }
         }
+    }
+
+    suspend fun setExcludeFromRecents(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.EXCLUDE_FROM_RECENTS] = enabled }
     }
 
     private fun parseClientCaps(raw: Set<String>?): Map<String, Long> {

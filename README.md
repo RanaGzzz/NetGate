@@ -56,7 +56,7 @@ NetGate runs entirely on the device. It uses Android's local `VpnService`, a use
 
 ## Download
 
-Grab the signed APK from the [latest release](https://github.com/RanaGzzz/NetGate/releases/latest) — download **`netgate-release-3.4.apk`** under **Assets**.
+Grab the signed APK from the [latest release](https://github.com/RanaGzzz/NetGate/releases/latest) — download **`netgate-release-3.5.apk`** under **Assets**.
 
 Requirements: Android 7.0 (API 24) or newer. NetGate uses a local VPN, so Android allows only one active VPN at a time.
 
@@ -93,7 +93,7 @@ Run the unit and Robolectric test suite:
 ./gradlew :app:testDebugUnitTest
 ```
 
-Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`.
+Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`. Pushing a version tag (e.g. `v3.5`) triggers the GitHub Actions release workflow to run tests, sign `netgate-release-3.5.apk` using repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`), extract release notes from `CHANGELOG.md`, and publish the GitHub Release.
 
 ## How it works
 
@@ -101,19 +101,21 @@ Release builds use the keystore configured in `app/build.gradle.kts`; supply `ST
 - **DNS, SafeSearch and filtering:** IPv4/IPv6 UDP/53 queries are intercepted; browser DoH discovery is blocked; QUIC hints are stripped when DPI bypass is active; poisoned private/bogon answers are rejected; SafeSearch and YouTube restricted domains are rewritten; allowed queries are forwarded over DoH, DNS-over-TCP, or protected UDP sockets.
 - **HTTPS/SNI and DPI bypass:** `LocalFilteringProxyServer` and `DpiBypassEngine` run on `127.0.0.1`, enforcing host/SNI rules, stripping tracking parameters (`utm_*`, `fbclid`, `gclid`), optionally chaining to an upstream proxy, and reshaping outbound TLS `ClientHello` / HTTP `Host` headers in userspace.
 - **Hotspot proxy and automation:** `HotspotProxyService` binds an HTTP/HTTPS proxy on the detected Hotspot interface for per-client caps, blocking and filters, while `AlarmManager` and throughput checks power scheduled and idle Wi-Fi locks.
-- **Persistence:** Room stores per-app rules, timers, filter lists, website rules, traffic snapshots, daily history and site/region logs; Jetpack DataStore stores DNS, DPI bypass, proxy, Hotspot and automation preferences.
+- **Home screen widget, recents privacy & updates:** `NetGateWidgetProvider` exposes 1-tap home screen toggles for VPN, DPI Bypass, Ad Blocker, and Hotspot Proxy; Settings adds Exclude from Recents, GitHub Release update checking, changelog browsing, and passive VPN/DPI logs.
+- **Persistence:** Room stores per-app rules, timers, filter lists, website rules, traffic snapshots, daily history and site/region logs; Jetpack DataStore stores DNS, DPI bypass, proxy, Hotspot, UI and privacy preferences.
 
 ## Permissions
 
 | Permission / declaration | Purpose |
 | --- | --- |
 | `BIND_VPN_SERVICE` | Runs the local firewall, DNS filter, ad/website blocker and Wi-Fi traffic lock |
-| `INTERNET` | Speed tests, DoH/DoTCP forwarding, filter list sync, hotspot relay and GeoIP lookups |
+| `INTERNET` | Speed tests, DoH/DoTCP forwarding, filter list sync, hotspot relay, GitHub update checks and GeoIP lookups |
 | `ACCESS_NETWORK_STATE` | Detects active Wi-Fi vs. mobile data, DNS servers, external VPN tunnels and Private DNS state |
 | `ACCESS_WIFI_STATE` | Reads Wi-Fi link telemetry and hotspot interface state |
 | `PACKAGE_USAGE_STATS` *(optional)* | Reads per-app and OS tethering traffic totals |
-| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps filtering, timers and the hotspot proxy alive in the background |
-| `POST_NOTIFICATIONS` *(optional)* | Shows firewall, hotspot and speed-readout notifications |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps filtering, timers, live speed icon and the hotspot proxy alive in the background |
+| `POST_NOTIFICATIONS` *(optional)* | Shows firewall, hotspot and live status bar speed readout notifications |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` *(optional)* | Lets users exempt NetGate from Battery Saver restrictions so background VPN and speed icon stay active |
 | `<queries>` launcher intent | Enumerates installed apps for per-app rules |
 
 ## Technology

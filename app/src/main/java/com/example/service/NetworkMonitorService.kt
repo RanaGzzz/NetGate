@@ -172,19 +172,7 @@ class NetworkMonitorService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.speed_monitor_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = getString(R.string.speed_monitor_channel_description)
-                setShowBadge(false)
-                enableVibration(false)
-                setSound(null, null)
-            }
-            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
-        }
+        ensureNotificationChannel(applicationContext)
     }
 
     private fun buildNotification(telemetry: LiveNetworkTelemetry): Notification {
@@ -235,15 +223,15 @@ class NetworkMonitorService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(speedIcon)
+            .setColor(android.graphics.Color.WHITE)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(inboxStyle)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openMonitorIntent)
@@ -255,21 +243,56 @@ class NetworkMonitorService : Service() {
         const val ACTION_START = "com.example.service.NETWORK_MONITOR_START"
         const val ACTION_STOP = "com.example.service.NETWORK_MONITOR_STOP"
 
-        const val CHANNEL_ID = "netgate_speed_monitor_channel"
+        const val LEGACY_CHANNEL_ID = "netgate_speed_monitor_channel"
+        const val CHANNEL_ID = "netgate_speed_monitor_channel_v2"
         private const val NOTIFICATION_ID = 4042
 
         /**
-         * Android hides the status bar icon with the whole notification when the user blocked the
-         * app or this app's speed-monitor channel, so the switch looks enabled while nothing shows.
+         * Creates or upgrades the silent-sound IMPORTANCE_DEFAULT channel required on Android 15–17
+         * so SystemUI does not hide the live status-bar speed icon as a silent/low-importance item.
+         */
+        fun ensureNotificationChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return
+            runCatching { manager.deleteNotificationChannel(LEGACY_CHANNEL_ID) }
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                context.getString(R.string.speed_monitor_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = context.getString(R.string.speed_monitor_channel_description)
+                setShowBadge(false)
+                enableVibration(false)
+                enableLights(false)
+                setSound(null, null)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            manager.createNotificationChannel(channel)
+        }
+
+        /**
+         * Android 15–17 hides the status bar icon when notifications are blocked OR when the
+         * channel importance is downgraded below IMPORTANCE_DEFAULT (e.g. Low/Min/Silent).
          */
         fun areNotificationsBlocked(context: Context): Boolean {
             val nm = NotificationManagerCompat.from(context)
             if (!nm.areNotificationsEnabled()) return true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = nm.getNotificationChannel(CHANNEL_ID)
-                if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) return true
+                if (channel != null && channel.importance < NotificationManager.IMPORTANCE_DEFAULT) {
+                    return true
+                }
             }
             return false
+        }
+
+        fun isChannelImportanceTooLow(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+            val nm = NotificationManagerCompat.from(context)
+            if (!nm.areNotificationsEnabled()) return false
+            val channel = nm.getNotificationChannel(CHANNEL_ID) ?: return false
+            return channel.importance != NotificationManager.IMPORTANCE_NONE &&
+                channel.importance < NotificationManager.IMPORTANCE_DEFAULT
         }
 
         fun start(context: Context) {

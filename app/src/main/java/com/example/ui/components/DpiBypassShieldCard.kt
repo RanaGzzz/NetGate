@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -36,6 +37,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -80,6 +82,7 @@ fun DpiBypassShieldCard(
     onSelectDnsTransportMode: (DnsTransportMode) -> Unit,
     onFlushCache: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
+    onOpenVpnDpiLogs: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isEnabled = dpiBypassMode != DpiBypassMode.OFF
@@ -395,6 +398,26 @@ fun DpiBypassShieldCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Flush DNS & Reset Autopilot")
+            }
+
+            if (onOpenVpnDpiLogs != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onOpenVpnDpiLogs,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("dpi_open_logs_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Terminal,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("View DPI Bypass & VPN Logs")
+                }
             }
         }
     }

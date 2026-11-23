@@ -55,6 +55,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material3.AlertDialog
@@ -136,6 +137,7 @@ fun VpnGuardContent(
     onVpnGateSearchChange: (String) -> Unit,
     onVpnGateSortChange: (VpnGateSortMode) -> Unit,
     onNotifyMessage: (String) -> Unit,
+    onOpenVpnLogs: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -255,12 +257,13 @@ fun VpnGuardContent(
                     val prep = VpnService.prepare(context)
                     if (prep == null) {
                         onGenerateWarpProfile("Cloudflare WARP", VpnGuardRoutingMode.WHOLE_SYSTEM, emptySet(), true)
-                    } else {
-                        pendingWarpConnectAfterPermission = true
-                        vpnPermissionLauncher.launch(prep)
-                    }
-                }
-            )
+                        } else {
+                            pendingWarpConnectAfterPermission = true
+                            vpnPermissionLauncher.launch(prep)
+                        }
+                    },
+                    onOpenVpnLogs = onOpenVpnLogs
+                )
         }
 
         item(key = "vpn_guard_subtabs") {
@@ -728,7 +731,8 @@ private fun VpnGuardHeroCard(
     nowMillis: Long,
     onConnect: (VpnGuardProfile) -> Unit,
     onDisconnect: (Boolean) -> Unit,
-    onQuickGenerateWarpAndConnect: () -> Unit
+    onQuickGenerateWarpAndConnect: () -> Unit,
+    onOpenVpnLogs: (() -> Unit)? = null
 ) {
     val runtime = state.runtimeState
     val isConnected = runtime.connectionState == VpnGuardConnectionState.CONNECTED
@@ -923,6 +927,26 @@ private fun VpnGuardHeroCard(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("1-Tap Connect Cloudflare WARP")
                     }
+                }
+            }
+
+            if (onOpenVpnLogs != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onOpenVpnLogs,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("vpn_guard_open_logs_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Terminal,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("View VPN & DPI Logs")
                 }
             }
         }

@@ -79,6 +79,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.ui.theme.WifiAccent
 
+import android.os.Build
+import com.example.service.BackgroundPowerHelper
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SystemNetworkMonitorCard(
@@ -96,11 +99,17 @@ fun SystemNetworkMonitorCard(
     val isDark = LocalIsDarkTheme.current
     val context = LocalContext.current
     var notificationsBlocked by remember { mutableStateOf(false) }
+    var channelTooLow by remember { mutableStateOf(false) }
+    var isIgnoringBattery by remember { mutableStateOf(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
+        channelTooLow = NetworkMonitorService.isChannelImportanceTooLow(context)
+        isIgnoringBattery = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
     }
     LaunchedEffect(isStatusBarSpeedEnabled) {
         notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
+        channelTooLow = NetworkMonitorService.isChannelImportanceTooLow(context)
+        isIgnoringBattery = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
     }
     val isOnline = telemetry.activeNetworkType != ActiveNetworkType.NONE
     val networkLabel = when (telemetry.activeNetworkType) {
@@ -380,7 +389,7 @@ fun SystemNetworkMonitorCard(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(WarningAmber.copy(alpha = if (isDark) 0.16f else 0.22f))
-                                .clickable { openNotificationSettings(context) }
+                                .clickable { openNotificationSettings(context, channelTooLow) }
                                 .padding(horizontal = 12.dp, vertical = 9.dp)
                                 .testTag("status_bar_notifications_blocked")
                         ) {
@@ -393,12 +402,56 @@ fun SystemNetworkMonitorCard(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Speed icon is hidden by Android",
+                                    text = if (channelTooLow) {
+                                        "Speed icon muted by low channel priority"
+                                    } else {
+                                        "Speed icon is hidden by Android"
+                                    },
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Notifications are blocked. Tap to allow NetGate notifications.",
+                                    text = if (channelTooLow) {
+                                        "Set Live Network Speed Icon importance to Default so Android 16/17 shows it in the status bar."
+                                    } else {
+                                        "Notifications are blocked. Tap to allow NetGate notifications."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    if (isStatusBarSpeedEnabled && !isIgnoringBattery) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(WarningAmber.copy(alpha = if (isDark) 0.14f else 0.18f))
+                                .clickable {
+                                    BackgroundPowerHelper.requestIgnoreBatteryOptimizations(context)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
+                                .testTag("status_bar_battery_restriction_banner")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = WarningAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Battery saver may pause speed icon",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Tap to allow unrestricted background battery usage.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -700,12 +753,30 @@ private fun LiveThroughputSparkline(
     }
 }
 
-private fun openNotificationSettings(context: Context) {
-    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+private fun openNotificationSettings(context: Context, openChannelSettings: Boolean) {
+    val intent = if (openChannelSettings && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            putExtra(Settings.EXTRA_CHANNEL_ID, NetworkMonitorService.CHANNEL_ID)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    } else {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
     }
-    runCatching { context.startActivity(intent) }
+    val opened = runCatching {
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+    if (!opened) {
+        val fallback = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(fallback) }
+    }
 }
 
 @Composable

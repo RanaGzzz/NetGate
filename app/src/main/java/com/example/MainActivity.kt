@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.AppDestination
 import com.example.data.model.NetGateThemeStyle
+import com.example.service.BackgroundPowerHelper
 import com.example.service.NetGateVpnService
 import com.example.service.NetworkMonitorService
 import com.example.service.SystemNetworkMonitor
@@ -45,11 +46,14 @@ import com.example.ui.theme.NetGateTheme
 class MainActivity : ComponentActivity() {
 
     private var pendingDestination by mutableStateOf<AppDestination?>(null)
+    private var pendingVpnConsentRequest by mutableStateOf(false)
+    private var latestExcludeFromRecents by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingDestination = parseDestinationExtra(intent)
+        pendingVpnConsentRequest = intent?.getBooleanExtra(EXTRA_REQUEST_VPN_CONSENT, false) == true
 
         setContent {
             val viewModel: FirewallViewModel = viewModel()
@@ -60,6 +64,14 @@ class MainActivity : ComponentActivity() {
                     viewModel.selectDestination(dest)
                     pendingDestination = null
                 }
+            }
+
+            LaunchedEffect(uiState.preferences.excludeFromRecents) {
+                latestExcludeFromRecents = uiState.preferences.excludeFromRecents
+                BackgroundPowerHelper.applyExcludeFromRecents(
+                    this@MainActivity,
+                    uiState.preferences.excludeFromRecents
+                )
             }
 
             NetGateTheme(
@@ -117,6 +129,13 @@ class MainActivity : ComponentActivity() {
                         }
                     } else {
                         launchVpnConsentOrStart()
+                    }
+                }
+
+                LaunchedEffect(pendingVpnConsentRequest) {
+                    if (pendingVpnConsentRequest) {
+                        pendingVpnConsentRequest = false
+                        requestEnableFirewall()
                     }
                 }
 
@@ -209,11 +228,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        BackgroundPowerHelper.applyExcludeFromRecents(this, latestExcludeFromRecents)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         parseDestinationExtra(intent)?.let { dest ->
             pendingDestination = dest
+        }
+        if (intent.getBooleanExtra(EXTRA_REQUEST_VPN_CONSENT, false)) {
+            pendingVpnConsentRequest = true
         }
     }
 
@@ -224,5 +251,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_DESTINATION = "extra_destination"
+        const val EXTRA_REQUEST_VPN_CONSENT = "extra_request_vpn_consent"
     }
 }

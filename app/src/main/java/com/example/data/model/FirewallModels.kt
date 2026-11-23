@@ -636,7 +636,8 @@ data class FirewallPreferencesState(
     val dpiIdleKeepAliveEnabled: Boolean = true,
     val blockQuicForDpiBypass: Boolean = true,
     val antiDnsPoisonEnabled: Boolean = true,
-    val dnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK
+    val dnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK,
+    val excludeFromRecents: Boolean = false
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {

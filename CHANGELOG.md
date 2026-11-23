@@ -1,3 +1,14 @@
+# What's New — NetGate 3.5
+
+### New Features
+- **Quick Shield Home Screen Widget:** 2x2 dark-glass widget (`NetGate Quick Shield`) with 1-tap toggles for **VPN**, **DPI**, **Ad Block**, and **Hotspot**, synchronized automatically with in-app state (and launching Android VPN consent cleanly if needed).
+- **Exclude from Recents:** new toggle in **Firewall Settings** using `AppTask.setExcludeFromRecents` so NetGate stays hidden from Android's Recent Apps switcher while running.
+- **Background & Battery Saver Controls:** added `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` support, a live **Allowed / Restricted** badge with 1-tap exemption launcher in **Firewall Settings**, and a restriction reminder in **System Network Monitor**.
+- **GitHub Updates, Changelog & VPN/DPI Logs:** added in-app GitHub Releases update checking, a searchable **Changelog** sheet, and a passive **VPN & DPI Bypass Logs** viewer in Settings.
+
+### Fixes
+- **Android 16 & Android 17 Status Bar Speed Icon:** migrated the speed monitor notification channel to `netgate_speed_monitor_channel_v2` at `IMPORTANCE_DEFAULT` (zero sound, vibration, or badges) and removed `.setSilent(true)` / `PRIORITY_LOW` so Android 16/17 SystemUI displays the real-time speed bitmap in the status bar, with explicit low-priority channel detection in **System Network Monitor**.
+
 # What's New — NetGate 3.4
 
 ### Interface

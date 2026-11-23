@@ -28,7 +28,9 @@ object StatusBarIconRenderer {
         telemetry: LiveNetworkTelemetry,
         style: StatusBarSpeedStyle
     ): Bitmap {
-        val bitmap = Bitmap.createBitmap(ICON_SIZE_PX, ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(ICON_SIZE_PX, ICON_SIZE_PX, Bitmap.Config.ARGB_8888).apply {
+            setHasAlpha(true)
+        }
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.TRANSPARENT)
 

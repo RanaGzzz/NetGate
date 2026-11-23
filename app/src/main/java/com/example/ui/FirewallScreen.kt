@@ -104,6 +104,8 @@ import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
 import com.example.data.model.NetGateThemeStyle
 import com.example.data.model.ThemeMode
+import com.example.data.model.VpnDpiLogCategory
+import com.example.ui.components.AppChangelogSheet
 import com.example.ui.components.AppDetailBottomSheet
 import com.example.ui.components.AppRuleRow
 import com.example.ui.components.BackgroundAnimationSheet
@@ -117,6 +119,7 @@ import com.example.ui.components.FrostedBackdrop
 import com.example.ui.components.FrostedSurface
 import com.example.ui.components.GlassToast
 import com.example.ui.components.HotspotAndWifiContent
+import com.example.ui.components.VpnDpiLogsSheet
 import com.example.ui.components.VpnGuardContent
 import com.example.ui.theme.BlurEngine.blurEngineModalDepth
 import com.example.ui.theme.LocalIsDarkTheme
@@ -585,7 +588,8 @@ fun FirewallScreen(
                                         onCopiedProxyEndpoint = viewModel::notifyCopiedDnsHostname,
                                         onClearDnsLogs = viewModel::clearDnsLogs,
                                         onRequestEnableFirewall = onRequestEnableFirewall,
-                                        onOpenDnsProtection = viewModel::openDnsProtection
+                                        onOpenDnsProtection = viewModel::openDnsProtection,
+                                        onOpenDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.DPI_BYPASS) }
                                     )
                                 }
 
@@ -678,7 +682,8 @@ fun FirewallScreen(
                                         onRefreshVpnGate = viewModel::refreshVpnGateServers,
                                         onVpnGateSearchChange = viewModel::setVpnGateSearchQuery,
                                         onVpnGateSortChange = viewModel::setVpnGateSortMode,
-                                        onNotifyMessage = viewModel::notifyVpnGuardMessage
+                                        onNotifyMessage = viewModel::notifyVpnGuardMessage,
+                                        onOpenVpnLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.VPN_GUARD) }
                                     )
                                 }
 
@@ -892,8 +897,35 @@ fun FirewallScreen(
             onToggleShowOfflineApps = viewModel::setShowOfflineApps,
             onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
             onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
+            onToggleExcludeFromRecents = viewModel::setExcludeFromRecents,
+            appUpdateState = uiState.appUpdateState,
+            vpnDpiLogsCount = uiState.vpnDpiLogs.size,
+            onCheckForUpdates = viewModel::checkForGitHubUpdates,
+            onOpenChangelog = viewModel::openChangelog,
+            onOpenVpnDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.ALL) },
             onClearAllRules = viewModel::clearAllRules,
             onDismiss = viewModel::closeSettings
+        )
+    }
+
+    if (uiState.isChangelogOpen) {
+        AppChangelogSheet(
+            updateState = uiState.appUpdateState,
+            onCheckUpdates = viewModel::checkForGitHubUpdates,
+            onCopiedChangelog = viewModel::notifyVpnGuardMessage,
+            onDismiss = viewModel::closeChangelog
+        )
+    }
+
+    if (uiState.isVpnDpiLogsOpen) {
+        VpnDpiLogsSheet(
+            logs = uiState.vpnDpiLogs,
+            initialCategory = uiState.vpnDpiLogsInitialCategory,
+            vpnRuntimeState = uiState.vpnRuntimeState,
+            vpnGuardRuntimeState = uiState.vpnGuardState.runtimeState,
+            onClearLogs = viewModel::clearVpnDpiLogs,
+            onCopyLogs = viewModel::notifyVpnGuardMessage,
+            onDismiss = viewModel::closeVpnDpiLogs
         )
     }
 

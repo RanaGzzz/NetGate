@@ -89,8 +89,16 @@ import com.example.service.VpnGuardManager
 import com.example.service.VpnRuntimeState
 import com.example.service.WarpConfigGenerator
 import com.example.service.WifiAutomationManager
+import com.example.BuildConfig
+import com.example.data.model.AppUpdateStatus
+import com.example.data.model.AppUpdateUiState
+import com.example.data.model.VpnDpiLogCategory
+import com.example.data.model.VpnDpiLogEntry
+import com.example.data.network.GitHubReleaseUpdateChecker
+import com.example.service.BackgroundPowerHelper
 import com.example.service.WireGuardConfigHelper
 import com.example.ui.AppIconManager
+import com.example.widget.NetGateWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -214,6 +222,14 @@ data class FirewallUiState(
     val hotspotProxyState: HotspotProxyRuntimeState = HotspotProxyRuntimeState(),
     val wifiIdleStatus: WifiIdleStatus = WifiIdleStatus(),
     val vpnGuardState: VpnGuardUiState = VpnGuardUiState(),
+    val appUpdateState: AppUpdateUiState = AppUpdateUiState(
+        currentVersionName = BuildConfig.VERSION_NAME,
+        currentVersionCode = BuildConfig.VERSION_CODE
+    ),
+    val isChangelogOpen: Boolean = false,
+    val vpnDpiLogs: List<VpnDpiLogEntry> = emptyList(),
+    val isVpnDpiLogsOpen: Boolean = false,
+    val vpnDpiLogsInitialCategory: VpnDpiLogCategory = VpnDpiLogCategory.ALL,
     val nowMillis: Long = System.currentTimeMillis()
 ) {
     val effectiveNetworkType: ActiveNetworkType
@@ -300,6 +316,17 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val vpnGateSearchQueryFlow = MutableStateFlow("")
     private val vpnGateSortModeFlow = MutableStateFlow(VpnGateSortMode.SCORE)
 
+    private val appUpdateStateFlow = MutableStateFlow(
+        AppUpdateUiState(
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE
+        )
+    )
+    private val isChangelogOpenFlow = MutableStateFlow(false)
+    private val isVpnDpiLogsOpenFlow = MutableStateFlow(false)
+    private val vpnDpiLogsInitialCategoryFlow = MutableStateFlow(VpnDpiLogCategory.ALL)
+    private val vpnDpiLogMonitor = VpnDpiLogMonitor()
+
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
 
@@ -333,6 +360,32 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         observeActiveTimerTicker()
         observeLiveNetworkTelemetry()
         initHotspotAndWifiObservers()
+        vpnDpiLogMonitor.startObserving(
+            scope = viewModelScope,
+            vpnRuntimeFlow = NetGateVpnService.runtimeState,
+            vpnGuardRuntimeFlow = VpnGuardManager.runtimeState,
+            preferencesFlow = repository.preferencesFlow
+        )
+        observeWidgetSync()
+    }
+
+    private fun observeWidgetSync() {
+        viewModelScope.launch {
+            combine(
+                repository.preferencesFlow.map { prefs ->
+                    listOf(
+                        prefs.isFirewallEnabled,
+                        prefs.dpiBypassMode,
+                        prefs.isAdBlockerEnabled,
+                        prefs.hotspotProxyEnabled
+                    )
+                }.distinctUntilChanged(),
+                NetGateVpnService.runtimeState.map { it.isServiceRunning }.distinctUntilChanged(),
+                HotspotProxyManager.runtimeState.map { it.isProxyRunning }.distinctUntilChanged()
+            ) { _, _, _ -> Unit }.collectLatest {
+                NetGateWidgetProvider.requestUpdate(getApplication())
+            }
+        }
     }
 
     private fun initHotspotAndWifiObservers() {
@@ -511,13 +564,29 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         DnsUiSnapshot(dnsOpen, dnsProbe, dnsLeak, dnsCheck)
     }
 
+    private val diagnosticsOverlayFlow = combine(
+        appUpdateStateFlow,
+        isChangelogOpenFlow,
+        vpnDpiLogMonitor.logs,
+        isVpnDpiLogsOpenFlow,
+        vpnDpiLogsInitialCategoryFlow
+    ) { appUpdate, changelogOpen, logs, logsOpen, logsCategory ->
+        DiagnosticsOverlaySnapshot(
+            appUpdateState = appUpdate,
+            isChangelogOpen = changelogOpen,
+            vpnDpiLogs = logs,
+            isVpnDpiLogsOpen = logsOpen,
+            vpnDpiLogsInitialCategory = logsCategory
+        )
+    }
+
     private val sheetsFlow = combine(
-        isSettingsOpenFlow,
-        isConnectionInfoOpenFlow,
+        combine(isSettingsOpenFlow, isConnectionInfoOpenFlow) { s, c -> s to c },
         isSpeedTestOpenFlow,
         speedTestStateFlow,
-        dnsUiFlow
-    ) { settingsOpen, connInfoOpen, speedTestOpen, speedTest, dnsUi ->
+        dnsUiFlow,
+        diagnosticsOverlayFlow
+    ) { (settingsOpen, connInfoOpen), speedTestOpen, speedTest, dnsUi, diag ->
         SheetsSnapshot(
             settingsOpen = settingsOpen,
             connInfoOpen = connInfoOpen,
@@ -526,7 +595,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             dnsLeakTestState = dnsUi.dnsLeakTestState,
             dnsCheckState = dnsUi.dnsCheckState,
             speedTestOpen = speedTestOpen,
-            speedTestState = speedTest
+            speedTestState = speedTest,
+            diagnostics = diag
         )
     }
 
@@ -850,6 +920,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             hotspotProxyState = hotspotState,
             wifiIdleStatus = idleStatus,
             vpnGuardState = vpnGuardState,
+            appUpdateState = sheets.diagnostics.appUpdateState,
+            isChangelogOpen = sheets.diagnostics.isChangelogOpen,
+            vpnDpiLogs = sheets.diagnostics.vpnDpiLogs,
+            isVpnDpiLogsOpen = sheets.diagnostics.isVpnDpiLogsOpen,
+            vpnDpiLogsInitialCategory = sheets.diagnostics.vpnDpiLogsInitialCategory,
             nowMillis = base.nowMillis
         )
     }.stateIn(
@@ -1225,6 +1300,67 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun closeSettings() {
         isSettingsOpenFlow.value = false
+    }
+
+    fun checkForGitHubUpdates() {
+        if (appUpdateStateFlow.value.status == AppUpdateStatus.CHECKING) return
+        viewModelScope.launch {
+            appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
+                status = AppUpdateStatus.CHECKING,
+                errorMessage = null
+            )
+            val result = GitHubReleaseUpdateChecker.checkForUpdates(BuildConfig.VERSION_NAME)
+            val now = System.currentTimeMillis()
+            result.onSuccess { checkResult ->
+                appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
+                    status = if (checkResult.isUpdateAvailable) {
+                        AppUpdateStatus.UPDATE_AVAILABLE
+                    } else {
+                        AppUpdateStatus.UP_TO_DATE
+                    },
+                    latestRelease = checkResult.latestRelease,
+                    recentReleases = checkResult.recentReleases,
+                    lastCheckedAtMs = now,
+                    errorMessage = null
+                )
+                val msg = if (checkResult.isUpdateAvailable) {
+                    "Update available: ${checkResult.latestRelease.tagName}"
+                } else {
+                    "NetGate v${BuildConfig.VERSION_NAME} is up to date (${checkResult.latestRelease.tagName})"
+                }
+                _snackbarMessages.tryEmit(msg)
+            }.onFailure { err ->
+                val msg = err.message ?: "Unable to check GitHub Releases"
+                appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
+                    status = AppUpdateStatus.ERROR,
+                    lastCheckedAtMs = now,
+                    errorMessage = msg
+                )
+                _snackbarMessages.tryEmit(msg)
+            }
+        }
+    }
+
+    fun openChangelog() {
+        isChangelogOpenFlow.value = true
+    }
+
+    fun closeChangelog() {
+        isChangelogOpenFlow.value = false
+    }
+
+    fun openVpnDpiLogs(category: VpnDpiLogCategory = VpnDpiLogCategory.ALL) {
+        vpnDpiLogsInitialCategoryFlow.value = category
+        isVpnDpiLogsOpenFlow.value = true
+    }
+
+    fun closeVpnDpiLogs() {
+        isVpnDpiLogsOpenFlow.value = false
+    }
+
+    fun clearVpnDpiLogs() {
+        vpnDpiLogMonitor.clear()
+        _snackbarMessages.tryEmit("Cleared VPN & DPI Bypass logs")
     }
 
     fun openConnectionInfo() {
@@ -1807,6 +1943,17 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         _snackbarMessages.tryEmit("Reset live session speed & byte counters")
     }
 
+    fun setExcludeFromRecents(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setExcludeFromRecents(enabled)
+            BackgroundPowerHelper.applyExcludeFromRecents(getApplication(), enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) "NetGate hidden from Recent Apps"
+                else "NetGate visible in Recent Apps"
+            )
+        }
+    }
+
     fun setHotspotProxyEnabled(enabled: Boolean) {
         viewModelScope.launch {
             preferences.setHotspotProxyEnabled(enabled)
@@ -2177,6 +2324,14 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val dnsCheckState: DnsCheckState
     )
 
+    private data class DiagnosticsOverlaySnapshot(
+        val appUpdateState: AppUpdateUiState,
+        val isChangelogOpen: Boolean,
+        val vpnDpiLogs: List<VpnDpiLogEntry>,
+        val isVpnDpiLogsOpen: Boolean,
+        val vpnDpiLogsInitialCategory: VpnDpiLogCategory
+    )
+
     private data class SheetsSnapshot(
         val settingsOpen: Boolean,
         val connInfoOpen: Boolean,
@@ -2185,7 +2340,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val dnsLeakTestState: DnsLeakTestState,
         val dnsCheckState: DnsCheckState,
         val speedTestOpen: Boolean,
-        val speedTestState: SpeedTestState
+        val speedTestState: SpeedTestState,
+        val diagnostics: DiagnosticsOverlaySnapshot
     )
 
     private data class UsageControlsSnapshot(

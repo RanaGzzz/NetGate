@@ -1,0 +1,137 @@
+name: Release Signed NetGate APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (leave blank to use v<versionName> from app/build.gradle.kts)'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark release as prerelease'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Resolve release tag and version
+        id: meta
+        run: |
+          GRADLE_VERSION=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          RAW_TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$RAW_TAG" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW_TAG="${{ github.ref_name }}"
+          fi
+          if [ -z "$RAW_TAG" ]; then
+            RAW_TAG="v${GRADLE_VERSION}"
+          fi
+          VERSION="${RAW_TAG#v}"
+          echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare env files and dummy debug keystore for unit tests
+        run: |
+          touch .env
+          keytool -genkeypair \
+            -keystore debug.keystore \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Run unit & Robolectric tests
+        run: gradle :app:testDebugUnitTest
+
+      - name: Verify signing secrets and decode upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Missing signing secrets. Add KEYSTORE_BASE64, STORE_PASSWORD, and KEY_PASSWORD in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "${{ github.workspace }}/my-upload-key.jks"
+
+      - name: Build signed Release APK
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle :app:assembleRelease
+
+      - name: Prepare release APK & extract CHANGELOG notes
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          APK_SRC="app/build/outputs/apk/release/app-release.apk"
+          APK_DEST="netgate-release-${VERSION}.apk"
+          cp "$APK_SRC" "$APK_DEST"
+          sha256sum "$APK_DEST" > "${APK_DEST}.sha256"
+
+          python3 - "$VERSION" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = re.compile(
+              rf"^# What's New — NetGate {re.escape(version)}\s*\n(.*?)(?=^# What's New|\Z)",
+              re.MULTILINE | re.DOTALL,
+          )
+          match = pattern.search(changelog)
+          if match:
+              notes = f"# What's New — NetGate {version}\n\n{match.group(1).strip()}\n"
+          else:
+              first_section = re.split(r"(?=^# What's New)", changelog, maxsplit=2, flags=re.MULTILINE)
+              notes = next((s.strip() for s in first_section if s.strip()), f"NetGate {version} Release") + "\n"
+          Path("release-notes.md").write_text(notes, encoding="utf-8")
+          PY
+
+      - name: Upload signed APK workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgate-release-${{ steps.meta.outputs.version }}-apk
+          path: |
+            netgate-release-${{ steps.meta.outputs.version }}.apk
+            netgate-release-${{ steps.meta.outputs.version }}.apk.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: NetGate ${{ steps.meta.outputs.version }}
+          body_path: release-notes.md
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: |
+            netgate-release-${{ steps.meta.outputs.version }}.apk
+            netgate-release-${{ steps.meta.outputs.version }}.apk.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
