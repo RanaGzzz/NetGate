@@ -799,7 +799,7 @@ fun FirewallSettingsSheet(
 }
 
 private fun iconPreviewColor(style: AppIconStyle): Color = when (style) {
-    AppIconStyle.EMERALD -> EmeraldPrimary
+    AppIconStyle.EMERALD -> Color(0xFFD9E533)
     AppIconStyle.NEON -> Color(0xFF38BDF8)
     AppIconStyle.VIOLET -> Color(0xFFA78BFA)
     AppIconStyle.AMBER -> Color(0xFFF59E0B)

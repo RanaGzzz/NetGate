@@ -56,7 +56,7 @@ enum class AppIconStyle(
     val subtitle: String,
     val aliasName: String
 ) {
-    EMERALD("Emerald", "Signature NetGate shield on deep navy", "com.example.LauncherEmerald"),
+    EMERALD("Lime", "Signature lime shield with verified badge", "com.example.LauncherEmerald"),
     NEON("Neon", "Electric cyan shield on midnight blue", "com.example.LauncherNeon"),
     VIOLET("Violet", "Ultraviolet shield on plum", "com.example.LauncherViolet"),
     AMBER("Amber", "Warm amber shield on charcoal", "com.example.LauncherAmber")

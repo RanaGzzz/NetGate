@@ -4,4 +4,5 @@
     <color name="ic_launcher_bg_neon">#04121F</color>
     <color name="ic_launcher_bg_violet">#140A24</color>
     <color name="ic_launcher_bg_amber">#1A120B</color>
+    <color name="ic_launcher_bg_legacy">#2F2F12</color>
 </resources>
