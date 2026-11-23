@@ -1,3 +1,11 @@
+# What's New — NetGate 3.3
+
+### Branding
+- **New app icon:** the lime shield mark with the verified badge is now the default adaptive launcher icon,
+  with a monochrome layer for Android 13 themed icons and a legacy fallback for older releases.
+- **README refresh:** project documentation rewritten around the app's core features, with the new logo and
+  current screenshots.
+
 # What's New — NetGate 3.2
 
 ### Live Monitor Fix
