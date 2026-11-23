@@ -52,4 +52,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: NetGate-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          # ABI splits are enabled for every variant, so this includes the universal
+          # debug APK (app-universal-debug.apk) plus one APK per architecture.
+          path: app/build/outputs/apk/debug/*.apk

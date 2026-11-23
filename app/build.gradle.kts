@@ -22,6 +22,18 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  // WireGuard ships libwg.so/libwg-go.so/libwg-quick.so for every ABI (~11.5 MB in
+  // total), so a single universal APK pays for all four architectures. Emit one APK
+  // per ABI and keep a universal APK as the "installs anywhere" download.
+  splits {
+    abi {
+      isEnable = true
+      reset()
+      include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+      isUniversalApk = true
+    }
+  }
+
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
   // and updating Android apps in AI Studio.
   signingConfigs {

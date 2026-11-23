@@ -81,11 +81,13 @@ Build a debug APK:
 ./gradlew :app:assembleDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Install it with:
+ABI splits are enabled, so each build emits one APK per architecture plus a universal APK. The universal debug APK is written to `app/build/outputs/apk/debug/app-universal-debug.apk`. Install it with:
 
 ```shell
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-universal-debug.apk
 ```
+
+To test the smaller per-ABI build instead, install `app/build/outputs/apk/debug/app-<abi>-debug.apk` (for example `app-arm64-v8a-debug.apk`).
 
 Run the unit and Robolectric test suite:
 
@@ -93,7 +95,7 @@ Run the unit and Robolectric test suite:
 ./gradlew :app:testDebugUnitTest
 ```
 
-Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`. Pushing a version tag (e.g. `v3.5`) triggers the GitHub Actions release workflow to run tests, sign `netgate-release-3.5.apk` using repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`), extract release notes from `CHANGELOG.md`, and publish the GitHub Release.
+Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`. Pushing a version tag (e.g. `v3.5`) triggers the GitHub Actions release workflow to run tests, sign one APK per ABI plus a universal APK using repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`), extract release notes from `CHANGELOG.md`, and publish the GitHub Release. Release assets are named `netgate-release-<version>-<abi>.apk` (smaller, architecture-specific) and `netgate-release-<version>.apk` (universal, installs anywhere); each has a `.sha256` alongside it.
 
 ## How it works
 

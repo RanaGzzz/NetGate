@@ -381,7 +381,7 @@ Run every tier that a change can touch. Tiers 0–2 are cheap; tier 3 is the onl
 - [ ] `.env` present (`test -f .env || cp .env.example .env`) — the Secrets plugin reads it
 - [ ] `debug.keystore` present (README keytool one-liner) or CI generates it
 - [ ] `./gradlew :app:testDebugUnitTest` exits **0**
-- [ ] `./gradlew assembleDebug` produces `app/build/outputs/apk/debug/app-debug.apk`
+- [ ] `./gradlew assembleDebug` produces `app/build/outputs/apk/debug/app-universal-debug.apk` (plus per-ABI APKs)
 - [ ] No new `fallbackToDestructiveMigration`, no `allowMainThreadQueries`
 
 ### Tier 1 — Pure logic (must stay green, per PR)

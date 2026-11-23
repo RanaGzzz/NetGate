@@ -50,9 +50,10 @@ yes | sdkmanager --licenses
 # unit + Robolectric suite (101 tests)
 ./gradlew :app:testDebugUnitTest
 
-# debug APK
+# debug APKs (ABI splits are on: one per architecture plus a universal APK)
 ./gradlew assembleDebug
-# → app/build/outputs/apk/debug/app-debug.apk
+# → app/build/outputs/apk/debug/app-universal-debug.apk
+# → app/build/outputs/apk/debug/app-<abi>-debug.apk
 ```
 
 ## Notes and known environment issues
