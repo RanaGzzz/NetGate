@@ -26,7 +26,9 @@ import com.example.data.model.ActiveNetworkType
 import com.example.data.model.AdFilterListItem
 import com.example.data.model.AppDestination
 import com.example.data.model.AppFilterMode
+import com.example.data.model.AppIconStyle
 import com.example.data.model.AppUsageBreakdownItem
+import com.example.data.model.BackgroundAnimationStyle
 import com.example.data.model.BatchAction
 import com.example.data.model.BlurEngineStyle
 import com.example.data.model.ConnectionDetails
@@ -88,6 +90,7 @@ import com.example.service.VpnRuntimeState
 import com.example.service.WarpConfigGenerator
 import com.example.service.WifiAutomationManager
 import com.example.service.WireGuardConfigHelper
+import com.example.ui.AppIconManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1446,6 +1449,29 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     fun setBlurAnimationEnabled(enabled: Boolean) {
         viewModelScope.launch {
             preferences.setBlurAnimationEnabled(enabled)
+        }
+    }
+
+    fun setBackgroundAnimation(style: BackgroundAnimationStyle) {
+        viewModelScope.launch {
+            preferences.setBackgroundAnimation(style)
+            _snackbarMessages.tryEmit("Background animation: ${style.title}")
+        }
+    }
+
+    fun setBackgroundParallaxEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferences.setBackgroundParallaxEnabled(enabled) }
+    }
+
+    fun setBackgroundSeasonalEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferences.setBackgroundSeasonalEnabled(enabled) }
+    }
+
+    fun setAppIconStyle(style: AppIconStyle) {
+        viewModelScope.launch {
+            preferences.setAppIconStyle(style)
+            AppIconManager.apply(getApplication(), style)
+            _snackbarMessages.tryEmit("App icon: ${style.title}")
         }
     }
 

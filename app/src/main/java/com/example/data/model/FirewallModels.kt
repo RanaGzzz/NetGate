@@ -29,6 +29,39 @@ enum class ThemeMode(val label: String) {
     DARK("Night")
 }
 
+/**
+ * Animated backdrop painted behind every NetGate screen. [RANDOM] resolves to one of the concrete
+ * styles when the app starts, so it stays stable for the session instead of flickering per frame.
+ */
+enum class BackgroundAnimationStyle(val title: String) {
+    CIRCLES("Circles"),
+    RINGS("Rings"),
+    MESH("Mesh"),
+    SPACE("Space"),
+    SHAPES("Shapes"),
+    SNOW("Snow"),
+    GRID("Grid"),
+    PARTICLES("Particles"),
+    LAVA_LAMP("Lava lamp"),
+    NONE("None"),
+    RANDOM("Random")
+}
+
+/**
+ * Launcher icon variants. Each value maps to an `<activity-alias>` in the manifest that exposes
+ * [targetActivity] with this icon, so picking one only toggles which alias the launcher sees.
+ */
+enum class AppIconStyle(
+    val title: String,
+    val subtitle: String,
+    val aliasName: String
+) {
+    EMERALD("Emerald", "Signature NetGate shield on deep navy", "com.example.LauncherEmerald"),
+    NEON("Neon", "Electric cyan shield on midnight blue", "com.example.LauncherNeon"),
+    VIOLET("Violet", "Ultraviolet shield on plum", "com.example.LauncherViolet"),
+    AMBER("Amber", "Warm amber shield on charcoal", "com.example.LauncherAmber")
+}
+
 enum class NetGateThemeStyle(
     val title: String,
     val subtitle: String,
@@ -581,6 +614,10 @@ data class FirewallPreferencesState(
     val isDeepMonitorEnabled: Boolean = true,
     val blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
     val isBlurAnimationEnabled: Boolean = true,
+    val backgroundAnimation: BackgroundAnimationStyle = BackgroundAnimationStyle.NONE,
+    val backgroundParallaxEnabled: Boolean = false,
+    val backgroundSeasonalEnabled: Boolean = false,
+    val appIconStyle: AppIconStyle = AppIconStyle.EMERALD,
     val hotspotProxyEnabled: Boolean = false,
     val hotspotProxyPort: Int = 8890,
     val hotspotApplyNetGateFilters: Boolean = true,

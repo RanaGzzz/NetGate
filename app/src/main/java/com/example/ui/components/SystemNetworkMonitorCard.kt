@@ -130,11 +130,24 @@ fun SystemNetworkMonitorCard(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
+                        Text(
+                            text = "System Network Monitor",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        // The LIVE badge lives on the interface line, not next to the title: on narrow
+                        // screens it was squeezed beside the long title and rendered as vertical text.
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "System Network Monitor",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "$networkLabel$ifaceSuffix",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
@@ -161,18 +174,13 @@ fun SystemNetworkMonitorCard(
                                     Text(
                                         text = "LIVE",
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isOnline) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (isOnline) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
                         }
-                        Text(
-                            text = "$networkLabel$ifaceSuffix",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
 

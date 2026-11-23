@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.data.model.BackgroundAnimationStyle
 import com.example.data.model.BlurEngineStyle
 import com.example.data.model.NetGateThemeStyle
 import com.example.ui.theme.BlurEngine.expressiveLiquidTouch
@@ -64,6 +65,9 @@ import kotlin.math.sin
 @Composable
 fun FrostedBackdrop(
     isFirewallActive: Boolean,
+    backgroundAnimation: BackgroundAnimationStyle = BackgroundAnimationStyle.NONE,
+    backgroundParallaxEnabled: Boolean = false,
+    backgroundSeasonalEnabled: Boolean = false,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -184,6 +188,13 @@ fun FrostedBackdrop(
                 }
             }
         }
+
+        AnimatedAppBackground(
+            style = backgroundAnimation,
+            parallaxEnabled = backgroundParallaxEnabled,
+            seasonalEnabled = backgroundSeasonalEnabled,
+            modifier = Modifier.matchParentSize()
+        )
 
         CompositionLocalProvider(
             LocalBackdropLiquidState provides backdropLiquidState,

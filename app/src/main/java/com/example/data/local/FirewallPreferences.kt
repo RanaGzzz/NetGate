@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.data.model.AppIconStyle
+import com.example.data.model.BackgroundAnimationStyle
 import com.example.data.model.BlurEngineStyle
 import com.example.data.model.DnsTransportMode
 import com.example.data.model.DpiBypassMode
@@ -63,6 +65,10 @@ class FirewallPreferences(private val context: Context) {
         val IS_DEEP_MONITOR_ENABLED = booleanPreferencesKey("is_deep_monitor_enabled")
         val BLUR_ENGINE_STYLE = stringPreferencesKey("blur_engine_style")
         val IS_BLUR_ANIMATION_ENABLED = booleanPreferencesKey("is_blur_animation_enabled")
+        val BACKGROUND_ANIMATION = stringPreferencesKey("background_animation")
+        val BACKGROUND_PARALLAX_ENABLED = booleanPreferencesKey("background_parallax_enabled")
+        val BACKGROUND_SEASONAL_ENABLED = booleanPreferencesKey("background_seasonal_enabled")
+        val APP_ICON_STYLE = stringPreferencesKey("app_icon_style")
         val HOTSPOT_PROXY_ENABLED = booleanPreferencesKey("hotspot_proxy_enabled")
         val HOTSPOT_PROXY_PORT = intPreferencesKey("hotspot_proxy_port")
         val HOTSPOT_APPLY_NETGATE_FILTERS = booleanPreferencesKey("hotspot_apply_netgate_filters")
@@ -108,6 +114,12 @@ class FirewallPreferences(private val context: Context) {
         val blurStyleName = prefs[Keys.BLUR_ENGINE_STYLE] ?: BlurEngineStyle.ACRYLIC_PRO.name
         val blurStyle = BlurEngineStyle.entries.firstOrNull { it.name == blurStyleName }
             ?: BlurEngineStyle.ACRYLIC_PRO
+        val backgroundAnimationName = prefs[Keys.BACKGROUND_ANIMATION] ?: BackgroundAnimationStyle.NONE.name
+        val backgroundAnimation = BackgroundAnimationStyle.entries.firstOrNull { it.name == backgroundAnimationName }
+            ?: BackgroundAnimationStyle.NONE
+        val appIconName = prefs[Keys.APP_ICON_STYLE] ?: AppIconStyle.EMERALD.name
+        val appIconStyle = AppIconStyle.entries.firstOrNull { it.name == appIconName }
+            ?: AppIconStyle.EMERALD
         val dpiModeName = prefs[Keys.DPI_BYPASS_MODE] ?: DpiBypassMode.OFF.name
         val dpiMode = DpiBypassMode.entries.firstOrNull { it.name == dpiModeName }
             ?: DpiBypassMode.OFF
@@ -148,6 +160,10 @@ class FirewallPreferences(private val context: Context) {
             isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true,
             blurEngineStyle = blurStyle,
             isBlurAnimationEnabled = prefs[Keys.IS_BLUR_ANIMATION_ENABLED] ?: true,
+            backgroundAnimation = backgroundAnimation,
+            backgroundParallaxEnabled = prefs[Keys.BACKGROUND_PARALLAX_ENABLED] ?: false,
+            backgroundSeasonalEnabled = prefs[Keys.BACKGROUND_SEASONAL_ENABLED] ?: false,
+            appIconStyle = appIconStyle,
             hotspotProxyEnabled = prefs[Keys.HOTSPOT_PROXY_ENABLED] ?: false,
             hotspotProxyPort = (prefs[Keys.HOTSPOT_PROXY_PORT] ?: 8890).coerceIn(1024, 65535),
             hotspotApplyNetGateFilters = prefs[Keys.HOTSPOT_APPLY_NETGATE_FILTERS] ?: true,
@@ -327,6 +343,22 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setBlurAnimationEnabled(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.IS_BLUR_ANIMATION_ENABLED] = enabled }
+    }
+
+    suspend fun setBackgroundAnimation(style: BackgroundAnimationStyle) {
+        context.firewallDataStore.edit { it[Keys.BACKGROUND_ANIMATION] = style.name }
+    }
+
+    suspend fun setBackgroundParallaxEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.BACKGROUND_PARALLAX_ENABLED] = enabled }
+    }
+
+    suspend fun setBackgroundSeasonalEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.BACKGROUND_SEASONAL_ENABLED] = enabled }
+    }
+
+    suspend fun setAppIconStyle(style: AppIconStyle) {
+        context.firewallDataStore.edit { it[Keys.APP_ICON_STYLE] = style.name }
     }
 
     suspend fun setHotspotProxyEnabled(enabled: Boolean) {

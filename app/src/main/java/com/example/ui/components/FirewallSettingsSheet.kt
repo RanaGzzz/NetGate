@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +36,9 @@ import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -43,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -57,6 +61,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
+import com.example.data.model.AppIconStyle
+import com.example.data.model.BackgroundAnimationStyle
 import com.example.data.model.BlurEngineStyle
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.NetGateThemeStyle
@@ -80,6 +86,8 @@ fun FirewallSettingsSheet(
     onToggleDynamicColor: (Boolean) -> Unit,
     onBlurStyleChange: (BlurEngineStyle) -> Unit,
     onToggleBlurAnimation: (Boolean) -> Unit,
+    onOpenBackgroundAnimation: () -> Unit = {},
+    onAppIconChange: (AppIconStyle) -> Unit = {},
     onReplayStartupAnimation: () -> Unit = {},
     onToggleShowSystemApps: (Boolean) -> Unit,
     onToggleShowOfflineApps: (Boolean) -> Unit,
@@ -470,6 +478,137 @@ fun FirewallSettingsSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            FrostedSurface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("settings_background_animation_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.Wallpaper,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Background animation",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${preferences.backgroundAnimation.title} · animation behind every screen",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    FilledTonalButton(
+                        onClick = onOpenBackgroundAnimation,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("settings_open_background_animation")
+                    ) {
+                        Text(
+                            text = "Choose animation",
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            FrostedSurface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("settings_app_icon_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.Shield,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "App Icon",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Adaptive launcher icon style",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AppIconStyle.entries.forEach { style ->
+                            val selected = preferences.appIconStyle == style
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = iconPreviewColor(style).copy(alpha = if (selected) 0.30f else 0.14f),
+                                border = BorderStroke(
+                                    if (selected) 2.dp else 1.dp,
+                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { onAppIconChange(style) }
+                                    .testTag("app_icon_${style.name.lowercase()}")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Shield,
+                                        contentDescription = null,
+                                        tint = iconPreviewColor(style),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = style.title,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             SettingsSwitchRow(
                 title = "Show System Apps",
                 subtitle = "Include pre-installed Android system apps",
@@ -657,6 +796,13 @@ fun FirewallSettingsSheet(
             }
         }
     }
+}
+
+private fun iconPreviewColor(style: AppIconStyle): Color = when (style) {
+    AppIconStyle.EMERALD -> EmeraldPrimary
+    AppIconStyle.NEON -> Color(0xFF38BDF8)
+    AppIconStyle.VIOLET -> Color(0xFFA78BFA)
+    AppIconStyle.AMBER -> Color(0xFFF59E0B)
 }
 
 private fun openRepository(context: Context) {

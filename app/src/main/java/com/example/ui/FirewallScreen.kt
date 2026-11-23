@@ -84,7 +84,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -105,6 +108,7 @@ import com.example.data.model.NetGateThemeStyle
 import com.example.data.model.ThemeMode
 import com.example.ui.components.AppDetailBottomSheet
 import com.example.ui.components.AppRuleRow
+import com.example.ui.components.BackgroundAnimationSheet
 import com.example.ui.components.BatchSelectionBar
 import com.example.ui.components.ConnectionInfoSheet
 import com.example.ui.components.DnsProtectionContent
@@ -133,6 +137,7 @@ fun FirewallScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(viewModel) {
         viewModel.snackbarMessages.collect { message ->
@@ -166,6 +171,9 @@ fun FirewallScreen(
 
     FrostedBackdrop(
         isFirewallActive = isFirewallActive,
+        backgroundAnimation = uiState.preferences.backgroundAnimation,
+        backgroundParallaxEnabled = uiState.preferences.backgroundParallaxEnabled,
+        backgroundSeasonalEnabled = uiState.preferences.backgroundSeasonalEnabled,
         modifier = modifier
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -174,6 +182,7 @@ fun FirewallScreen(
 
             val hasOpenSheet = uiState.isSettingsOpen ||
                 uiState.isConnectionInfoOpen ||
+                showBackgroundSheet ||
                 uiState.inspectedApp != null
 
             Scaffold(
@@ -881,6 +890,11 @@ fun FirewallScreen(
             onToggleDynamicColor = viewModel::setUseDynamicColor,
             onBlurStyleChange = viewModel::setBlurEngineStyle,
             onToggleBlurAnimation = viewModel::setBlurAnimationEnabled,
+            onOpenBackgroundAnimation = {
+                viewModel.closeSettings()
+                showBackgroundSheet = true
+            },
+            onAppIconChange = viewModel::setAppIconStyle,
             onReplayStartupAnimation = {
                 viewModel.closeSettings()
                 onReplayStartupAnimation()
@@ -891,6 +905,16 @@ fun FirewallScreen(
             onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
             onClearAllRules = viewModel::clearAllRules,
             onDismiss = viewModel::closeSettings
+        )
+    }
+
+    if (showBackgroundSheet) {
+        BackgroundAnimationSheet(
+            preferences = uiState.preferences,
+            onSelectAnimation = viewModel::setBackgroundAnimation,
+            onToggleParallax = viewModel::setBackgroundParallaxEnabled,
+            onToggleSeasonal = viewModel::setBackgroundSeasonalEnabled,
+            onDismiss = { showBackgroundSheet = false }
         )
     }
 }

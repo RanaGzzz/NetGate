@@ -1,3 +1,18 @@
+# What's New — NetGate 3.2
+
+### Live Monitor Fix
+- **System Network Monitor header:** the **LIVE** badge no longer gets squeezed into vertical text next to the
+  long card title. It now sits on the interface line beside the network label, and the title ellipsizes on
+  narrow screens.
+
+### Appearance
+- **Background animation:** a new picker in Settings offers Circles, Rings, Mesh, Space, Shapes, Snow, Grid,
+  Particles, Lava lamp, None and Random backdrops, rendered behind every screen.
+- **Parallax effect:** the background can shift smoothly as the device tilts.
+- **Seasonal themes:** an optional seasonal tint for the background animation.
+- **App icon styles:** choose between Emerald, Neon, Violet and Amber adaptive launcher icons. All use a
+  vector foreground with a monochrome layer for Android 13 themed icons.
+
 # What's New — NetGate 3.1
 
 ### UI Fixes
