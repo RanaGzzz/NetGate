@@ -19,3 +19,8 @@ debug.keystore
 
 # Upload keystore used to sign release builds locally; never commit it
 my-upload-key.jks
+
+# Built APKs are produced by Gradle and published as CI artifacts/releases,
+# never committed to the repository.
+apk/
+*.apk
