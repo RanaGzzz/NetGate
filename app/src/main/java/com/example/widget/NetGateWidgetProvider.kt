@@ -7,7 +7,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
 import android.widget.RemoteViews
+import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.local.FirewallPreferences
@@ -77,9 +79,9 @@ class NetGateWidgetProvider : AppWidgetProvider() {
             ACTION_REFRESH
         )
 
-        private const val COLOR_ACTIVE = 0xFF10B981.toInt()
-        private const val COLOR_ACTIVE_TEXT = 0xFFA7F3D0.toInt()
-        private const val COLOR_INACTIVE = 0xFF94A3B8.toInt()
+        private const val FALLBACK_COLOR_ACTIVE = 0xFF10B981.toInt()
+        private const val FALLBACK_COLOR_ACTIVE_TEXT = 0xFFA7F3D0.toInt()
+        private const val FALLBACK_COLOR_INACTIVE = 0xFF94A3B8.toInt()
 
         private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -187,6 +189,25 @@ class NetGateWidgetProvider : AppWidgetProvider() {
         ): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_netgate_controls)
 
+            val useDynamicYou = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && prefs.useDynamicColor
+            val activeAccentColor = if (useDynamicYou) {
+                ContextCompat.getColor(context, R.color.widget_active_accent)
+            } else {
+                FALLBACK_COLOR_ACTIVE
+            }
+            val activeTextColor = if (useDynamicYou) {
+                ContextCompat.getColor(context, R.color.widget_active_text)
+            } else {
+                FALLBACK_COLOR_ACTIVE_TEXT
+            }
+            val inactiveColor = if (useDynamicYou) {
+                ContextCompat.getColor(context, R.color.widget_inactive_tint)
+            } else {
+                FALLBACK_COLOR_INACTIVE
+            }
+            val titleTextColor = ContextCompat.getColor(context, R.color.widget_title_text)
+            val subtitleTextColor = ContextCompat.getColor(context, R.color.widget_subtitle_text)
+
             val vpnActive = prefs.isFirewallEnabled || vpnRunning
             val dpiActive = prefs.dpiBypassMode != DpiBypassMode.OFF
             val adBlockActive = prefs.isAdBlockerEnabled
@@ -200,6 +221,10 @@ class NetGateWidgetProvider : AppWidgetProvider() {
                 else -> "Standby"
             }
             val anyHighlighted = vpnActive || hotspotActive
+            views.setInt(R.id.widget_brand_icon, "setColorFilter", activeAccentColor)
+            views.setTextColor(R.id.widget_title, titleTextColor)
+            views.setInt(R.id.widget_refresh_btn, "setColorFilter", subtitleTextColor)
+
             views.setTextViewText(R.id.widget_status_pill, statusText)
             views.setInt(
                 R.id.widget_status_pill,
@@ -208,7 +233,7 @@ class NetGateWidgetProvider : AppWidgetProvider() {
             )
             views.setTextColor(
                 R.id.widget_status_pill,
-                if (anyHighlighted) COLOR_ACTIVE_TEXT else COLOR_INACTIVE
+                if (anyHighlighted) activeTextColor else inactiveColor
             )
 
             val dpiLabel = prefs.dpiBypassMode.title
@@ -217,36 +242,56 @@ class NetGateWidgetProvider : AppWidgetProvider() {
                 views = views,
                 tileId = R.id.widget_tile_vpn,
                 iconId = R.id.widget_icon_vpn,
+                labelId = R.id.widget_label_vpn,
                 stateId = R.id.widget_state_vpn,
                 isActive = vpnActive,
                 stateLabel = if (vpnActive) "Active" else "Paused",
+                activeIconColor = activeAccentColor,
+                activeTextColor = activeTextColor,
+                inactiveColor = inactiveColor,
+                titleTextColor = titleTextColor,
                 pendingIntent = createActionPendingIntent(context, ACTION_TOGGLE_VPN, 1001)
             )
             bindTile(
                 views = views,
                 tileId = R.id.widget_tile_dpi,
                 iconId = R.id.widget_icon_dpi,
+                labelId = R.id.widget_label_dpi,
                 stateId = R.id.widget_state_dpi,
                 isActive = dpiActive,
                 stateLabel = dpiLabel,
+                activeIconColor = activeAccentColor,
+                activeTextColor = activeTextColor,
+                inactiveColor = inactiveColor,
+                titleTextColor = titleTextColor,
                 pendingIntent = createActionPendingIntent(context, ACTION_TOGGLE_DPI, 1002)
             )
             bindTile(
                 views = views,
                 tileId = R.id.widget_tile_adblock,
                 iconId = R.id.widget_icon_adblock,
+                labelId = R.id.widget_label_adblock,
                 stateId = R.id.widget_state_adblock,
                 isActive = adBlockActive,
                 stateLabel = if (adBlockActive) "On" else "Off",
+                activeIconColor = activeAccentColor,
+                activeTextColor = activeTextColor,
+                inactiveColor = inactiveColor,
+                titleTextColor = titleTextColor,
                 pendingIntent = createActionPendingIntent(context, ACTION_TOGGLE_ADBLOCK, 1003)
             )
             bindTile(
                 views = views,
                 tileId = R.id.widget_tile_hotspot,
                 iconId = R.id.widget_icon_hotspot,
+                labelId = R.id.widget_label_hotspot,
                 stateId = R.id.widget_state_hotspot,
                 isActive = hotspotActive,
                 stateLabel = if (hotspotActive) "Sharing" else "Off",
+                activeIconColor = activeAccentColor,
+                activeTextColor = activeTextColor,
+                inactiveColor = inactiveColor,
+                titleTextColor = titleTextColor,
                 pendingIntent = createActionPendingIntent(context, ACTION_TOGGLE_HOTSPOT, 1004)
             )
 
@@ -271,9 +316,14 @@ class NetGateWidgetProvider : AppWidgetProvider() {
             views: RemoteViews,
             tileId: Int,
             iconId: Int,
+            labelId: Int,
             stateId: Int,
             isActive: Boolean,
             stateLabel: String,
+            activeIconColor: Int,
+            activeTextColor: Int,
+            inactiveColor: Int,
+            titleTextColor: Int,
             pendingIntent: PendingIntent
         ) {
             views.setInt(
@@ -284,12 +334,13 @@ class NetGateWidgetProvider : AppWidgetProvider() {
             views.setInt(
                 iconId,
                 "setColorFilter",
-                if (isActive) COLOR_ACTIVE else COLOR_INACTIVE
+                if (isActive) activeIconColor else inactiveColor
             )
+            views.setTextColor(labelId, titleTextColor)
             views.setTextViewText(stateId, stateLabel)
             views.setTextColor(
                 stateId,
-                if (isActive) COLOR_ACTIVE_TEXT else COLOR_INACTIVE
+                if (isActive) activeTextColor else inactiveColor
             )
             views.setOnClickPendingIntent(tileId, pendingIntent)
         }

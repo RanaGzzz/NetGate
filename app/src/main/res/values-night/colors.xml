@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- NetGate Liquid Glass Widget tokens (Night fallback API < 31) -->
+    <color name="widget_title_text">#FFF8FAFC</color>
+    <color name="widget_subtitle_text">#FF94A3B8</color>
+    <color name="widget_active_accent">#FF10B981</color>
+    <color name="widget_active_text">#FFA7F3D0</color>
+    <color name="widget_inactive_tint">#FF94A3B8</color>
+    <color name="widget_glass_rim">#55FFFFFF</color>
+    <color name="widget_tile_inactive_rim">#33FFFFFF</color>
+</resources>

@@ -291,6 +291,8 @@ fun FirewallScreen(
                                                 viewModel.runDeviceSecurityAudit()
                                             } else if (uiState.dataUsageState.selectedSubTab == com.example.data.model.DataUsageSubTab.SPEED_TEST) {
                                                 viewModel.refreshConnectionDetails()
+                                            } else if (uiState.dataUsageState.selectedSubTab == com.example.data.model.DataUsageSubTab.WIFI) {
+                                                viewModel.refreshWifiDiagnostics()
                                             }
                                         }
                                         AppDestination.DNS -> {
@@ -545,7 +547,9 @@ fun FirewallScreen(
                                         activeNetworkLabel = activeNetLabel,
                                         onStartSpeedTest = viewModel::startSpeedTest,
                                         onStopSpeedTest = viewModel::stopSpeedTest,
-                                        onRunVideoTest = viewModel::startVideoPlaybackTest
+                                        onRunVideoTest = viewModel::startVideoPlaybackTest,
+                                        onRefreshWifi = viewModel::refreshWifiDiagnostics,
+                                        onClearObservedWifi = viewModel::clearObservedWifiHistory
                                     )
                                 }
 

@@ -23,7 +23,7 @@
             android:layout_height="18dp"
             android:contentDescription="@string/app_name"
             android:src="@drawable/ic_widget_vpn"
-            android:tint="#10B981" />
+            android:tint="@color/widget_active_accent" />
 
         <TextView
             android:id="@+id/widget_title"
@@ -34,7 +34,7 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:text="@string/app_name"
-            android:textColor="#F8FAFC"
+            android:textColor="@color/widget_title_text"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -49,7 +49,7 @@
             android:paddingEnd="9dp"
             android:paddingBottom="3dp"
             android:text="Standby"
-            android:textColor="#94A3B8"
+            android:textColor="@color/widget_inactive_tint"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -60,7 +60,7 @@
             android:contentDescription="Refresh NetGate widget"
             android:padding="14dp"
             android:src="@drawable/ic_widget_refresh"
-            android:tint="#94A3B8" />
+            android:tint="@color/widget_subtitle_text" />
     </LinearLayout>
 
     <LinearLayout
@@ -92,7 +92,7 @@
                 android:layout_height="20dp"
                 android:contentDescription="Toggle VPN Firewall"
                 android:src="@drawable/ic_widget_vpn"
-                android:tint="#94A3B8" />
+                android:tint="@color/widget_inactive_tint" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -102,12 +102,13 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/widget_label_vpn"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="VPN"
-                    android:textColor="#F8FAFC"
+                    android:textColor="@color/widget_title_text"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
@@ -118,7 +119,7 @@
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="Paused"
-                    android:textColor="#94A3B8"
+                    android:textColor="@color/widget_subtitle_text"
                     android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
@@ -144,7 +145,7 @@
                 android:layout_height="20dp"
                 android:contentDescription="Toggle DPI Bypass"
                 android:src="@drawable/ic_widget_dpi"
-                android:tint="#94A3B8" />
+                android:tint="@color/widget_inactive_tint" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -154,12 +155,13 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/widget_label_dpi"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="DPI"
-                    android:textColor="#F8FAFC"
+                    android:textColor="@color/widget_title_text"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
@@ -170,7 +172,7 @@
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="Off"
-                    android:textColor="#94A3B8"
+                    android:textColor="@color/widget_subtitle_text"
                     android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
@@ -205,7 +207,7 @@
                 android:layout_height="20dp"
                 android:contentDescription="Toggle Ad Blocker"
                 android:src="@drawable/ic_widget_adblock"
-                android:tint="#94A3B8" />
+                android:tint="@color/widget_inactive_tint" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -215,12 +217,13 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/widget_label_adblock"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="Ad Block"
-                    android:textColor="#F8FAFC"
+                    android:textColor="@color/widget_title_text"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
@@ -231,7 +234,7 @@
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="Off"
-                    android:textColor="#94A3B8"
+                    android:textColor="@color/widget_subtitle_text"
                     android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
@@ -257,7 +260,7 @@
                 android:layout_height="20dp"
                 android:contentDescription="Toggle Hotspot Proxy"
                 android:src="@drawable/ic_widget_hotspot"
-                android:tint="#94A3B8" />
+                android:tint="@color/widget_inactive_tint" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -267,12 +270,13 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/widget_label_hotspot"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="Hotspot"
-                    android:textColor="#F8FAFC"
+                    android:textColor="@color/widget_title_text"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
@@ -283,7 +287,7 @@
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="Off"
-                    android:textColor="#94A3B8"
+                    android:textColor="@color/widget_subtitle_text"
                     android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>

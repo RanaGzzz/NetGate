@@ -51,14 +51,15 @@ object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
             versionLabel = "NetGate 3.5",
-            subtitle = "Quick Shield Widget, Android 16/17 Speed Icon Fix, Recents Privacy & Releases",
+            subtitle = "Wi-Fi Diagnostics, Liquid Glass Material You Widget, New Icons & Releases",
             sections = listOf(
                 ChangelogSection(
                     heading = "New Features",
                     bullets = listOf(
-                        "Quick Shield Home Screen Widget: toggle VPN Firewall, DPI Bypass, Ad Blocker, and Hotspot Proxy directly from your home screen with automatic two-way sync.",
-                        "Exclude from Recents: hide NetGate's card from Android's Recent Apps switcher while background filtering stays active.",
-                        "Background & Battery Saver control: check unrestricted background status in Settings and request battery-optimization exemption in one tap.",
+                        "Wi-Fi Diagnostics in Network & Usage: inspect connected and device-saved/nearby Wi-Fi networks with Standard (Wi-Fi 4/5/6/7), Frequency & Band (2.4/5/6 GHz + Channel), RSSI Signal Strength (dBm), Tx/Rx Link Speed, and Signal Quality thresholds (-67 dBm or stronger = Good).",
+                        "Quick Shield Home Screen Widget (Liquid Glass + Material You): multi-layer refractive Liquid Glass widget with Android 12+ Material You dynamic color palettes and 1-tap VPN, DPI, Ad Block & Hotspot toggles.",
+                        "Exclude from Recents & Battery Saver Control: hide NetGate from Android Recent Apps while filtering stays active, and request unrestricted background battery mode directly from Settings.",
+                        "3 New NetGate Launcher Icons & Updated VPN Emblem: Cyber Gate, Tunnel Core, and Packet Bastion adaptive icons join Lime Shield, plus an updated encrypted globe emblem for VPN Guard.",
                         "GitHub Update Checker, Changelog & VPN/DPI Logs: check GitHub Releases for new APKs, browse release notes, and inspect live passive VPN Guard & DPI bypass telemetry in Settings."
                     )
                 ),
@@ -78,7 +79,7 @@ object BundledChangelog {
                     heading = "Interface",
                     bullets = listOf(
                         "Top glass toast: in-app messages appear as a Liquid Glass pill at the top of the screen so the floating navigation bar and bottom controls stay uncovered.",
-                        "Distinct app icon styles: Lime Shield, Neon Signal, Violet Lock, and Amber Bolt designs, each with an Android 13 monochrome layer."
+                        "Distinct app icon styles: Lime Shield plus three custom NetGate-themed adaptive icon styles, each with an Android 13 monochrome layer."
                     )
                 ),
                 ChangelogSection(

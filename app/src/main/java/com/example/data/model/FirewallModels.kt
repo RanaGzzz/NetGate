@@ -57,9 +57,9 @@ enum class AppIconStyle(
     val aliasName: String
 ) {
     EMERALD("Lime Shield", "Signature lime shield with verified badge", "com.example.LauncherEmerald"),
-    NEON("Neon Signal", "Radar signal rings on midnight blue", "com.example.LauncherNeon"),
-    VIOLET("Violet Lock", "Padlock with keyhole on deep plum", "com.example.LauncherViolet"),
-    AMBER("Amber Bolt", "Lightning bolt inside a hex frame", "com.example.LauncherAmber")
+    NEON("Cyber Gate", "Armored network gateway & packet barrier", "com.example.LauncherNeon"),
+    VIOLET("Tunnel Core", "Encrypted shield & bidirectional tunnel", "com.example.LauncherViolet"),
+    AMBER("Packet Bastion", "Octagonal firewall crest & threat deflector", "com.example.LauncherAmber")
 }
 
 enum class NetGateThemeStyle(
@@ -386,13 +386,17 @@ data class ConnectionDetails(
     val privateDnsHostname: String? = null,
     val privateDnsMode: String? = null,
     // Wi-Fi specific telemetry
+    val wifiSsid: String? = null,
+    val wifiBssid: String? = null,
     val wifiRssiDbm: Int? = null,
     val wifiSignalLabel: String? = null,
     val wifiLinkSpeedMbps: Int? = null,
     val wifiRxLinkSpeedMbps: Int? = null,
     val wifiFrequencyMhz: Int? = null,
+    val wifiChannel: Int? = null,
     val wifiBandLabel: String? = null,
-    val wifiStandardLabel: String? = null
+    val wifiStandardLabel: String? = null,
+    val wifiSecurityLabel: String? = null
 ) {
     val isCloudflarePrivateDns: Boolean
         get() {
@@ -974,6 +978,7 @@ fun formatSingleLineCompactSpeed(bytesPerSec: Long): String {
 
 enum class DataUsageSubTab(val label: String) {
     OVERVIEW("Live & Usage"),
+    WIFI("Wi-Fi"),
     SITES_REGIONS("Sites & Regions"),
     SECURITY_AUDIT("Security Audit"),
     SPEED_TEST("Speed Test")
@@ -1220,6 +1225,139 @@ data class VpnGuardUiState(
     val vpnGateSortMode: VpnGateSortMode = VpnGateSortMode.SCORE,
     val runtimeState: VpnGuardRuntimeState = VpnGuardRuntimeState()
 )
+
+enum class WifiSignalQuality(
+    val label: String,
+    val rangeLabel: String,
+    val description: String,
+    val isGoodOrBetter: Boolean
+) {
+    EXCELLENT(
+        label = "Excellent",
+        rangeLabel = "-30 to -55 dBm",
+        description = "Peak speed, lowest latency & rock-solid streaming or calls",
+        isGoodOrBetter = true
+    ),
+    GOOD(
+        label = "Good",
+        rangeLabel = "-56 to -67 dBm",
+        description = "Good signal strength — reliable HD video, voice & fast downloads",
+        isGoodOrBetter = true
+    ),
+    FAIR(
+        label = "Fair",
+        rangeLabel = "-68 to -75 dBm",
+        description = "Usable for browsing, but throughput may fluctuate under load",
+        isGoodOrBetter = false
+    ),
+    WEAK(
+        label = "Weak",
+        rangeLabel = "Below -75 dBm",
+        description = "Fringe coverage — expect high packet loss, buffering, or drops",
+        isGoodOrBetter = false
+    ),
+    UNAVAILABLE(
+        label = "No Signal",
+        rangeLabel = "Disconnected",
+        description = "Connect to Wi-Fi to inspect live signal strength & quality",
+        isGoodOrBetter = false
+    )
+}
+
+enum class WifiSavedAccessStatus {
+    FULL_OS_LIST,
+    SCOPED_ANDROID_10_PLUS,
+    PERMISSION_NEEDED
+}
+
+data class SavedWifiNetworkInfo(
+    val ssid: String,
+    val bssid: String = "",
+    val standardLabel: String = "Wi-Fi",
+    val frequencyMhz: Int? = null,
+    val bandLabel: String? = null,
+    val channel: Int? = null,
+    val rssiDbm: Int? = null,
+    val linkSpeedMbps: Int? = null,
+    val rxLinkSpeedMbps: Int? = null,
+    val quality: WifiSignalQuality = WifiSignalQuality.UNAVAILABLE,
+    val securityLabel: String = "",
+    val isCurrentlyConnected: Boolean = false,
+    val isSavedOnDevice: Boolean = false,
+    val sourceLabel: String = "",
+    val lastSeenAtMs: Long = 0L
+)
+
+data class WifiDiagnosticsUiState(
+    val isRefreshing: Boolean = false,
+    val isWifiEnabled: Boolean = false,
+    val hasLocationPermission: Boolean = false,
+    val accessStatus: WifiSavedAccessStatus = WifiSavedAccessStatus.SCOPED_ANDROID_10_PLUS,
+    val connectedWifi: SavedWifiNetworkInfo? = null,
+    val savedNetworks: List<SavedWifiNetworkInfo> = emptyList(),
+    val nearbyNetworks: List<SavedWifiNetworkInfo> = emptyList(),
+    val lastUpdatedAtMs: Long = 0L,
+    val statusNote: String = ""
+)
+
+fun classifyWifiSignalQuality(rssiDbm: Int?): WifiSignalQuality = when {
+    rssiDbm == null -> WifiSignalQuality.UNAVAILABLE
+    rssiDbm >= -55 -> WifiSignalQuality.EXCELLENT
+    rssiDbm >= -67 -> WifiSignalQuality.GOOD
+    rssiDbm >= -75 -> WifiSignalQuality.FAIR
+    else -> WifiSignalQuality.WEAK
+}
+
+fun isGoodWifiSignal(rssiDbm: Int?): Boolean = rssiDbm != null && rssiDbm >= -67
+
+fun rssiToSignalPercent(rssiDbm: Int?): Int {
+    if (rssiDbm == null) return 0
+    return (((rssiDbm + 100).coerceIn(0, 70)) * 100) / 70
+}
+
+fun wifiBandFromFrequency(frequencyMhz: Int?): String? = when {
+    frequencyMhz == null || frequencyMhz <= 0 -> null
+    frequencyMhz >= 5925 -> "6 GHz"
+    frequencyMhz >= 4900 -> "5 GHz"
+    frequencyMhz >= 2400 -> "2.4 GHz"
+    else -> "$frequencyMhz MHz"
+}
+
+fun frequencyToWifiChannel(frequencyMhz: Int?): Int? {
+    if (frequencyMhz == null || frequencyMhz <= 0) return null
+    return when {
+        frequencyMhz == 2484 -> 14
+        frequencyMhz in 2412..2472 -> (frequencyMhz - 2407) / 5
+        frequencyMhz in 5160..5885 -> (frequencyMhz - 5000) / 5
+        frequencyMhz in 5955..7115 -> (frequencyMhz - 5950) / 5
+        else -> null
+    }
+}
+
+fun wifiStandardLabelFromCode(standardCode: Int): String = when (standardCode) {
+    8 -> "Wi-Fi 7 (802.11be)"
+    7 -> "Wi-Fi 6E / 6 (802.11ax)"
+    6 -> "Wi-Fi 6 (802.11ax)"
+    5 -> "Wi-Fi 5 (802.11ac)"
+    4 -> "Wi-Fi 4 (802.11n)"
+    1 -> "Legacy (802.11a/b/g)"
+    else -> "Wi-Fi"
+}
+
+fun wifiCapabilitiesToSecurityLabel(capabilities: String?): String {
+    val caps = capabilities?.uppercase().orEmpty()
+    return when {
+        caps.contains("SAE") -> "WPA3-SAE"
+        caps.contains("PSK") && caps.contains("WPA2") -> "WPA2-PSK"
+        caps.contains("EAP") -> "WPA2/3 Enterprise"
+        caps.contains("OWE") -> "OWE (Enhanced Open)"
+        caps.contains("WEP") -> "WEP (Legacy)"
+        caps.contains("WPA") -> "WPA"
+        caps.isNotBlank() -> "Open"
+        else -> ""
+    }
+}
+
 
 
 

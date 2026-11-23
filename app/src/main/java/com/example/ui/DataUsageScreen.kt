@@ -45,8 +45,10 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Wifi
 import com.example.data.network.SpeedTestState
 import com.example.ui.components.SpeedTestContent
+import com.example.ui.components.WifiAnalysisContent
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -129,6 +131,8 @@ fun DataUsageContent(
     onStartSpeedTest: () -> Unit,
     onStopSpeedTest: () -> Unit,
     onRunVideoTest: () -> Unit,
+    onRefreshWifi: () -> Unit = {},
+    onClearObservedWifi: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -149,6 +153,7 @@ fun DataUsageContent(
         Column(modifier = Modifier.fillMaxSize()) {
             DataUsageSubTabBar(
                 selectedSubTab = state.selectedSubTab,
+                wifiCount = state.wifiDiagnostics.savedNetworks.size,
                 sitesCount = state.liveConnections.size.coerceAtLeast(state.historicalConnections.size),
                 flaggedCount = state.flaggedSitesCount,
                 onSelectSubTab = onSelectSubTab,
@@ -157,6 +162,18 @@ fun DataUsageContent(
             )
 
             when (state.selectedSubTab) {
+                DataUsageSubTab.WIFI -> {
+                    WifiAnalysisContent(
+                        state = state.wifiDiagnostics,
+                        onRefreshWifi = onRefreshWifi,
+                        onClearObservedHistory = onClearObservedWifi,
+                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
+                        modifier = Modifier
+                            .weight(1f)
+                            .align(Alignment.CenterHorizontally)
+                    )
+                }
+
                 DataUsageSubTab.SPEED_TEST -> {
                     Box(
                         modifier = Modifier
@@ -464,6 +481,7 @@ fun DataUsageContent(
 @Composable
 private fun DataUsageSubTabBar(
     selectedSubTab: DataUsageSubTab,
+    wifiCount: Int,
     sitesCount: Int,
     flaggedCount: Int,
     onSelectSubTab: (DataUsageSubTab) -> Unit,
@@ -471,7 +489,7 @@ private fun DataUsageSubTabBar(
 ) {
     val isDark = LocalIsDarkTheme.current
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        val useWeight = maxWidth >= 560.dp
+        val useWeight = maxWidth >= 640.dp
         val rowModifier = if (useWeight) {
             Modifier.fillMaxWidth()
         } else {
@@ -487,12 +505,14 @@ private fun DataUsageSubTabBar(
                 val selected = selectedSubTab == tab
                 val icon = when (tab) {
                     DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart
+                    DataUsageSubTab.WIFI -> Icons.Rounded.Wifi
                     DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public
                     DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security
                     DataUsageSubTab.SPEED_TEST -> Icons.Rounded.Speed
                 }
                 val badgeText = when (tab) {
                     DataUsageSubTab.OVERVIEW -> null
+                    DataUsageSubTab.WIFI -> if (wifiCount > 0) "$wifiCount" else null
                     DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
                     DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
                     DataUsageSubTab.SPEED_TEST -> null

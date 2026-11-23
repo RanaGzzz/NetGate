@@ -4,13 +4,13 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Packet Bastion octagonal crest + inner shield silhouette -->
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="4"
-        android:strokeLineJoin="round"
-        android:pathData="M54,24L80,39v30L54,84L28,69V39z" />
+        android:strokeWidth="5"
+        android:pathData="M42,26 H66 L82,42 V66 L66,82 H42 L26,66 V42 Z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M58,33L42,58h9l-3,17 16,-26h-9z" />
+        android:pathData="M54,37 L67,43 V53 C67,62 61,68 54,71 C47,68 41,62 41,53 V43 Z" />
 </vector>

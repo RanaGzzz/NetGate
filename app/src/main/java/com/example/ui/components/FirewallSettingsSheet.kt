@@ -23,9 +23,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -34,16 +39,15 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.LightMode
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NewReleases
@@ -620,7 +624,7 @@ fun FirewallSettingsSheet(
                             val selected = preferences.appIconStyle == style
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
-                                color = iconPreviewColor(style).copy(alpha = if (selected) 0.30f else 0.14f),
+                                color = iconPreviewColor(style).copy(alpha = if (selected) 0.24f else 0.12f),
                                 border = BorderStroke(
                                     if (selected) 2.dp else 1.dp,
                                     if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
@@ -634,18 +638,14 @@ fun FirewallSettingsSheet(
                                     modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Icon(
-                                        imageVector = style.previewIcon(),
-                                        contentDescription = null,
-                                        tint = iconPreviewColor(style),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    AppIconTilePreview(style = style)
+                                    Spacer(modifier = Modifier.height(6.dp))
                                     Text(
                                         text = style.title,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -1235,18 +1235,61 @@ fun FirewallSettingsSheet(
     }
 }
 
-private fun iconPreviewColor(style: AppIconStyle): Color = when (style) {
-    AppIconStyle.EMERALD -> Color(0xFFD9E533)
-    AppIconStyle.NEON -> Color(0xFF38BDF8)
-    AppIconStyle.VIOLET -> Color(0xFFA78BFA)
-    AppIconStyle.AMBER -> Color(0xFFF59E0B)
+@Composable
+private fun AppIconTilePreview(style: AppIconStyle) {
+    val bgColor = when (style) {
+        AppIconStyle.EMERALD -> Color(0xFF0D1225)
+        AppIconStyle.NEON -> Color(0xFF061626)
+        AppIconStyle.VIOLET -> Color(0xFF0E142C)
+        AppIconStyle.AMBER -> Color(0xFF0D181A)
+    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(bgColor)
+    ) {
+        when (style) {
+            AppIconStyle.EMERALD -> Icon(
+                imageVector = Icons.Rounded.VerifiedUser,
+                contentDescription = style.title,
+                tint = Color(0xFFD9E533),
+                modifier = Modifier.size(22.dp)
+            )
+            AppIconStyle.NEON -> Image(
+                painter = painterResource(id = R.drawable.ic_launcher_gate_img),
+                contentDescription = style.title,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(28.dp)
+                    .padding(1.dp)
+            )
+            AppIconStyle.VIOLET -> Image(
+                painter = painterResource(id = R.drawable.ic_launcher_tunnel_img),
+                contentDescription = style.title,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(28.dp)
+                    .padding(1.dp)
+            )
+            AppIconStyle.AMBER -> Image(
+                painter = painterResource(id = R.drawable.ic_launcher_bastion_img),
+                contentDescription = style.title,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(28.dp)
+                    .padding(1.dp)
+            )
+        }
+    }
 }
 
-private fun AppIconStyle.previewIcon() = when (this) {
-    AppIconStyle.EMERALD -> Icons.Rounded.VerifiedUser
-    AppIconStyle.NEON -> Icons.Rounded.Radar
-    AppIconStyle.VIOLET -> Icons.Rounded.Lock
-    AppIconStyle.AMBER -> Icons.Rounded.Bolt
+private fun iconPreviewColor(style: AppIconStyle): Color = when (style) {
+    AppIconStyle.EMERALD -> Color(0xFFD9E533)
+    AppIconStyle.NEON -> Color(0xFF22D3EE)
+    AppIconStyle.VIOLET -> Color(0xFF60A5FA)
+    AppIconStyle.AMBER -> Color(0xFF34D399)
 }
 
 private fun openRepository(context: Context) {

@@ -22,9 +22,13 @@ import com.example.data.model.StatusBarSpeedStyle
 import com.example.data.model.ThemeMode
 import com.example.data.model.UpstreamDnsServer
 import com.example.data.model.WebsiteFilterMode
+import com.example.data.model.WifiSignalQuality
 import com.example.data.model.YouTubeRestrictedMode
+import com.example.data.model.SavedWifiNetworkInfo
+import com.example.data.model.classifyWifiSignalQuality
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONObject
 
 private val Context.firewallDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "netgate_preferences"
@@ -89,6 +93,7 @@ class FirewallPreferences(private val context: Context) {
         val ANTI_DNS_POISON_ENABLED = booleanPreferencesKey("anti_dns_poison_enabled")
         val DNS_TRANSPORT_MODE = stringPreferencesKey("dns_transport_mode")
         val EXCLUDE_FROM_RECENTS = booleanPreferencesKey("exclude_from_recents")
+        val SAVED_WIFI_OBSERVED_SET = stringSetPreferencesKey("saved_wifi_observed_set")
     }
 
     val preferencesFlow: Flow<FirewallPreferencesState> = context.firewallDataStore.data.map { prefs ->
@@ -487,8 +492,78 @@ class FirewallPreferences(private val context: Context) {
         }
     }
 
+    val observedWifiFlow: Flow<List<SavedWifiNetworkInfo>> = context.firewallDataStore.data.map { prefs ->
+        parseObservedWifi(prefs[Keys.SAVED_WIFI_OBSERVED_SET])
+    }
+
+    suspend fun recordObservedWifi(network: SavedWifiNetworkInfo) {
+        val cleanSsid = network.ssid.trim()
+        if (cleanSsid.isEmpty() || cleanSsid.equals("<unknown ssid>", ignoreCase = true)) return
+        context.firewallDataStore.edit { prefs ->
+            val current = parseObservedWifi(prefs[Keys.SAVED_WIFI_OBSERVED_SET])
+                .filterNot { it.ssid.equals(cleanSsid, ignoreCase = true) }
+            val updated = (listOf(network.copy(ssid = cleanSsid, isSavedOnDevice = true)) + current)
+                .sortedByDescending { it.lastSeenAtMs }
+                .take(30)
+            prefs[Keys.SAVED_WIFI_OBSERVED_SET] = updated.mapNotNull(::serializeObservedWifi).toSet()
+        }
+    }
+
+    suspend fun clearObservedWifi() {
+        context.firewallDataStore.edit { it.remove(Keys.SAVED_WIFI_OBSERVED_SET) }
+    }
+
     suspend fun setExcludeFromRecents(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.EXCLUDE_FROM_RECENTS] = enabled }
+    }
+
+    private fun serializeObservedWifi(item: SavedWifiNetworkInfo): String? = runCatching {
+        JSONObject().apply {
+            put("ssid", item.ssid)
+            put("bssid", item.bssid)
+            put("standard", item.standardLabel)
+            put("freq", item.frequencyMhz ?: -1)
+            put("band", item.bandLabel ?: "")
+            put("channel", item.channel ?: -1)
+            put("rssi", item.rssiDbm ?: Int.MIN_VALUE)
+            put("txMbps", item.linkSpeedMbps ?: -1)
+            put("rxMbps", item.rxLinkSpeedMbps ?: -1)
+            put("security", item.securityLabel)
+            put("seenAt", item.lastSeenAtMs)
+        }.toString()
+    }.getOrNull()
+
+    private fun parseObservedWifi(raw: Set<String>?): List<SavedWifiNetworkInfo> {
+        if (raw.isNullOrEmpty()) return emptyList()
+        return raw.mapNotNull { line ->
+            runCatching {
+                val obj = JSONObject(line)
+                val ssid = obj.optString("ssid", "").trim()
+                if (ssid.isEmpty()) return@mapNotNull null
+                val rssi = obj.optInt("rssi", Int.MIN_VALUE).takeIf { it in -120..-1 }
+                val freq = obj.optInt("freq", -1).takeIf { it > 0 }
+                val channel = obj.optInt("channel", -1).takeIf { it > 0 }
+                val txMbps = obj.optInt("txMbps", -1).takeIf { it > 0 }
+                val rxMbps = obj.optInt("rxMbps", -1).takeIf { it > 0 }
+                SavedWifiNetworkInfo(
+                    ssid = ssid,
+                    bssid = obj.optString("bssid", ""),
+                    standardLabel = obj.optString("standard", "Wi-Fi").ifBlank { "Wi-Fi" },
+                    frequencyMhz = freq,
+                    bandLabel = obj.optString("band", "").takeIf { it.isNotBlank() },
+                    channel = channel,
+                    rssiDbm = rssi,
+                    linkSpeedMbps = txMbps,
+                    rxLinkSpeedMbps = rxMbps,
+                    quality = classifyWifiSignalQuality(rssi),
+                    securityLabel = obj.optString("security", ""),
+                    isCurrentlyConnected = false,
+                    isSavedOnDevice = true,
+                    sourceLabel = "Observed on Device",
+                    lastSeenAtMs = obj.optLong("seenAt", 0L)
+                )
+            }.getOrNull()
+        }.sortedByDescending { it.lastSeenAtMs }
     }
 
     private fun parseClientCaps(raw: Set<String>?): Map<String, Long> {

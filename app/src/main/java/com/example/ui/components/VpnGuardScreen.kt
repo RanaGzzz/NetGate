@@ -47,8 +47,8 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.EnhancedEncryption
 import androidx.compose.material.icons.rounded.FileOpen
-import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
@@ -56,7 +56,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -395,7 +394,7 @@ fun VpnGuardContent(
                                     modifier = Modifier.testTag("vpn_guard_keypair_button")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Rounded.Key,
+                                        imageVector = Icons.Rounded.EnhancedEncryption,
                                         contentDescription = null,
                                         modifier = Modifier.size(18.dp)
                                     )
@@ -420,7 +419,7 @@ fun VpnGuardContent(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.VpnKey,
+                                    imageVector = Icons.Rounded.VpnLock,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(40.dp)

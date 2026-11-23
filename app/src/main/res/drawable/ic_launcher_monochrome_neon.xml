@@ -4,25 +4,17 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Cyber Gate silhouette for themed monochrome icons -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,48.5a5.5,5.5 0 1,0 0.1,0z" />
+        android:pathData="M31,32h8v44h-8zM69,32h8v44h-8z" />
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="5"
         android:strokeLineCap="round"
-        android:pathData="M54,42A12,12 0 0,1 66,54" />
+        android:pathData="M39,48 A15,15 0 0,1 69,48" />
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:pathData="M54,33A21,21 0 0,1 75,54" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:pathData="M54,24A30,30 0 0,1 84,54" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,47 l7,7 -7,7 -7,-7z" />
 </vector>

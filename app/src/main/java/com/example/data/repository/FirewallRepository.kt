@@ -19,6 +19,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import com.example.data.local.AdFilterListDao
 import com.example.data.local.AdFilterListEntity
 import com.example.data.local.AppNetworkRuleDao
@@ -50,10 +51,18 @@ import com.example.data.model.DnsLeakTestState
 import com.example.data.model.FirewallPreferencesState
 import com.example.data.model.HistoricalUsageTotals
 import com.example.data.model.InstalledAppInfo
+import com.example.data.model.SavedWifiNetworkInfo
 import com.example.data.model.SiteConnectionRecord
 import com.example.data.model.VpnGuardProfile
 import com.example.data.model.VpnGuardRoutingMode
 import com.example.data.model.WebsiteRuleItem
+import com.example.data.model.WifiDiagnosticsUiState
+import com.example.data.model.WifiSavedAccessStatus
+import com.example.data.model.classifyWifiSignalQuality
+import com.example.data.model.frequencyToWifiChannel
+import com.example.data.model.wifiBandFromFrequency
+import com.example.data.model.wifiCapabilitiesToSecurityLabel
+import com.example.data.model.wifiStandardLabelFromCode
 import com.example.data.network.DnsConnectionChecker
 import com.example.data.network.DnsLeakTester
 import com.example.service.AdBlockFilterEngine
@@ -653,6 +662,14 @@ class FirewallRepository(
             null
         }
 
+        val rawSsid = runCatching { wifiInfo?.ssid }.getOrNull()
+        val cleanSsid = sanitizeWifiSsid(rawSsid)
+        val cleanBssid = runCatching { wifiInfo?.bssid }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() && it != "02:00:00:00:00:00" }
+        val channel = frequencyToWifiChannel(freq)
+        val securityLabel = resolveWifiSecurityLabel(wifiInfo)
+
         val privateDnsActive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             linkProps?.isPrivateDnsActive == true
         } else {
@@ -690,14 +707,258 @@ class FirewallRepository(
             isPrivateDnsActive = privateDnsActive || (privateDnsMode == "hostname" && !resolvedPrivateDnsHost.isNullOrBlank()),
             privateDnsHostname = resolvedPrivateDnsHost,
             privateDnsMode = privateDnsMode,
+            wifiSsid = cleanSsid,
+            wifiBssid = cleanBssid,
             wifiRssiDbm = rssi,
             wifiSignalLabel = signalLabel,
             wifiLinkSpeedMbps = linkSpeed,
             wifiRxLinkSpeedMbps = rxLinkSpeed,
             wifiFrequencyMhz = freq,
+            wifiChannel = channel,
             wifiBandLabel = bandLabel,
-            wifiStandardLabel = wifiStandardLabel
+            wifiStandardLabel = wifiStandardLabel,
+            wifiSecurityLabel = securityLabel
         )
+    }
+
+    suspend fun inspectWifiDiagnostics(
+        observedSaved: List<SavedWifiNetworkInfo>
+    ): WifiDiagnosticsUiState = withContext(Dispatchers.IO) {
+        val details = detectConnectionDetails()
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val hasFineLocation = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarseLocation = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasLocationPermission = hasFineLocation || hasCoarseLocation
+
+        val nowMs = System.currentTimeMillis()
+
+        val scanResults = if (hasLocationPermission && wifiManager != null) {
+            runCatching { wifiManager.scanResults }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+
+        // Best live scan match per SSID (strongest RSSI) for enriching saved/connected metadata
+        val bestScanBySsid = LinkedHashMap<String, SavedWifiNetworkInfo>()
+        for (scan in scanResults) {
+            @Suppress("DEPRECATION")
+            val rawName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                scan.wifiSsid?.toString() ?: scan.SSID
+            } else {
+                scan.SSID
+            }
+            val ssid = sanitizeWifiSsid(rawName) ?: continue
+            val freq = scan.frequency.takeIf { it > 0 }
+            val rssi = scan.level.takeIf { it in -120..-1 }
+            val standard = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                wifiStandardLabelFromCode(scan.wifiStandard)
+            } else {
+                inferLegacyStandard(freq, scan.channelWidth)
+            }
+            val candidate = SavedWifiNetworkInfo(
+                ssid = ssid,
+                bssid = scan.BSSID.orEmpty(),
+                standardLabel = standard,
+                frequencyMhz = freq,
+                bandLabel = wifiBandFromFrequency(freq),
+                channel = frequencyToWifiChannel(freq),
+                rssiDbm = rssi,
+                linkSpeedMbps = null,
+                rxLinkSpeedMbps = null,
+                quality = classifyWifiSignalQuality(rssi),
+                securityLabel = wifiCapabilitiesToSecurityLabel(scan.capabilities),
+                isCurrentlyConnected = false,
+                isSavedOnDevice = false,
+                sourceLabel = "Nearby Wi-Fi",
+                lastSeenAtMs = nowMs
+            )
+            val existing = bestScanBySsid[ssid.lowercase()]
+            if (existing == null || (candidate.rssiDbm ?: -120) > (existing.rssiDbm ?: -120)) {
+                bestScanBySsid[ssid.lowercase()] = candidate
+            }
+        }
+
+        val connectedWifi = if (details.isWifiConnected) {
+            val resolvedSsid = details.wifiSsid ?: "Connected Wi-Fi (SSID Hidden)"
+            val scanMatch = details.wifiSsid?.let { bestScanBySsid[it.lowercase()] }
+            val entry = SavedWifiNetworkInfo(
+                ssid = resolvedSsid,
+                bssid = details.wifiBssid ?: scanMatch?.bssid.orEmpty(),
+                standardLabel = details.wifiStandardLabel ?: scanMatch?.standardLabel ?: "Wi-Fi",
+                frequencyMhz = details.wifiFrequencyMhz ?: scanMatch?.frequencyMhz,
+                bandLabel = details.wifiBandLabel ?: scanMatch?.bandLabel,
+                channel = details.wifiChannel ?: scanMatch?.channel,
+                rssiDbm = details.wifiRssiDbm ?: scanMatch?.rssiDbm,
+                linkSpeedMbps = details.wifiLinkSpeedMbps,
+                rxLinkSpeedMbps = details.wifiRxLinkSpeedMbps,
+                quality = classifyWifiSignalQuality(details.wifiRssiDbm ?: scanMatch?.rssiDbm),
+                securityLabel = details.wifiSecurityLabel?.takeIf { it.isNotBlank() }
+                    ?: scanMatch?.securityLabel.orEmpty(),
+                isCurrentlyConnected = true,
+                isSavedOnDevice = true,
+                sourceLabel = "Connected & Saved",
+                lastSeenAtMs = nowMs
+            )
+            if (!details.wifiSsid.isNullOrBlank()) {
+                runCatching { preferences.recordObservedWifi(entry) }
+            }
+            entry
+        } else {
+            null
+        }
+
+        // Real OS configured networks (available on Android < 10; callerConfiguredNetworks on Android 13+)
+        val osConfiguredSsids = LinkedHashSet<String>()
+        var hasFullOsSavedList = false
+        if (wifiManager != null && hasLocationPermission) {
+            @Suppress("DEPRECATION")
+            val legacyConfigured = runCatching { wifiManager.configuredNetworks }.getOrDefault(emptyList())
+            if (!legacyConfigured.isNullOrEmpty()) {
+                hasFullOsSavedList = true
+                for (cfg in legacyConfigured) {
+                    @Suppress("DEPRECATION")
+                    sanitizeWifiSsid(cfg.SSID)?.let { osConfiguredSsids.add(it) }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val callerConfigs = runCatching { wifiManager.callerConfiguredNetworks }.getOrDefault(emptyList())
+                for (cfg in callerConfigs) {
+                    @Suppress("DEPRECATION")
+                    sanitizeWifiSsid(cfg.SSID)?.let { osConfiguredSsids.add(it) }
+                }
+            }
+        }
+
+        val savedMap = LinkedHashMap<String, SavedWifiNetworkInfo>()
+        if (connectedWifi != null && !details.wifiSsid.isNullOrBlank()) {
+            savedMap[connectedWifi.ssid.lowercase()] = connectedWifi
+        }
+        for (ssid in osConfiguredSsids) {
+            val key = ssid.lowercase()
+            val liveScan = bestScanBySsid[key]
+            val prevObserved = observedSaved.firstOrNull { it.ssid.equals(ssid, ignoreCase = true) }
+            val existing = savedMap[key]
+            if (existing == null) {
+                savedMap[key] = SavedWifiNetworkInfo(
+                    ssid = ssid,
+                    bssid = liveScan?.bssid ?: prevObserved?.bssid.orEmpty(),
+                    standardLabel = liveScan?.standardLabel ?: prevObserved?.standardLabel ?: "Wi-Fi",
+                    frequencyMhz = liveScan?.frequencyMhz ?: prevObserved?.frequencyMhz,
+                    bandLabel = liveScan?.bandLabel ?: prevObserved?.bandLabel,
+                    channel = liveScan?.channel ?: prevObserved?.channel,
+                    rssiDbm = liveScan?.rssiDbm ?: prevObserved?.rssiDbm,
+                    linkSpeedMbps = prevObserved?.linkSpeedMbps,
+                    rxLinkSpeedMbps = prevObserved?.rxLinkSpeedMbps,
+                    quality = classifyWifiSignalQuality(liveScan?.rssiDbm ?: prevObserved?.rssiDbm),
+                    securityLabel = liveScan?.securityLabel?.ifBlank { prevObserved?.securityLabel.orEmpty() }
+                        ?: prevObserved?.securityLabel.orEmpty(),
+                    isCurrentlyConnected = false,
+                    isSavedOnDevice = true,
+                    sourceLabel = if (liveScan != null) "Device Saved • In Range" else "Device Saved",
+                    lastSeenAtMs = liveScan?.lastSeenAtMs ?: prevObserved?.lastSeenAtMs ?: nowMs
+                )
+            }
+        }
+        for (obs in observedSaved) {
+            val key = obs.ssid.lowercase()
+            if (key in savedMap) continue
+            val liveScan = bestScanBySsid[key]
+            val mergedRssi = liveScan?.rssiDbm ?: obs.rssiDbm
+            savedMap[key] = obs.copy(
+                bssid = liveScan?.bssid?.ifBlank { obs.bssid } ?: obs.bssid,
+                standardLabel = liveScan?.standardLabel ?: obs.standardLabel,
+                frequencyMhz = liveScan?.frequencyMhz ?: obs.frequencyMhz,
+                bandLabel = liveScan?.bandLabel ?: obs.bandLabel,
+                channel = liveScan?.channel ?: obs.channel,
+                rssiDbm = mergedRssi,
+                quality = classifyWifiSignalQuality(mergedRssi),
+                securityLabel = liveScan?.securityLabel?.ifBlank { obs.securityLabel } ?: obs.securityLabel,
+                isCurrentlyConnected = false,
+                isSavedOnDevice = true,
+                sourceLabel = if (liveScan != null) "Saved on Device • In Range" else "Saved on Device",
+                lastSeenAtMs = liveScan?.lastSeenAtMs ?: obs.lastSeenAtMs
+            )
+        }
+
+        val savedNetworks = savedMap.values.sortedWith(
+            compareByDescending<SavedWifiNetworkInfo> { it.isCurrentlyConnected }
+                .thenByDescending { it.rssiDbm ?: Int.MIN_VALUE }
+                .thenByDescending { it.lastSeenAtMs }
+        )
+
+        val nearbyNetworks = bestScanBySsid.values
+            .filter { scan ->
+                val lower = scan.ssid.lowercase()
+                lower != details.wifiSsid?.lowercase() && lower !in savedMap
+            }
+            .sortedByDescending { it.rssiDbm ?: Int.MIN_VALUE }
+
+        val accessStatus = when {
+            !hasLocationPermission -> WifiSavedAccessStatus.PERMISSION_NEEDED
+            hasFullOsSavedList -> WifiSavedAccessStatus.FULL_OS_LIST
+            else -> WifiSavedAccessStatus.SCOPED_ANDROID_10_PLUS
+        }
+
+        val statusNote = when (accessStatus) {
+            WifiSavedAccessStatus.PERMISSION_NEEDED ->
+                "Grant Location permission so Android lets NetGate reveal the active Wi-Fi name (SSID), scan nearby networks, and record device Wi-Fi profiles with live frequency & signal stats."
+            WifiSavedAccessStatus.FULL_OS_LIST ->
+                "Showing saved system Wi-Fi profiles enriched with live band, standard, link speed, and signal quality."
+            WifiSavedAccessStatus.SCOPED_ANDROID_10_PLUS ->
+                "Android 10+ limits third-party apps from reading the full system Wi-Fi password list. NetGate lists live connected & previously observed device Wi-Fi networks plus nearby scan metrics; tap Android Wi-Fi Settings to manage all saved credentials."
+        }
+
+        WifiDiagnosticsUiState(
+            isRefreshing = false,
+            isWifiEnabled = details.isWifiRadioEnabled,
+            hasLocationPermission = hasLocationPermission,
+            accessStatus = accessStatus,
+            connectedWifi = connectedWifi,
+            savedNetworks = savedNetworks,
+            nearbyNetworks = nearbyNetworks,
+            lastUpdatedAtMs = nowMs,
+            statusNote = statusNote
+        )
+    }
+
+    private fun sanitizeWifiSsid(raw: String?): String? {
+        val clean = raw?.trim()?.removePrefix("\"")?.removeSuffix("\"")?.trim().orEmpty()
+        if (clean.isEmpty()) return null
+        if (clean.equals("<unknown ssid>", ignoreCase = true)) return null
+        if (clean.equals("0x", ignoreCase = true)) return null
+        return clean
+    }
+
+    private fun resolveWifiSecurityLabel(wifiInfo: WifiInfo?): String? {
+        if (wifiInfo == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        return when (wifiInfo.currentSecurityType) {
+            WifiInfo.SECURITY_TYPE_SAE -> "WPA3-SAE"
+            WifiInfo.SECURITY_TYPE_PSK -> "WPA2-PSK"
+            WifiInfo.SECURITY_TYPE_EAP -> "WPA2 Enterprise"
+            WifiInfo.SECURITY_TYPE_EAP_WPA3_ENTERPRISE,
+            WifiInfo.SECURITY_TYPE_EAP_WPA3_ENTERPRISE_192_BIT -> "WPA3 Enterprise"
+            WifiInfo.SECURITY_TYPE_OWE -> "OWE (Enhanced Open)"
+            WifiInfo.SECURITY_TYPE_OPEN -> "Open"
+            WifiInfo.SECURITY_TYPE_WEP -> "WEP (Legacy)"
+            WifiInfo.SECURITY_TYPE_WAPI_PSK -> "WAPI-PSK"
+            else -> null
+        }
+    }
+
+    private fun inferLegacyStandard(frequencyMhz: Int?, channelWidth: Int): String {
+        return when {
+            frequencyMhz != null && frequencyMhz >= 5925 -> "Wi-Fi 6E (6 GHz)"
+            frequencyMhz != null && frequencyMhz >= 4900 && channelWidth >= ScanResult.CHANNEL_WIDTH_80MHZ -> "Wi-Fi 5/6 (802.11ac/ax)"
+            frequencyMhz != null && frequencyMhz >= 4900 -> "Wi-Fi 5 (802.11ac)"
+            frequencyMhz != null && frequencyMhz >= 2400 -> "Wi-Fi 4 (802.11n)"
+            else -> "Wi-Fi"
+        }
     }
 
     suspend fun runDnsLeakTest(

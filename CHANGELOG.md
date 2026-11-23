@@ -1,7 +1,9 @@
 # What's New — NetGate 3.5
 
 ### New Features
-- **Quick Shield Home Screen Widget:** 2x2 dark-glass widget (`NetGate Quick Shield`) with 1-tap toggles for **VPN**, **DPI**, **Ad Block**, and **Hotspot**, synchronized automatically with in-app state (and launching Android VPN consent cleanly if needed).
+- **Wi-Fi Tab in Network & Usage:** Added a dedicated **Wi-Fi** diagnostics view displaying live connected Wi-Fi and device-saved/nearby profiles with **Standard** (Wi-Fi 4/5/6/7), **Frequency & Band** (2.4 / 5 / 6 GHz + Channel), **Signal Strength** (`dBm` RSSI & %), **Link Speed** (Tx/Rx Mbps), and **Wi-Fi Quality** guidance highlighting **-67 dBm or stronger** as good signal strength.
+- **Liquid Glass + Material You Widget:** Upgraded **NetGate Quick Shield** (`NetGateWidgetProvider`) with multi-layer refractive Liquid Glass backdrops/tiles powered by Android 12+ Material You dynamic colors (`system_accent1` / `system_neutral1` / `system_neutral2`) with adaptive Light & Dark fallbacks, plus 1-tap toggles for **VPN**, **DPI**, **Ad Block**, and **Hotspot**.
+- **3 New NetGate Launcher Icons & Updated VPN Emblem:** Kept **Lime Shield** unchanged and regenerated the other 3 adaptive icons as **Cyber Gate**, **Tunnel Core**, and **Packet Bastion** with matching Android 13+ monochrome layers; replaced the key logo on VPN Guard with an encrypted globe emblem.
 - **Exclude from Recents:** new toggle in **Firewall Settings** using `AppTask.setExcludeFromRecents` so NetGate stays hidden from Android's Recent Apps switcher while running.
 - **Background & Battery Saver Controls:** added `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` support, a live **Allowed / Restricted** badge with 1-tap exemption launcher in **Firewall Settings**, and a restriction reminder in **System Network Monitor**.
 - **GitHub Updates, Changelog & VPN/DPI Logs:** added in-app GitHub Releases update checking, a searchable **Changelog** sheet, and a passive **VPN & DPI Bypass Logs** viewer in Settings.
@@ -14,9 +16,7 @@
 ### Interface
 - **Top glass toast:** in-app messages now appear as a Liquid Glass pill at the top of the screen instead of
   a snackbar at the bottom, so the floating navigation bar and bottom controls stay uncovered. Tap to dismiss.
-- **Distinct app icon styles:** the icon picker no longer recolours the same adaptive shield. It now offers four
-  different designs — Lime Shield, Neon Signal (radar), Violet Lock (padlock) and Amber Bolt — each with its own
-  Android 13 monochrome layer.
+- **Distinct app icon styles:** the icon picker offers **Lime Shield** alongside three custom NetGate adaptive icon styles, each with its own Android 13 monochrome layer.
 
 ### Fixes
 - **Status bar network speed:** the live speed icon appears immediately instead of waiting for Android's

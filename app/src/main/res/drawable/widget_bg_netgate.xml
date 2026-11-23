@@ -1,13 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <gradient
-        android:angle="135"
-        android:startColor="#F20A121C"
-        android:centerColor="#F20E1926"
-        android:endColor="#F2071419" />
-    <stroke
-        android:width="1.2dp"
-        android:color="#4010B981" />
-    <corners android:radius="22dp" />
-</shape>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Layer 0: Translucent Material You / fallback frosted base -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_glass_backdrop_fill" />
+            <corners android:radius="26dp" />
+        </shape>
+    </item>
+    <!-- Layer 1: Dynamic Material You chromatic aura wash -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_glass_aura_tint" />
+            <corners android:radius="26dp" />
+        </shape>
+    </item>
+    <!-- Layer 2: Liquid Glass specular refraction sheen -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="135"
+                android:startColor="#48FFFFFF"
+                android:centerColor="#12FFFFFF"
+                android:endColor="#08FFFFFF" />
+            <corners android:radius="26dp" />
+        </shape>
+    </item>
+    <!-- Layer 3: Inner top highlight rim -->
+    <item
+        android:top="1dp"
+        android:left="1dp"
+        android:right="1dp"
+        android:bottom="1dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <stroke
+                android:width="0.8dp"
+                android:color="#40FFFFFF" />
+            <corners android:radius="25dp" />
+        </shape>
+    </item>
+    <!-- Layer 4: Outer Material You dynamic glass rim -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <stroke
+                android:width="1.3dp"
+                android:color="@color/widget_glass_outer_rim" />
+            <corners android:radius="26dp" />
+        </shape>
+    </item>
+</layer-list>

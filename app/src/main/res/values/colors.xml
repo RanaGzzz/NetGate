@@ -7,4 +7,13 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- NetGate Liquid Glass Widget tokens (Light fallback API < 31) -->
+    <color name="widget_title_text">#FF0F172A</color>
+    <color name="widget_subtitle_text">#FF475569</color>
+    <color name="widget_active_accent">#FF059669</color>
+    <color name="widget_active_text">#FF065F46</color>
+    <color name="widget_inactive_tint">#FF64748B</color>
+    <color name="widget_glass_rim">#B8FFFFFF</color>
+    <color name="widget_tile_inactive_rim">#7AFFFFFF</color>
 </resources>

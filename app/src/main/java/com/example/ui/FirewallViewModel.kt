@@ -70,6 +70,7 @@ import com.example.data.model.VpnGuardSubTab
 import com.example.data.model.VpnGuardUiState
 import com.example.data.model.WebsiteFilterMode
 import com.example.data.model.WebsiteRuleItem
+import com.example.data.model.WifiDiagnosticsUiState
 import com.example.data.model.WifiIdleStatus
 import com.example.data.model.YouTubeRestrictedMode
 import com.example.data.network.DnsConnectionChecker
@@ -111,6 +112,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -138,7 +140,8 @@ data class DataUsageUiState(
     val siteSearchQuery: String = "",
     val selectedCountryFilter: String? = null,
     val showLiveSitesFeed: Boolean = true,
-    val securityAuditReport: DeviceSecurityAuditReport = DeviceSecurityAuditReport()
+    val securityAuditReport: DeviceSecurityAuditReport = DeviceSecurityAuditReport(),
+    val wifiDiagnostics: WifiDiagnosticsUiState = WifiDiagnosticsUiState()
 ) {
     val activeFeedTotalCount: Int
         get() = if (showLiveSitesFeed) liveConnections.size else historicalConnections.size
@@ -304,6 +307,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val selectedCountryFilterFlow = MutableStateFlow<String?>(null)
     private val showLiveSitesFeedFlow = MutableStateFlow(true)
     private val securityAuditReportFlow = MutableStateFlow(DeviceSecurityAuditReport())
+    private val wifiDiagnosticsStateFlow = MutableStateFlow(WifiDiagnosticsUiState())
     private val isSyncingAdListsFlow = MutableStateFlow(false)
 
     private val vpnGuardSubTabFlow = MutableStateFlow(VpnGuardSubTab.PROFILES)
@@ -633,9 +637,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         ConnectionMonitorHub.liveConnectionsFlow,
         repository.connectionHistoryFlow,
         siteControlsFlow,
-        securityAuditReportFlow
-    ) { live, history, controls, auditReport ->
-        SiteMonitorSnapshot(live, history, controls, auditReport)
+        securityAuditReportFlow,
+        wifiDiagnosticsStateFlow
+    ) { live, history, controls, auditReport, wifiDiagnostics ->
+        SiteMonitorSnapshot(live, history, controls, auditReport, wifiDiagnostics)
     }
 
     private val usageStateFlow = combine(
@@ -734,7 +739,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             siteSearchQuery = siteCtrls.siteQuery,
             selectedCountryFilter = siteCtrls.countryFilter,
             showLiveSitesFeed = siteCtrls.showLive,
-            securityAuditReport = siteMonitor.auditReport
+            securityAuditReport = siteMonitor.auditReport,
+            wifiDiagnostics = siteMonitor.wifiDiagnostics
         )
     }
 
@@ -965,6 +971,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                     runDeviceSecurityAudit()
                 } else if (dataUsageSubTabFlow.value == DataUsageSubTab.SPEED_TEST) {
                     refreshConnectionDetails()
+                } else if (dataUsageSubTabFlow.value == DataUsageSubTab.WIFI) {
+                    refreshWifiDiagnostics()
                 }
             }
             AppDestination.DNS -> {
@@ -989,6 +997,28 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
         if (tab == DataUsageSubTab.SPEED_TEST) {
             refreshConnectionDetails()
+        }
+        if (tab == DataUsageSubTab.WIFI) {
+            refreshWifiDiagnostics()
+        }
+    }
+
+    fun refreshWifiDiagnostics() {
+        if (wifiDiagnosticsStateFlow.value.isRefreshing) return
+        viewModelScope.launch {
+            wifiDiagnosticsStateFlow.value = wifiDiagnosticsStateFlow.value.copy(isRefreshing = true)
+            val observed = runCatching { preferences.observedWifiFlow.first() }.getOrDefault(emptyList())
+            val state = repository.inspectWifiDiagnostics(observed)
+            wifiDiagnosticsStateFlow.value = state
+            connectionDetailsFlow.value = repository.detectConnectionDetails()
+        }
+    }
+
+    fun clearObservedWifiHistory() {
+        viewModelScope.launch {
+            preferences.clearObservedWifi()
+            refreshWifiDiagnostics()
+            _snackbarMessages.tryEmit("Cleared observed device Wi-Fi history")
         }
     }
 
@@ -1572,7 +1602,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setUseDynamicColor(enabled: Boolean) {
-        viewModelScope.launch { preferences.setUseDynamicColor(enabled) }
+        viewModelScope.launch {
+            preferences.setUseDynamicColor(enabled)
+            NetGateWidgetProvider.requestUpdate(getApplication())
+        }
     }
 
     fun setBlurEngineStyle(style: BlurEngineStyle) {
@@ -2390,7 +2423,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val live: List<SiteConnectionRecord>,
         val history: List<SiteConnectionRecord>,
         val controls: SiteControlsSnapshot,
-        val auditReport: DeviceSecurityAuditReport
+        val auditReport: DeviceSecurityAuditReport,
+        val wifiDiagnostics: WifiDiagnosticsUiState
     )
 }
 
