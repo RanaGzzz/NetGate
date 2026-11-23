@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag name (leave blank to use v<versionName> from app/build.gradle.kts)'
+        description: 'Release tag (blank = v<versionName>); must match versionName in app/build.gradle.kts'
         required: false
         default: ''
       prerelease:
@@ -25,6 +25,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Full history and tags are needed to validate the tag, the previous
+          # release's versionCode and the CHANGELOG section.
+          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -37,20 +41,83 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Resolve release tag and version
+      - name: Validate version, tag and CHANGELOG
         id: meta
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          GRADLE_VERSION=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
-          RAW_TAG="${{ github.event.inputs.tag_name }}"
-          if [ -z "$RAW_TAG" ] && [ "${{ github.ref_type }}" = "tag" ]; then
-            RAW_TAG="${{ github.ref_name }}"
+          set -euo pipefail
+
+          VERSION_CODE=$(grep -E '^[[:space:]]*versionCode[[:space:]]*=' app/build.gradle.kts | head -n1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          VERSION_NAME=$(grep -E '^[[:space:]]*versionName[[:space:]]*=' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ]; then
+            echo "::error::Could not read versionCode/versionName from app/build.gradle.kts."
+            exit 1
+          fi
+
+          RAW_TAG="$INPUT_TAG"
+          if [ -z "$RAW_TAG" ] && [ "$REF_TYPE" = "tag" ]; then
+            RAW_TAG="$REF_NAME"
           fi
           if [ -z "$RAW_TAG" ]; then
-            RAW_TAG="v${GRADLE_VERSION}"
+            RAW_TAG="v${VERSION_NAME}"
           fi
           VERSION="${RAW_TAG#v}"
+
+          # The tag must agree with the versionName that was actually built.
+          if [ "$VERSION" != "$VERSION_NAME" ]; then
+            echo "::error::Tag '$RAW_TAG' does not match versionName '$VERSION_NAME' in app/build.gradle.kts. Bump versionName (and versionCode) before releasing."
+            exit 1
+          fi
+
+          # Releasing from an unmerged branch would publish code that never passed
+          # the default-branch build, so require the tagged commit to be on it.
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            DEFAULT_BRANCH="main"
+          fi
+          git fetch --no-tags --quiet origin \
+            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" || true
+          if ! git rev-parse --verify -q "origin/${DEFAULT_BRANCH}" > /dev/null; then
+            echo "::error::Could not resolve origin/${DEFAULT_BRANCH} to check that $GITHUB_SHA is on the default branch."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::Commit $GITHUB_SHA is not on ${DEFAULT_BRANCH}. Merge before tagging a release."
+            exit 1
+          fi
+
+          # versionCode must increase over the previous release, otherwise Android
+          # refuses to install the update and stores reject the upload.
+          PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$RAW_TAG" | head -n1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            PREV_CODE=$(git show "$PREV_TAG:app/build.gradle.kts" 2>/dev/null \
+              | grep -E '^[[:space:]]*versionCode[[:space:]]*=' | head -n1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)
+            if [ -z "$PREV_CODE" ]; then
+              echo "::error::Could not read versionCode from previous release tag '$PREV_TAG'."
+              exit 1
+            fi
+            if [ "$VERSION_CODE" -le "$PREV_CODE" ]; then
+              echo "::error::versionCode $VERSION_CODE must be greater than $PREV_CODE from '$PREV_TAG'. Bump versionCode in app/build.gradle.kts."
+              exit 1
+            fi
+            echo "versionCode $VERSION_CODE is greater than $PREV_CODE from $PREV_TAG"
+          else
+            echo "No previous v* tag found; skipping versionCode comparison."
+          fi
+
+          # Notes must exist for exactly this version; falling back to another
+          # section would publish the wrong changelog to users.
+          if ! grep -qxF "# What's New — NetGate ${VERSION}" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '# What's New — NetGate ${VERSION}' section. Add release notes before tagging."
+            exit 1
+          fi
+
           echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare env files and dummy debug keystore for unit tests
         run: |
@@ -89,8 +156,87 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle :app:assembleRelease
 
+      - name: Verify APK signature and metadata
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.RELEASE_CERT_SHA256 }}
+          META_VERSION: ${{ steps.meta.outputs.version }}
+          META_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::Release APK missing at $APK."
+            exit 1
+          fi
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          BUILD_TOOLS=$(ls -d "${SDK_ROOT}"/build-tools/*/ 2>/dev/null | sort -V | tail -n1 || true)
+          APKSIGNER=$(command -v apksigner || true)
+          if [ -z "$APKSIGNER" ] && [ -n "$BUILD_TOOLS" ]; then
+            APKSIGNER="${BUILD_TOOLS}apksigner"
+          fi
+          if [ ! -x "${APKSIGNER:-}" ]; then
+            echo "::error::apksigner not found; the runner has no Android build-tools."
+            exit 1
+          fi
+
+          if ! CERTS=$("$APKSIGNER" verify --verbose --print-certs "$APK"); then
+            echo "::error::$APK failed signature verification (apksigner verify)."
+            exit 1
+          fi
+          printf '%s\n' "$CERTS"
+
+          ACTUAL_SHA256=$(printf '%s\n' "$CERTS" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: *//p' \
+            | head -n1 | tr 'A-F' 'a-f' | tr -d ': ')
+          if [ -z "$ACTUAL_SHA256" ]; then
+            echo "::error::Could not read the signer certificate digest from apksigner output."
+            exit 1
+          fi
+
+          EXPECTED_SHA256=$(printf '%s' "${EXPECTED_CERT_SHA256:-}" | tr 'A-F' 'a-f' | tr -d ': ')
+          if [ -z "$EXPECTED_SHA256" ]; then
+            echo "::error::Set repository variable RELEASE_CERT_SHA256 to ${ACTUAL_SHA256} (Settings -> Secrets and variables -> Actions -> Variables) so releases can prove they used the upload key."
+            exit 1
+          fi
+          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::APK was signed by certificate ${ACTUAL_SHA256}, expected ${EXPECTED_SHA256}. The signing secrets do not match the upload key; refusing to publish."
+            exit 1
+          fi
+
+          AAPT=$(command -v aapt || true)
+          if [ -z "$AAPT" ] && [ -n "$BUILD_TOOLS" ] && [ -x "${BUILD_TOOLS}aapt" ]; then
+            AAPT="${BUILD_TOOLS}aapt"
+          fi
+          if [ -z "$AAPT" ] && [ -n "$BUILD_TOOLS" ] && [ -x "${BUILD_TOOLS}aapt2" ]; then
+            AAPT="${BUILD_TOOLS}aapt2"
+          fi
+          if [ ! -x "${AAPT:-}" ]; then
+            echo "::error::Neither aapt nor aapt2 was found to read the APK manifest."
+            exit 1
+          fi
+
+          BADGING=$("$AAPT" dump badging "$APK" 2>/dev/null | head -n1 || true)
+          ACTUAL_CODE=$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          ACTUAL_NAME=$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          if [ "$ACTUAL_CODE" != "$META_VERSION_CODE" ] || [ "$ACTUAL_NAME" != "$META_VERSION" ]; then
+            echo "::error::APK reports versionCode='$ACTUAL_CODE' versionName='$ACTUAL_NAME' but this release is versionCode='$META_VERSION_CODE' versionName='$META_VERSION'."
+            exit 1
+          fi
+
+          {
+            echo "### Release APK verified"
+            echo ""
+            echo "| Field | Value |"
+            echo "| :--- | :--- |"
+            echo "| versionCode | \`$ACTUAL_CODE\` |"
+            echo "| versionName | \`$ACTUAL_NAME\` |"
+            echo "| signer SHA-256 | \`$ACTUAL_SHA256\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Prepare release APK & extract CHANGELOG notes
         run: |
+          set -euo pipefail
           VERSION="${{ steps.meta.outputs.version }}"
           APK_SRC="app/build/outputs/apk/release/app-release.apk"
           APK_DEST="netgate-release-${VERSION}.apk"
@@ -109,11 +255,9 @@ jobs:
               re.MULTILINE | re.DOTALL,
           )
           match = pattern.search(changelog)
-          if match:
-              notes = f"# What's New — NetGate {version}\n\n{match.group(1).strip()}\n"
-          else:
-              first_section = re.split(r"(?=^# What's New)", changelog, maxsplit=2, flags=re.MULTILINE)
-              notes = next((s.strip() for s in first_section if s.strip()), f"NetGate {version} Release") + "\n"
+          if match is None or not match.group(1).strip():
+              sys.exit(f"::error::CHANGELOG.md has no release notes for NetGate {version}.")
+          notes = f"# What's New — NetGate {version}\n\n{match.group(1).strip()}\n"
           Path("release-notes.md").write_text(notes, encoding="utf-8")
           PY
 
