@@ -1,29 +1,30 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# R8 / ProGuard rules for NetGate release builds (isMinifyEnabled + isShrinkResources).
+# AndroidX, Compose, Room, OkHttp and coroutines ship their own consumer rules, so
+# only project-specific keep rules and trace metadata belong here.
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Reference: https://developer.android.com/build/shrink-code
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep the file/line metadata so crashes from release builds can be retraced
+# against the mapping.txt uploaded by the release workflow. Source file names
+# are replaced with the literal "SourceFile" to avoid leaking paths.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep JNI methods; native code resolves them by name at runtime.
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# ViewModels are instantiated reflectively by ViewModelProvider's default factory.
+-keepclassmembers class * extends androidx.lifecycle.ViewModel {
+    <init>();
+}
 
+# WireGuard's tunnel library is loaded through JNI and parses its config classes
+# by name, so it has to survive shrinking and obfuscation untouched.
 -keep class com.wireguard.android.** { *; }
 -keep class com.wireguard.config.** { *; }
 -keep class com.wireguard.crypto.** { *; }
 -dontwarn com.wireguard.android.**
--keepclasseswithmembernames class * {
-    native <methods>;
-}
+-dontwarn com.wireguard.config.**
+-dontwarn com.wireguard.crypto.**

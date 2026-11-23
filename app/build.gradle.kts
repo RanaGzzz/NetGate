@@ -43,7 +43,11 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      // Shrink and obfuscate release builds with R8. Resource shrinking needs
+      // minification enabled; the resulting mapping.txt is uploaded by the
+      // release workflow so crash traces can be retraced.
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
