@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.time.Instant
 
 plugins {
   alias(libs.plugins.android.application)
@@ -38,7 +39,9 @@ android {
       }.getOrDefault("")
     }
     val suppliedTimestamp = System.getenv("BUILD_TIMESTAMP")?.trim().orEmpty()
-    val buildTimestamp = if (suppliedTimestamp.isNotEmpty()) suppliedTimestamp else java.time.Instant.now().toString()
+    // Note: the fully qualified `java.time.Instant` does not resolve here, because
+    // `java` is the Gradle Java plugin extension inside a build script.
+    val buildTimestamp = if (suppliedTimestamp.isNotEmpty()) suppliedTimestamp else Instant.now().toString()
     buildConfigField("String", "GIT_COMMIT_SHA", "\"$gitSha\"")
     buildConfigField("String", "BUILD_TIMESTAMP", "\"$buildTimestamp\"")
   }
