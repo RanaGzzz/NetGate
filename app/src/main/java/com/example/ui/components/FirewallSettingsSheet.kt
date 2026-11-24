@@ -987,6 +987,15 @@ fun FirewallSettingsSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.testTag("settings_app_version")
                             )
+                            buildIdentityText()?.let { identity ->
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = identity,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("settings_build_identity")
+                                )
+                            }
                         }
                         Surface(
                             shape = RoundedCornerShape(50),
@@ -1362,4 +1371,19 @@ private fun SettingsSwitchRow(
             )
         }
     }
+}
+
+/**
+ * Short build identity for the About card: the commit the APK was built from and
+ * when it was built, or null when neither is known (for example a build from a
+ * source archive without git metadata).
+ */
+private fun buildIdentityText(): String? {
+    val sha = BuildConfig.GIT_COMMIT_SHA.trim()
+    val timestamp = BuildConfig.BUILD_TIMESTAMP.trim()
+    val parts = buildList {
+        if (sha.isNotEmpty()) add("commit ${sha.take(7)}")
+        if (timestamp.length >= 16) add("built ${timestamp.substring(0, 16).replace('T', ' ')} UTC")
+    }
+    return if (parts.isEmpty()) null else parts.joinToString(" \u00b7 ")
 }

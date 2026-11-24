@@ -20,6 +20,27 @@ android {
     versionName = "3.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Build identity surfaced in the About card. CI passes GIT_COMMIT_SHA and
+    // BUILD_TIMESTAMP; local builds fall back to git HEAD and the current time.
+    val suppliedSha = System.getenv("GIT_COMMIT_SHA")?.trim().orEmpty()
+    val gitSha = if (suppliedSha.isNotEmpty()) {
+      suppliedSha
+    } else {
+      runCatching {
+        val process = ProcessBuilder("git", "rev-parse", "HEAD")
+          .directory(rootDir)
+          .redirectErrorStream(true)
+          .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        process.waitFor()
+        if (output.matches(Regex("[0-9a-f]{40}"))) output else ""
+      }.getOrDefault("")
+    }
+    val suppliedTimestamp = System.getenv("BUILD_TIMESTAMP")?.trim().orEmpty()
+    val buildTimestamp = if (suppliedTimestamp.isNotEmpty()) suppliedTimestamp else java.time.Instant.now().toString()
+    buildConfigField("String", "GIT_COMMIT_SHA", "\"$gitSha\"")
+    buildConfigField("String", "BUILD_TIMESTAMP", "\"$buildTimestamp\"")
   }
 
   // WireGuard ships libwg.so/libwg-go.so/libwg-quick.so for every ABI (~11.5 MB in

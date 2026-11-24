@@ -169,7 +169,10 @@ jobs:
           STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
           ALIAS: ${{ secrets.ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle :app:assembleRelease
+          GIT_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          export BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gradle :app:assembleRelease
 
       - name: Verify APK signatures and metadata
         env:

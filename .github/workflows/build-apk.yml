@@ -46,7 +46,11 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build Debug APK
-        run: gradle assembleDebug
+        env:
+          GIT_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          export BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gradle assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
