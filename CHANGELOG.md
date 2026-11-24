@@ -1,7 +1,19 @@
 # What's New — NetGate 3.6
 
-### Release Build Fixes
-- **Release APK shrinking:** fixed R8 failures caused by OkHttp probing optional Bouncy Castle, Conscrypt, and OpenJSSE TLS providers that are not bundled with the Android app.
+### Android Compatibility
+- **Network diagnostics on older Android:** guarded MTU and per-interface traffic-counter APIs that are unavailable on older OS versions, so unsupported values are reported as unknown instead of risking a monitor crash.
+
+### About & Release Downloads
+- **Build identity:** the About card now shows the APK's short source commit and UTC build time.
+- **Smaller release APKs:** enabled R8 code and resource shrinking and added separate `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64` downloads alongside the universal APK.
+- **Release build compatibility:** fixed R8 failures from OkHttp's optional Bouncy Castle, Conscrypt, and OpenJSSE TLS providers; Android continues to use its platform TLS provider.
+
+### Release Engineering
+- Hardened publishing with version/tag and `versionCode` checks, upload-certificate and APK metadata verification, per-ABI native-library checks, and SHA-256 checksums.
+- Added release build provenance attestations, a CycloneDX SBOM, and uploaded R8 mappings for retracing.
+- Pinned release actions, restricted workflow permissions, added lint and dependency-review gates, and automated dependency updates.
+- Added shared Android CI setup, bounded workflow concurrency/timeouts, Gradle configuration-cache-safe build identity, and dependency-graph submission; removed the checked-in debug APK.
+- Migrated Android source files from the sample `com.example` package to `com.aistudio.netgate`.
 
 # What's New — NetGate 3.5
 

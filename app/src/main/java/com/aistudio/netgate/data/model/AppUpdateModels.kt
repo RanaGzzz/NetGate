@@ -51,12 +51,20 @@ object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
             versionLabel = "NetGate 3.6",
-            subtitle = "Release Build Fixes",
+            subtitle = "Android Compatibility, Build Identity & Smaller Downloads",
             sections = listOf(
                 ChangelogSection(
-                    heading = "Fixes",
+                    heading = "Android Compatibility",
                     bullets = listOf(
-                        "Fixed release APK shrinking failures caused by OkHttp probing optional TLS providers that are not bundled with Android."
+                        "Network monitoring now guards MTU and per-interface traffic-counter APIs that are unavailable on older Android versions, reporting unsupported values instead of risking a crash."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "About & Release Downloads",
+                    bullets = listOf(
+                        "The About card now shows the APK's short source commit and UTC build time.",
+                        "Release APKs are smaller through R8 code and resource shrinking, with separate downloads for each supported CPU architecture and a universal APK.",
+                        "Fixed release shrinking failures from OkHttp's optional TLS providers; Android continues to use its platform TLS implementation."
                     )
                 )
             )
