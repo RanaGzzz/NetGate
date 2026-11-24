@@ -28,3 +28,9 @@
 -dontwarn com.wireguard.android.**
 -dontwarn com.wireguard.config.**
 -dontwarn com.wireguard.crypto.**
+
+# OkHttp probes these optional TLS providers at runtime; Android uses its
+# platform TLS implementation when they are not packaged with the app.
+-dontwarn org.bouncycastle.jsse.**
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**

@@ -1,3 +1,8 @@
+# What's New — NetGate 3.6
+
+### Release Build Fixes
+- **Release APK shrinking:** fixed R8 failures caused by OkHttp probing optional Bouncy Castle, Conscrypt, and OpenJSSE TLS providers that are not bundled with the Android app.
+
 # What's New — NetGate 3.5
 
 ### New Features
