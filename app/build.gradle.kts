@@ -101,6 +101,14 @@ android {
     compose = true
     buildConfig = true
   }
+  lint {
+    // CI runs `:app:lintDebug`, so error-severity findings must fail the build
+    // instead of just being printed. Warnings stay non-blocking.
+    abortOnError = true
+    warningsAsErrors = false
+    // These only report newer upstream versions, which Dependabot covers.
+    disable += setOf("GradleDependency", "AndroidGradlePluginVersion")
+  }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
     includeInApk = false
