@@ -33,7 +33,7 @@ NetGate is a root-free Android network-control utility built on a single local `
 ## 2. Layer map (verified file inventory)
 
 ```
-app/src/main/java/com/example/
+app/src/main/java/com/aistudio/netgate/
 ├── MainActivity.kt                    225   Compose host, VPN consent, notification perms, splash
 ├── ui/                                      29 files — Compose UI + single ViewModel
 │   ├── FirewallScreen.kt            1,249   Root scaffold + nav destinations
@@ -142,12 +142,12 @@ Every row names the *actual* function that starts the subsystem in the current c
 ### In-process intent actions & extras (string contract)
 
 ```
-com.example.service.ACTION_START / ACTION_STOP / ACTION_RELOAD_RULES        NetGateVpnService
-com.example.service.NETWORK_MONITOR_START / NETWORK_MONITOR_STOP            NetworkMonitorService
-com.example.service.HOTSPOT_PROXY_START / HOTSPOT_PROXY_STOP                HotspotProxyService
-com.example.action.VPN_GUARD_START / VPN_GUARD_STOP / VPN_GUARD_UPDATE      VpnGuardService (private)
-com.example.service.ACTION_CHECK_APP_TIMERS                                 AppTimerScheduler → receiver
-com.example.service.ACTION_GLOBAL_WIFI_TIMER / ACTION_UNLOCK_GLOBAL_WIFI    WifiAutomationManager → receiver
+com.aistudio.netgate.service.ACTION_START / ACTION_STOP / ACTION_RELOAD_RULES        NetGateVpnService
+com.aistudio.netgate.service.NETWORK_MONITOR_START / NETWORK_MONITOR_STOP            NetworkMonitorService
+com.aistudio.netgate.service.HOTSPOT_PROXY_START / HOTSPOT_PROXY_STOP                HotspotProxyService
+com.aistudio.netgate.action.VPN_GUARD_START / VPN_GUARD_STOP / VPN_GUARD_UPDATE      VpnGuardService (private)
+com.aistudio.netgate.service.ACTION_CHECK_APP_TIMERS                                 AppTimerScheduler → receiver
+com.aistudio.netgate.service.ACTION_GLOBAL_WIFI_TIMER / ACTION_UNLOCK_GLOBAL_WIFI    WifiAutomationManager → receiver
 extra_destination                                                          MainActivity (AppDestination name)
 ```
 
@@ -307,7 +307,7 @@ NetworkMonitorService ──► SystemNetworkMonitor + StatusBarIconRenderer
 | R8 | **Packet writers are hand-rolled** | `DnsPacketFilter` builds IPv4/IPv6 UDP/TCP/ICMP packets with manual checksums; `DpiBypassEngine` slices ClientHello byte ranges | Any refactor here is high-blast-radius; only unit tests protect it |
 | R9 | **Lifetime counters flushed asynchronously** | `pendingLifetimeAdsDelta` + `scheduleFlushLifetimeAds()` writes DataStore from `NetGateVpnService` | A refactor moving counter ownership risks lost increments on kill |
 | R10 | **Privacy surface** | `allowBackup=true`; Room DB + prefs contain browsing domains, per-app usage history, hotspot client IPs/labels | Backup/export rules must be reviewed before shipping any data refactor |
-| R11 | **Build config drift** | `namespace = com.example`, `applicationId = com.aistudio.netgate.xkqmpt`; release keystore path/env vars from AI Studio; Google Services plugin with `WARN` passthrough; `metadata.json` advertises a Gemini capability nothing uses | Renaming packages or wiring Firebase must not disturb signing or the Secrets plugin |
+| R11 | **Build config drift** | `namespace = com.aistudio.netgate`, `applicationId = com.aistudio.netgate.xkqmpt`; release keystore path/env vars from AI Studio; Google Services plugin with `WARN` passthrough; `metadata.json` advertises a Gemini capability nothing uses | Renaming packages or wiring Firebase must not disturb signing or the Secrets plugin |
 | R12 | **CI builds only** | `.github/workflows/build-apk.yml` runs `gradle assembleDebug` and uploads the APK — **never runs tests** | Regressions pass CI silently; the checklist below is the real gate |
 
 ---

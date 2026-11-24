@@ -11,7 +11,7 @@ need that slot, so ownership is now arbitrated by a single component instead of 
 
 The GoBackend TUN implementation, routing modes, split-tunnel package sets and both foreground
 services are unchanged. Only *who may own the slot, and when*, moved into
-`com.example.service.session.VpnSessionCoordinator`.
+`com.aistudio.netgate.service.session.VpnSessionCoordinator`.
 
 ## Components
 
@@ -107,7 +107,7 @@ to free the slot. It is the only gate for restoring the firewall later.
 
 ## Test results
 
-`app/src/test/java/com/example/service/session/VpnSessionCoordinatorTest.kt` — 17 tests, JVM only,
+`app/src/test/java/com/aistudio/netgate/service/session/VpnSessionCoordinatorTest.kt` — 17 tests, JVM only,
 virtual time (`runTest`), no Robolectric/Android:
 
 | Area | Tests |

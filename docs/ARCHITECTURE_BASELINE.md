@@ -1,7 +1,7 @@
 # NetGate — Architecture Baseline & Refactoring Report
 
 **Project:** NetGate  
-**Package Namespace:** `com.example`  
+**Package Namespace:** `com.aistudio.netgate`  
 **Application ID:** `com.aistudio.netgate.xkqmpt`  
 **Target / Compile SDK:** Android 36 (minorApiLevel 1) | **Min SDK:** 24 (Android 7.0)  
 **Toolchain:** Kotlin 2.2.10, Jetpack Compose BOM 2025.12.00, AGP 9.1.1, KSP 2.3.5, Java 11 / desugar_jdk_libs 2.1.5  
@@ -65,14 +65,14 @@ NetGate is a modern rootless Android firewall, DNS filtering shield, and VPN rou
 
 | Subsystem | Primary Entry Point | Trigger / Invocation Pattern | Key Runtime Classes |
 | :--- | :--- | :--- | :--- |
-| **Local Firewall VPN** | `com.example.service.NetGateVpnService` (`android.net.VpnService`) | User toggles Master Firewall switch in UI. Initiates `VpnService.prepare(context)` consent and calls `NetGateVpnService.startOrReload(context)`. | `NetGateVpnService`, `PerAppFirewallEngine`, `TunPacketInspector` |
-| **VPN Guard (WireGuard / WARP)** | `com.example.service.VpnGuardService` & `com.wireguard.android.backend.GoBackend$VpnService` | User selects profile and taps Connect in VPN Guard. `VpnGuardManager.connect(context, profile)` pauses local firewall, writes `IS_FIREWALL_ENABLED = false`, and binds WireGuard tunnel. | `VpnGuardService`, `VpnGuardManager`, `WireGuardConfigHelper`, `WarpConfigGenerator` |
+| **Local Firewall VPN** | `com.aistudio.netgate.service.NetGateVpnService` (`android.net.VpnService`) | User toggles Master Firewall switch in UI. Initiates `VpnService.prepare(context)` consent and calls `NetGateVpnService.startOrReload(context)`. | `NetGateVpnService`, `PerAppFirewallEngine`, `TunPacketInspector` |
+| **VPN Guard (WireGuard / WARP)** | `com.aistudio.netgate.service.VpnGuardService` & `com.wireguard.android.backend.GoBackend$VpnService` | User selects profile and taps Connect in VPN Guard. `VpnGuardManager.connect(context, profile)` pauses local firewall, writes `IS_FIREWALL_ENABLED = false`, and binds WireGuard tunnel. | `VpnGuardService`, `VpnGuardManager`, `WireGuardConfigHelper`, `WarpConfigGenerator` |
 | **DNS Packet Interception & DoH** | Loop inside `NetGateVpnService.vpnLoop()` intercepting port UDP/53 | Intercepts all port 53 packets; matches domains against AdBlock, website rules, and SafeSearch aliases. Synthesizes NXDOMAIN/NODATA or forwards over HTTPS (RFC 8484). | `DnsPacketFilter`, `AdBlockFilterEngine`, `DnsConnectionChecker`, `DnsLeakTester` |
 | **Local Filtering Proxy Server** | ServerSocket listening on `127.0.0.1:8899` | Started during `NetGateVpnService` boot. Serves HTTP, HTTPS `CONNECT`, TLS ClientHello SNI inspection, and tracking URL parameter stripping. | `LocalFilteringProxyServer`, `DpiBypassEngine`, `GeoIpResolver` |
 | **DPI Bypass Shield** | Pre-routing filter inside `LocalFilteringProxyServer` | Active when `DpiBypassMode != OFF`. Fragments TLS ClientHello SNI bytes, desynchronizes HTTP Host headers, downgrades QUIC, and suppresses spoofed DNS responses. | `DpiBypassEngine`, `DnsPacketFilter.stripQuicSvcbRecords()`, `DnsPacketFilter.isLikelyForgedDnsResponse()` |
-| **Hotspot Proxy Sharing** | `com.example.service.HotspotProxyService` listening on `0.0.0.0:8890` | User enables Hotspot Proxy in Hotspot & Wi-Fi settings sheet. Invokes `HotspotProxyManager.startProxy(context, port)` across tethered interfaces. | `HotspotProxyService`, `HotspotProxyManager`, `LocalFilteringProxyServer` |
+| **Hotspot Proxy Sharing** | `com.aistudio.netgate.service.HotspotProxyService` listening on `0.0.0.0:8890` | User enables Hotspot Proxy in Hotspot & Wi-Fi settings sheet. Invokes `HotspotProxyManager.startProxy(context, port)` across tethered interfaces. | `HotspotProxyService`, `HotspotProxyManager`, `LocalFilteringProxyServer` |
 | **Wi-Fi Automation & Timers** | `AppTimerReceiver` (`BroadcastReceiver`) & `WifiAutomationManager` | `AppTimerScheduler` sets `AlarmManager.setExactAndAllowWhileIdle()`. Monitored every 1s by ViewModel and 3s by `NetGateVpnService` loop. | `AppTimerScheduler`, `AppTimerReceiver`, `WifiAutomationManager` |
-| **System Speed & Telemetry Monitor** | `com.example.service.NetworkMonitorService` | User enables Status Bar Speed Icon or opens live telemetry dashboard. Executes 1 Hz `TrafficStats` delta polling loop. | `NetworkMonitorService`, `SystemNetworkMonitor`, `StatusBarIconRenderer` |
+| **System Speed & Telemetry Monitor** | `com.aistudio.netgate.service.NetworkMonitorService` | User enables Status Bar Speed Icon or opens live telemetry dashboard. Executes 1 Hz `TrafficStats` delta polling loop. | `NetworkMonitorService`, `SystemNetworkMonitor`, `StatusBarIconRenderer` |
 | **Security & Kernel Socket Audit** | `SecurityAuditEngine.runFullAudit()` | Triggered on demand or when opening Audit tab. Reads `/proc/net/{tcp,tcp6,udp,udp6}`, audits Accessibility services, device admins, and active VPNs. | `SecurityAuditEngine`, `ConnectionMonitorHub` |
 
 ---
@@ -262,7 +262,7 @@ All persistent settings are stored in DataStore file `"netgate_preferences"` (wi
 Prior to refactoring or modifying code, execute and verify the following Critical User Journeys (CUJs):
 
 - [ ] **CUJ-01: Per-App Network Isolation**
-  - Verify that adding a rule blocking Wi-Fi for `com.example.test` generates a `TunnelPlan` containing that UID in the sinkhole route without affecting unblocked packages.
+  - Verify that adding a rule blocking Wi-Fi for `com.aistudio.netgate.test` generates a `TunnelPlan` containing that UID in the sinkhole route without affecting unblocked packages.
 - [ ] **CUJ-02: DNS Interception & SafeSearch Rewriting**
   - Verify that UDP/53 queries for `google.com` return an `A` record rewritten to `forcesafesearch.google.com` (`216.239.38.120`) when SafeSearch is enabled.
 - [ ] **CUJ-03: Ad & Tracker Dropping**
