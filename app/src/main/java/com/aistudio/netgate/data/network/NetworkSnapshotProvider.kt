@@ -140,7 +140,8 @@ class NetworkSnapshotProvider(
             ipv4Addresses = ipv4.distinct(),
             ipv6Addresses = ipv6.distinct(),
             gatewayAddress = routes.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress,
-            mtu = mtu,
+            // LinkProperties#getMtu is API 29+; older devices report 0 (unknown).
+            mtu = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) mtu else 0,
             httpProxyHost = proxy?.host,
             httpProxyPort = proxy?.port ?: 0
         )

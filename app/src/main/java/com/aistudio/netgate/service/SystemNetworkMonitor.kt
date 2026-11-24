@@ -3,6 +3,7 @@ package com.aistudio.netgate.service
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.TrafficStats
+import android.os.Build
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.network.NetworkSnapshotProvider
 import com.aistudio.netgate.data.model.LiveNetworkTelemetry
@@ -328,12 +329,15 @@ object SystemNetworkMonitor {
         val networkType = snapshot.activeNetworkType()
 
         val iface = physicalNetwork?.interfaceName?.takeIf { it.isNotBlank() && !it.startsWith("tun") }
-        val ifaceRx = if (iface != null) {
+        // Per-interface counters (getRxBytes(String)/getTxBytes(String)) only exist from API 31;
+        // calling them on older devices would throw and crash the monitor.
+        val perInterfaceCountersAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        val ifaceRx = if (iface != null && perInterfaceCountersAvailable) {
             runCatching { TrafficStats.getRxBytes(iface) }.getOrDefault(TrafficStats.UNSUPPORTED.toLong())
         } else {
             TrafficStats.UNSUPPORTED.toLong()
         }
-        val ifaceTx = if (iface != null) {
+        val ifaceTx = if (iface != null && perInterfaceCountersAvailable) {
             runCatching { TrafficStats.getTxBytes(iface) }.getOrDefault(TrafficStats.UNSUPPORTED.toLong())
         } else {
             TrafficStats.UNSUPPORTED.toLong()
