@@ -77,8 +77,21 @@ The workflow then runs unit/Robolectric tests, builds the signed release, and ve
 | `netgate-release-<version>-universal.apk` | every ABI in one APK |
 | `netgate-release-<version>.apk` | byte-identical copy of the universal APK, kept so old links work |
 | `*.apk.sha256` | checksum per APK |
+| `netgate-release-<version>-sbom.cdx.json` | CycloneDX SBOM of the packaged APKs |
 
 The job also uploads `netgate-release-<version>-mapping` (the R8 `mapping.txt`) as a workflow artifact, **not** as a release asset.
+
+### Provenance and SBOM
+
+Every release APK is attested by `actions/attest-build-provenance`, which records that this workflow, on this repository, at this commit produced exactly those bytes. Anyone can check a download:
+
+```shell
+gh attestation verify netgate-release-3.5-arm64-v8a.apk --repo RanaGzzz/NetGate
+```
+
+The SBOM (`netgate-release-<version>-sbom.cdx.json`) is generated from the built APKs with Anchore Syft in CycloneDX format, so it describes what actually ships — including the bundled WireGuard native libraries — rather than the requested dependency graph. It is attached to the release and also kept as the `netgate-release-<version>-sbom` workflow artifact.
+
+Attestations need the `release` job's `id-token: write` and `attestations: write` permissions, and only work while the repository is public.
 
 ### Beta releases
 
