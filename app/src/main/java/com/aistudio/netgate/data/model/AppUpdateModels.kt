@@ -50,6 +50,18 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.6",
+            subtitle = "Release Build Fixes",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Fixes",
+                    bullets = listOf(
+                        "Fixed release APK shrinking failures caused by OkHttp probing optional TLS providers that are not bundled with Android."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.5",
             subtitle = "Wi-Fi Diagnostics, Liquid Glass Material You Widget, New Icons & Releases",
             sections = listOf(
