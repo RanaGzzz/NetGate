@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # Gradle dependencies are declared in gradle/libs.versions.toml, so a single
+  # root entry covers the app.
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      gradle-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Workflow actions are pinned to commit SHAs; Dependabot bumps the pin and
+  # keeps the trailing version comment honest.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
