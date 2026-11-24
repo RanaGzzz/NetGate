@@ -31,7 +31,6 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,8 +49,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.AppDestination
 import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.NetGateThemeStyle
@@ -198,10 +199,11 @@ fun FloatingFrostedNavBar(
         }
     }
 
+    val vpnTunnelIcon = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
     val tabs = listOf(
         NavTabSpec(AppDestination.FIREWALL, Icons.Rounded.Shield, "Firewall", "nav_tab_firewall", onSelectFirewall),
         NavTabSpec(AppDestination.WEBSITES, Icons.Rounded.Public, "Ad & Website Blocker", "nav_tab_websites", onSelectWebsites),
-        NavTabSpec(AppDestination.VPN_GUARD, Icons.Rounded.VpnLock, "VPN Guard (WireGuard & WARP)", "floating_nav_vpn_guard", onSelectVpnGuard),
+        NavTabSpec(AppDestination.VPN_GUARD, vpnTunnelIcon, "VPN Guard (WireGuard & OpenVPN)", "floating_nav_vpn_guard", onSelectVpnGuard),
         NavTabSpec(AppDestination.DATA_USAGE, Icons.Rounded.BarChart, "Network & Usage", "nav_tab_data_usage", onSelectDataUsage),
         NavTabSpec(AppDestination.DNS, Icons.Rounded.Dns, "1.1.1.1 DNS Protection", "floating_nav_dns", onSelectDnsProtection),
         NavTabSpec(AppDestination.HOTSPOT, Icons.Rounded.WifiTethering, "Hotspot & Wi-Fi", "floating_nav_hotspot", onSelectHotspot)

@@ -60,7 +60,6 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PublicOff
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VerifiedUser
-import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -91,14 +90,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.AdFilterListItem
 import com.aistudio.netgate.data.model.ConnectionDetails
 import com.aistudio.netgate.data.model.DnsQueryStatus
@@ -826,7 +828,7 @@ private fun WebsiteMainTabBar(
                 WebsiteMainTab.AD_BLOCKER -> Icons.Rounded.GppGood
                 WebsiteMainTab.WEBSITES -> Icons.Rounded.Public
                 WebsiteMainTab.SAFE_SEARCH -> Icons.Rounded.FamilyRestroom
-                WebsiteMainTab.PROXY_DPI -> Icons.Rounded.VpnKey
+                WebsiteMainTab.PROXY_DPI -> ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
                 WebsiteMainTab.DNS_LOGS -> Icons.Rounded.Dns
             }
 

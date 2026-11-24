@@ -147,6 +147,13 @@ jobs:
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
+      - name: Accept Android SDK licenses
+        run: |
+          SDK_MANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDK_MANAGER" ]; then
+            yes | "$SDK_MANAGER" --licenses >/dev/null 2>&1 || true
+          fi
+
       - name: Run unit & Robolectric tests
         run: gradle :app:testDebugUnitTest
 

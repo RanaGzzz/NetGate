@@ -199,7 +199,7 @@ class VpnGuardService : Service() {
             }
 
             return NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setSmallIcon(R.drawable.ic_vpn_tunnel_shield)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setOngoing(true)

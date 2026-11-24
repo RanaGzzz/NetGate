@@ -30,7 +30,6 @@ import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -47,10 +46,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.DnsTransportMode
 import com.aistudio.netgate.data.model.DpiBypassMode
 import com.aistudio.netgate.ui.theme.BlockedRed
@@ -125,7 +127,7 @@ fun DpiBypassShieldCard(
                                 imageVector = if (dpiBypassMode == DpiBypassMode.AUTOPILOT) {
                                     Icons.Rounded.AutoFixHigh
                                 } else {
-                                    Icons.Rounded.VpnKey
+                                    ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
                                 },
                                 contentDescription = null,
                                 tint = accent,

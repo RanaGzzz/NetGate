@@ -23,11 +23,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.EnhancedEncryption
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.VpnKey
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -47,12 +46,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.DpiBypassMode
 import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.VpnDpiLogCategory
@@ -388,9 +390,10 @@ private fun VpnDpiLogRow(entry: VpnDpiLogEntry) {
         VpnDpiLogSeverity.ERROR -> BlockedRed
         VpnDpiLogSeverity.INFO -> WifiAccent
     }
+    val vpnTunnelIcon = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
     val icon = when (entry.category) {
-        VpnDpiLogCategory.VPN_GUARD -> Icons.Rounded.VpnLock
-        VpnDpiLogCategory.DPI_BYPASS -> Icons.Rounded.VpnKey
+        VpnDpiLogCategory.VPN_GUARD -> vpnTunnelIcon
+        VpnDpiLogCategory.DPI_BYPASS -> Icons.Rounded.EnhancedEncryption
         VpnDpiLogCategory.VPN_TUNNEL, VpnDpiLogCategory.ALL -> Icons.Rounded.Shield
     }
 

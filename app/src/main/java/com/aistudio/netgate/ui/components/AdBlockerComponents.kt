@@ -38,7 +38,6 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.VerifiedUser
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -62,12 +61,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.AdFilterListItem
 import com.aistudio.netgate.data.model.DnsQueryLogEntry
 import com.aistudio.netgate.data.model.DnsQueryStatus
@@ -475,7 +477,7 @@ fun HttpsFilteringProxyCard(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Rounded.VpnLock,
+                                imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
                                 contentDescription = null,
                                 tint = activeAccent,
                                 modifier = Modifier.size(22.dp)

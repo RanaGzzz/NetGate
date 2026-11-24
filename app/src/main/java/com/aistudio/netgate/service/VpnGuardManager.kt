@@ -6,10 +6,12 @@ import android.net.VpnService
 import android.os.Build
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
 import com.aistudio.netgate.data.model.VpnGuardProfile
+import com.aistudio.netgate.data.model.VpnGuardProtocol
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
 import com.aistudio.netgate.data.model.VpnGuardRuntimeState
 import com.aistudio.netgate.service.session.VpnSessionCoordinator
 import com.aistudio.netgate.service.session.VpnSessionPorts
+import com.aistudio.netgate.service.session.VpnSlotOwner
 import com.aistudio.netgate.service.session.VpnTransitionResult
 import com.wireguard.android.backend.BackendException
 import com.wireguard.android.backend.GoBackend
@@ -49,9 +51,12 @@ object VpnGuardManager {
     private var backend: GoBackend? = null
     private var statsJob: Job? = null
 
-    /** True while the WireGuard tunnel itself is up (kept separate from the published UI state). */
+    /** True while either the WireGuard or OpenVPN tunnel is up. */
     @Volatile
     private var tunnelUp: Boolean = false
+
+    @Volatile
+    private var activeProtocol: VpnGuardProtocol? = null
 
     /** Set while a user/coordinator-initiated teardown is running, so DOWN is not "unexpected". */
     @Volatile
@@ -64,6 +69,9 @@ object VpnGuardManager {
         override fun getName(): String = "netgate_vpn_guard"
 
         override fun onStateChange(newState: Tunnel.State) {
+            if (activeProtocol == VpnGuardProtocol.OPENVPN && newState == Tunnel.State.DOWN) {
+                return
+            }
             val mapped = when (newState) {
                 Tunnel.State.UP -> VpnGuardConnectionState.CONNECTED
                 Tunnel.State.DOWN -> VpnGuardConnectionState.DISCONNECTED
@@ -72,8 +80,12 @@ object VpnGuardManager {
             val previous = _runtimeState.value.connectionState
             if (newState == Tunnel.State.UP) {
                 tunnelUp = true
+                activeProtocol = VpnGuardProtocol.WIREGUARD
             } else if (newState == Tunnel.State.DOWN) {
-                tunnelUp = false
+                if (activeProtocol == VpnGuardProtocol.WIREGUARD) {
+                    tunnelUp = false
+                    activeProtocol = null
+                }
             }
             _runtimeState.value = _runtimeState.value.copy(connectionState = mapped)
 
@@ -143,9 +155,11 @@ object VpnGuardManager {
                         )
                         _runtimeState.value = VpnGuardRuntimeState(
                             connectionState = VpnGuardConnectionState.ERROR,
+                            protocol = profile.protocol,
                             activeProfileId = profile.id,
                             activeProfileName = profile.name,
                             endpoint = profile.endpointHost,
+                            activeServerIp = extractHostFromEndpoint(profile.endpointHost),
                             routingMode = profile.routingMode,
                             errorMessage = err.message,
                             pausedLocalFirewallForVpn = wasFirewallActive
@@ -158,11 +172,28 @@ object VpnGuardManager {
                     filterInstalledPackages(appContext, profile.targetPackages)
             }
 
+            // Seamlessly tear down any active WireGuard/OpenVPN tunnel before switching profiles,
+            // preserving firewallRestorePending so "Switch to Firewall" stays available.
+            if (tunnelUp || coordinator.state.value.owner == VpnSlotOwner.TUNNEL) {
+                stopStatsPolling()
+                intentionalDisconnect = true
+                try {
+                    coordinator.disconnectTunnel(
+                        ports = sessionPorts(appContext),
+                        restoreFirewallRequested = false
+                    )
+                } finally {
+                    intentionalDisconnect = false
+                }
+            }
+
             _runtimeState.value = _runtimeState.value.copy(
                 connectionState = VpnGuardConnectionState.CONNECTING,
+                protocol = profile.protocol,
                 activeProfileId = profile.id,
                 activeProfileName = profile.name,
                 endpoint = profile.endpointHost,
+                activeServerIp = extractHostFromEndpoint(profile.endpointHost),
                 tunnelAddresses = profile.interfaceAddresses,
                 routingMode = profile.routingMode,
                 routedPackagesCount = if (profile.routingMode == VpnGuardRoutingMode.WHOLE_SYSTEM) 0 else effectivePackages.size,
@@ -171,79 +202,178 @@ object VpnGuardManager {
             )
 
             return@withLock runCatching {
-                val endpointHostOnly = profile.endpointHost
-                    .trim()
-                    .let { ep ->
-                        if (ep.startsWith("[")) {
-                            ep.substringAfter("[").substringBefore("]")
-                        } else {
-                            ep.substringBeforeLast(':', ep)
-                        }
-                    }
-                val resolvedFallbackIp = WarpConfigGenerator.resolveHostForWireGuard(endpointHostOnly)
-                val runtimeRawConfig = if (resolvedFallbackIp != null) {
-                    WireGuardConfigHelper.replaceEndpointHost(profile.rawConfig, resolvedFallbackIp)
-                } else {
-                    profile.rawConfig
-                }
-                val runtimeProfile = profile.copy(
-                    rawConfig = runtimeRawConfig,
-                    targetPackages = effectivePackages
-                )
-                val wgConfig = WireGuardConfigHelper.buildWireGuardConfig(runtimeProfile).getOrThrow()
-
-                val transition = coordinator.connectTunnel(
-                    ports = sessionPorts(
+                when (profile.protocol) {
+                    VpnGuardProtocol.WIREGUARD -> connectWireGuardLocked(
                         appContext = appContext,
-                        activateTunnel = {
-                            val goBackend = getOrCreateBackend(appContext)
-                            runCatching {
-                                goBackend.setState(activeTunnel, Tunnel.State.DOWN, null)
-                            }
-                            goBackend.setState(activeTunnel, Tunnel.State.UP, wgConfig)
-                            tunnelUp = true
-
-                            val now = System.currentTimeMillis()
-                            _runtimeState.value = _runtimeState.value.copy(
-                                connectionState = VpnGuardConnectionState.CONNECTED,
-                                connectedSinceMs = now,
-                                rxBytes = 0L,
-                                txBytes = 0L,
-                                rxSpeedBytesPerSec = 0L,
-                                txSpeedBytesPerSec = 0L,
-                                errorMessage = null
-                            )
-                            // Start foreground status service only AFTER the tunnel is active to
-                            // avoid FGS timing crashes on error.
-                            VpnGuardService.start(appContext)
-                            startStatsPolling(appContext, goBackend)
-                        }
-                    ),
-                    permissionGranted = VpnService.prepare(appContext) == null
-                )
-
-                when (transition) {
-                    is VpnTransitionResult.Success -> Unit
-                    is VpnTransitionResult.Rejected ->
-                        throw IllegalStateException(transition.message)
-                    is VpnTransitionResult.Failed ->
-                        throw transition.cause ?: IllegalStateException(transition.message)
-                    else -> throw IllegalStateException(transition.describe())
+                        profile = profile,
+                        effectivePackages = effectivePackages
+                    )
+                    VpnGuardProtocol.OPENVPN -> connectOpenVpnLocked(
+                        appContext = appContext,
+                        profile = profile,
+                        effectivePackages = effectivePackages
+                    )
                 }
             }.onFailure { err ->
                 stopStatsPolling()
                 VpnGuardService.stop(appContext)
-                val friendlyMessage = formatTunnelError(err)
+                val friendlyMessage = formatTunnelError(err, profile.protocol)
                 _runtimeState.value = VpnGuardRuntimeState(
                     connectionState = VpnGuardConnectionState.ERROR,
+                    protocol = profile.protocol,
                     activeProfileId = profile.id,
                     activeProfileName = profile.name,
                     endpoint = profile.endpointHost,
+                    activeServerIp = extractHostFromEndpoint(profile.endpointHost),
                     routingMode = profile.routingMode,
                     errorMessage = friendlyMessage,
                     pausedLocalFirewallForVpn = coordinator.state.value.firewallRestorePending
                 )
             }
+        }
+    }
+
+    private suspend fun connectWireGuardLocked(
+        appContext: Context,
+        profile: VpnGuardProfile,
+        effectivePackages: Set<String>
+    ) {
+        val endpointHostOnly = extractHostFromEndpoint(profile.endpointHost)
+        val resolvedFallbackIp = WarpConfigGenerator.resolveHostForWireGuard(endpointHostOnly)
+        val runtimeRawConfig = if (resolvedFallbackIp != null) {
+            WireGuardConfigHelper.replaceEndpointHost(profile.rawConfig, resolvedFallbackIp)
+        } else {
+            profile.rawConfig
+        }
+        val runtimeProfile = profile.copy(
+            rawConfig = runtimeRawConfig,
+            targetPackages = effectivePackages
+        )
+        val wgConfig = WireGuardConfigHelper.buildWireGuardConfig(runtimeProfile).getOrThrow()
+
+        val transition = coordinator.connectTunnel(
+            ports = sessionPorts(
+                appContext = appContext,
+                activateTunnel = {
+                    runCatching { NetGateOpenVpnService.disconnect() }
+                    val goBackend = getOrCreateBackend(appContext)
+                    runCatching {
+                        goBackend.setState(activeTunnel, Tunnel.State.DOWN, null)
+                    }
+                    goBackend.setState(activeTunnel, Tunnel.State.UP, wgConfig)
+                    activeProtocol = VpnGuardProtocol.WIREGUARD
+                    tunnelUp = true
+
+                    val now = System.currentTimeMillis()
+                    _runtimeState.value = _runtimeState.value.copy(
+                        connectionState = VpnGuardConnectionState.CONNECTED,
+                        protocol = VpnGuardProtocol.WIREGUARD,
+                        connectedSinceMs = now,
+                        rxBytes = 0L,
+                        txBytes = 0L,
+                        rxSpeedBytesPerSec = 0L,
+                        txSpeedBytesPerSec = 0L,
+                        errorMessage = null
+                    )
+                    // Start foreground status service only AFTER the tunnel is active to
+                    // avoid FGS timing crashes on error.
+                    VpnGuardService.start(appContext)
+                    startStatsPolling(appContext) {
+                        val stats = runCatching { goBackend.getStatistics(activeTunnel) }.getOrNull()
+                        if (stats != null) stats.totalRx() to stats.totalTx() else null
+                    }
+                }
+            ),
+            permissionGranted = VpnService.prepare(appContext) == null
+        )
+
+        when (transition) {
+            is VpnTransitionResult.Success -> Unit
+            is VpnTransitionResult.Rejected ->
+                throw IllegalStateException(transition.message)
+            is VpnTransitionResult.Failed ->
+                throw transition.cause ?: IllegalStateException(transition.message)
+            else -> throw IllegalStateException(transition.describe())
+        }
+    }
+
+    private suspend fun connectOpenVpnLocked(
+        appContext: Context,
+        profile: VpnGuardProfile,
+        effectivePackages: Set<String>
+    ) {
+        val runtimeProfile = profile.copy(targetPackages = effectivePackages)
+        val ovpnListener = object : NetGateOpenVpnService.Listener {
+            override fun onStatusChanged(stageMessage: String) {
+                // Keep CONNECTING state clean while handshake completes
+            }
+
+            override fun onDisconnected(reason: String?) {
+                if (intentionalDisconnect) return
+                tunnelUp = false
+                if (activeProtocol == VpnGuardProtocol.OPENVPN) {
+                    activeProtocol = null
+                }
+                stopStatsPolling()
+                VpnGuardService.stop(appContext)
+                scope.launch {
+                    val msg = reason?.takeIf { it.isNotBlank() }
+                        ?: "The OpenVPN tunnel disconnected unexpectedly"
+                    coordinator.handleUnexpectedTunnelDisconnect(msg)
+                    _runtimeState.value = _runtimeState.value.copy(
+                        connectionState = VpnGuardConnectionState.DISCONNECTED,
+                        errorMessage = reason,
+                        pausedLocalFirewallForVpn = coordinator.state.value.firewallRestorePending
+                    )
+                }
+            }
+        }
+
+        val transition = coordinator.connectTunnel(
+            ports = sessionPorts(
+                appContext = appContext,
+                activateTunnel = {
+                    runCatching { backend?.setState(activeTunnel, Tunnel.State.DOWN, null) }
+                    val info = NetGateOpenVpnService.connectProfile(
+                        context = appContext,
+                        profile = runtimeProfile,
+                        listener = ovpnListener
+                    ).getOrThrow()
+
+                    activeProtocol = VpnGuardProtocol.OPENVPN
+                    tunnelUp = true
+
+                    val effectiveEndpoint = info.endpoint.ifBlank { profile.endpointHost }
+                    val now = System.currentTimeMillis()
+                    _runtimeState.value = _runtimeState.value.copy(
+                        connectionState = VpnGuardConnectionState.CONNECTED,
+                        protocol = VpnGuardProtocol.OPENVPN,
+                        endpoint = effectiveEndpoint,
+                        activeServerIp = extractHostFromEndpoint(effectiveEndpoint),
+                        tunnelAddresses = info.tunnelAddresses.ifBlank { "Assigned" },
+                        connectedSinceMs = now,
+                        rxBytes = 0L,
+                        txBytes = 0L,
+                        rxSpeedBytesPerSec = 0L,
+                        txSpeedBytesPerSec = 0L,
+                        errorMessage = null
+                    )
+                    VpnGuardService.start(appContext)
+                    startStatsPolling(appContext) {
+                        NetGateOpenVpnService.readTransportStats()
+                    }
+                }
+            ),
+            permissionGranted = VpnService.prepare(appContext) == null
+        )
+
+        when (transition) {
+            is VpnTransitionResult.Success -> Unit
+            is VpnTransitionResult.Rejected ->
+                throw IllegalStateException(transition.message)
+            is VpnTransitionResult.Failed ->
+                throw transition.cause ?: IllegalStateException(transition.message)
+            else -> throw IllegalStateException(transition.describe())
         }
     }
 
@@ -275,9 +405,11 @@ object VpnGuardManager {
                 is VpnTransitionResult.Failed -> {
                     _runtimeState.value = VpnGuardRuntimeState(
                         connectionState = VpnGuardConnectionState.ERROR,
+                        protocol = _runtimeState.value.protocol,
                         activeProfileId = _runtimeState.value.activeProfileId,
                         activeProfileName = _runtimeState.value.activeProfileName,
                         endpoint = _runtimeState.value.endpoint,
+                        activeServerIp = _runtimeState.value.activeServerIp,
                         routingMode = _runtimeState.value.routingMode,
                         errorMessage = transition.message,
                         pausedLocalFirewallForVpn = session.firewallRestorePending
@@ -307,7 +439,7 @@ object VpnGuardManager {
 
     /**
      * Endpoints handed to [VpnSessionCoordinator]. Production wiring for the real firewall service
-     * and the WireGuard backend.
+     * and both the WireGuard and OpenVPN3 backends.
      */
     private fun sessionPorts(
         appContext: Context,
@@ -319,17 +451,30 @@ object VpnGuardManager {
         tunnelRunning = { tunnelUp },
         activateTunnel = activateTunnel,
         deactivateTunnel = {
-            val goBackend = backend
-            if (goBackend != null) {
-                goBackend.setState(activeTunnel, Tunnel.State.DOWN, null)
+            runCatching {
+                backend?.setState(activeTunnel, Tunnel.State.DOWN, null)
             }
+            runCatching {
+                NetGateOpenVpnService.disconnect()
+            }
+            activeProtocol = null
             tunnelUp = false
             stopStatsPolling()
             VpnGuardService.stop(appContext)
         }
     )
 
-    private fun formatTunnelError(err: Throwable): String {
+    private fun extractHostFromEndpoint(endpoint: String): String {
+        val clean = endpoint.trim().substringBefore(' ')
+        if (clean.isEmpty()) return ""
+        return if (clean.startsWith("[")) {
+            clean.substringAfter("[").substringBefore("]")
+        } else {
+            clean.substringBeforeLast(':', clean)
+        }
+    }
+
+    private fun formatTunnelError(err: Throwable, protocol: VpnGuardProtocol): String {
         if (err is BackendException) {
             return when (err.reason) {
                 BackendException.Reason.VPN_NOT_AUTHORIZED -> "Android VPN permission is required before connecting"
@@ -341,12 +486,15 @@ object VpnGuardManager {
         }
         val linkErr = (err as? UnsatisfiedLinkError) ?: (err.cause as? UnsatisfiedLinkError)
         if (linkErr != null) {
-            return "WireGuard native library could not be loaded on this device ABI (${linkErr.message ?: "incompatible native lib"}). You can still export the .conf file."
+            return "${protocol.label} native library could not be loaded on this device ABI (${linkErr.message ?: "incompatible native lib"}). You can still export the .${protocol.fileExtension} file."
         }
-        return err.message?.takeIf { it.isNotBlank() } ?: "Failed to bring up WireGuard tunnel"
+        return err.message?.takeIf { it.isNotBlank() } ?: "Failed to bring up ${protocol.label} tunnel"
     }
 
-    private fun startStatsPolling(context: Context, goBackend: GoBackend) {
+    private fun startStatsPolling(
+        context: Context,
+        readStats: () -> Pair<Long, Long>?
+    ) {
         statsJob?.cancel()
         statsJob = scope.launch {
             var prevRx = 0L
@@ -358,10 +506,9 @@ object VpnGuardManager {
                 if (current.connectionState != VpnGuardConnectionState.CONNECTED) {
                     break
                 }
-                val stats = runCatching { goBackend.getStatistics(activeTunnel) }.getOrNull()
+                val stats = runCatching { readStats() }.getOrNull()
                 if (stats != null) {
-                    val rx = stats.totalRx()
-                    val tx = stats.totalTx()
+                    val (rx, tx) = stats
                     val rxRate = if (firstSample) 0L else (rx - prevRx).coerceAtLeast(0L)
                     val txRate = if (firstSample) 0L else (tx - prevTx).coerceAtLeast(0L)
                     prevRx = rx

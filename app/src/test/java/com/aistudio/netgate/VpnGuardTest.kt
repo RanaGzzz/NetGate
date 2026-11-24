@@ -14,8 +14,10 @@ import com.aistudio.netgate.data.model.VpnGateServer
 import com.aistudio.netgate.data.model.VpnGuardProviderType
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
+import com.aistudio.netgate.data.model.VpnGuardProtocol
 import com.aistudio.netgate.data.model.VpnGuardSubTab
 import com.aistudio.netgate.data.model.VpnGuardUiState
+import com.aistudio.netgate.service.OpenVpnConfigHelper
 import com.aistudio.netgate.service.VpnGateClient
 import com.aistudio.netgate.service.VpnGuardManager
 import com.aistudio.netgate.service.VpnGuardService
@@ -302,5 +304,118 @@ class VpnGuardTest {
         VpnGuardService.stop(context)
         VpnGuardManager.disconnect(context, restoreFirewallIfPaused = false)
         assertEquals(VpnGuardConnectionState.DISCONNECTED, VpnGuardManager.runtimeState.value.connectionState)
+    }
+
+    @Test
+    fun `openVpnConfigHelper parses ovpn profile, credentials, and strips windows directives`() {
+        val sampleOvpn = """
+            client
+            dev tun
+            proto tcp
+            remote vpn.example.org 443
+            auth-user-pass
+            dhcp-option DNS 1.1.1.1
+            tun-mtu 1420
+            register-dns
+            block-outside-dns
+            <ca>
+            -----BEGIN CERTIFICATE-----
+            TEST
+            -----END CERTIFICATE-----
+            </ca>
+        """.trimIndent()
+
+        assertTrue(OpenVpnConfigHelper.looksLikeOpenVpnConfig(sampleOvpn))
+        assertTrue(OpenVpnConfigHelper.requiresAuthUserPass(sampleOvpn))
+
+        val (wgConf, _) = WireGuardConfigHelper.generateTemplateConfig()
+        assertFalse(OpenVpnConfigHelper.looksLikeOpenVpnConfig(wgConf))
+
+        val profile = OpenVpnConfigHelper.parseToProfile(
+            rawConfig = sampleOvpn,
+            nameHint = "Proton-Free.ovpn",
+            routingModeOverride = VpnGuardRoutingMode.SELECTED_APPS,
+            targetPackagesOverride = setOf("com.whatsapp"),
+            username = "alice",
+            password = "secret"
+        ).getOrThrow()
+
+        assertEquals("Proton-Free", profile.name)
+        assertEquals(VpnGuardProtocol.OPENVPN, profile.protocol)
+        assertEquals(VpnGuardProviderType.CUSTOM_OPENVPN, profile.providerType)
+        assertEquals("vpn.example.org:443 (tcp)", profile.endpointHost)
+        assertEquals("1.1.1.1", profile.dnsServers)
+        assertEquals(1420, profile.mtu)
+
+        val (user, pass) = OpenVpnConfigHelper.extractCredentials(profile.rawConfig)
+        assertEquals("alice", user)
+        assertEquals("secret", pass)
+
+        val runtimeCfg = OpenVpnConfigHelper.prepareRuntimeConfig(profile.rawConfig)
+        assertFalse(runtimeCfg.contains("register-dns"))
+        assertFalse(runtimeCfg.contains("block-outside-dns"))
+        assertFalse(runtimeCfg.contains("netgate-user-b64"))
+        assertTrue(runtimeCfg.contains("auth-user-pass"))
+    }
+
+    @Test
+    fun `vpngate server converts directly to deterministic OpenVPN profile and renders in-app Connect`() {
+        ShadowVpnService.setPrepareResult(null)
+        val server = VpnGateServer(
+            hostName = "vpn777",
+            ip = "203.0.113.77",
+            score = 900000L,
+            pingMs = 19,
+            speedBps = 72_000_000L,
+            countryLong = "Japan",
+            countryShort = "JP",
+            numVpnSessions = 12,
+            uptimeMs = 100000L,
+            totalUsers = 300L,
+            totalTrafficBytes = 500000L,
+            logType = "2weeks",
+            operatorName = "Tsukuba",
+            message = "",
+            ovpnConfig = "client\ndev tun\nproto udp\nremote 203.0.113.77 1195\n<ca>\ndummy\n</ca>"
+        )
+
+        val profile = OpenVpnConfigHelper.fromVpnGateServer(server)
+        assertEquals("vpngate_203.0.113.77", profile.id)
+        assertEquals(VpnGuardProtocol.OPENVPN, profile.protocol)
+        assertEquals(VpnGuardProviderType.VPNGATE, profile.providerType)
+        assertEquals("ovpn", profile.protocol.fileExtension)
+
+        var connectedServer: VpnGateServer? = null
+        composeRule.setContent {
+            NetGateTheme {
+                VpnGuardContent(
+                    state = VpnGuardUiState(
+                        selectedSubTab = VpnGuardSubTab.VPNGATE,
+                        vpnGateServers = listOf(server)
+                    ),
+                    allManagedApps = emptyList(),
+                    isLocalFirewallActive = false,
+                    nowMillis = System.currentTimeMillis(),
+                    loadIcon = { null },
+                    onSelectSubTab = {},
+                    onSelectProfile = {},
+                    onImportWireGuardConfig = { _, _, _, _ -> },
+                    onGenerateWarpProfile = { _, _, _, _ -> },
+                    onGenerateKeypairTemplate = {},
+                    onUpdateProfileRouting = { _, _, _ -> },
+                    onDeleteProfile = {},
+                    onConnectProfile = {},
+                    onDisconnect = {},
+                    onRefreshVpnGate = {},
+                    onVpnGateSearchChange = {},
+                    onVpnGateSortChange = {},
+                    onNotifyMessage = {},
+                    onConnectVpnGateServer = { connectedServer = it }
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("vpngate_connect_203.0.113.77").performScrollTo().performClick()
+        assertEquals(server.ip, connectedServer?.ip)
     }
 }

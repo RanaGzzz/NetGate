@@ -35,7 +35,6 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SignalCellularOff
 import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiLock
 import androidx.compose.material.icons.rounded.WifiOff
@@ -60,9 +59,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.ConnectionDetails
 import com.aistudio.netgate.data.model.LiveNetworkTelemetry
@@ -669,7 +670,7 @@ fun FirewallHeaderCard(
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.VpnLock,
+                            imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
                             contentDescription = "Open VPN Guard",
                             tint = vpnAccent,
                             modifier = Modifier.size(16.dp)

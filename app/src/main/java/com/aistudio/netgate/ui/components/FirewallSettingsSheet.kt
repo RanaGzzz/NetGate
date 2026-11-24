@@ -47,7 +47,6 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NewReleases

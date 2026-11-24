@@ -62,7 +62,6 @@ import androidx.compose.material.icons.rounded.Search
 import android.net.VpnService
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -90,9 +89,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -416,7 +417,7 @@ fun FirewallScreen(
                                 onClick = { viewModel.selectDestination(AppDestination.VPN_GUARD) },
                                 icon = {
                                     Icon(
-                                        imageVector = Icons.Rounded.VpnLock,
+                                        imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
                                         contentDescription = stringResource(R.string.nav_vpn_guard)
                                     )
                                 },
@@ -687,7 +688,9 @@ fun FirewallScreen(
                                         onVpnGateSearchChange = viewModel::setVpnGateSearchQuery,
                                         onVpnGateSortChange = viewModel::setVpnGateSortMode,
                                         onNotifyMessage = viewModel::notifyVpnGuardMessage,
-                                        onOpenVpnLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.VPN_GUARD) }
+                                        onOpenVpnLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.VPN_GUARD) },
+                                        onConnectVpnGateServer = viewModel::connectVpnGateServerDirect,
+                                        onSaveVpnGateServer = viewModel::saveVpnGateServerProfile
                                     )
                                 }
 

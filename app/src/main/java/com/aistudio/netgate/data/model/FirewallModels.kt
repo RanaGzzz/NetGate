@@ -1111,9 +1111,14 @@ fun countryCodeToFlagEmoji(code: String): String {
 }
 
 enum class VpnGuardSubTab(val label: String) {
-    PROFILES("WireGuard & WARP"),
+    PROFILES("WireGuard & OpenVPN"),
     VPNGATE("VPNGate Live"),
     PROVIDERS("Open-Source VPNs")
+}
+
+enum class VpnGuardProtocol(val label: String, val fileExtension: String) {
+    WIREGUARD("WireGuard", "conf"),
+    OPENVPN("OpenVPN", "ovpn")
 }
 
 enum class VpnGuardRoutingMode(val title: String, val subtitle: String) {
@@ -1136,7 +1141,9 @@ enum class VpnGuardProviderType(val label: String) {
     CLOUDFLARE_WARP("Cloudflare WARP"),
     PROTON_VPN("Proton VPN"),
     WINDSCRIBE("Windscribe"),
-    MULLVAD_OR_OTHER("Open-Source VPN")
+    MULLVAD_OR_OTHER("Open-Source VPN"),
+    CUSTOM_OPENVPN("OpenVPN"),
+    VPNGATE("VPNGate")
 }
 
 enum class VpnGuardConnectionState(val label: String) {
@@ -1160,13 +1167,27 @@ data class VpnGuardProfile(
     val targetPackages: Set<String> = emptySet(),
     val createdAt: Long = System.currentTimeMillis(),
     val lastConnectedAt: Long = 0L
-)
+) {
+    val protocol: VpnGuardProtocol
+        get() = when {
+            providerType == VpnGuardProviderType.CUSTOM_OPENVPN ||
+                providerType == VpnGuardProviderType.VPNGATE -> VpnGuardProtocol.OPENVPN
+            rawConfig.contains("[Interface]", ignoreCase = true) &&
+                rawConfig.contains("[Peer]", ignoreCase = true) -> VpnGuardProtocol.WIREGUARD
+            rawConfig.contains("remote ", ignoreCase = true) ||
+                rawConfig.contains("<ca>", ignoreCase = true) ||
+                rawConfig.contains("dev tun", ignoreCase = true) -> VpnGuardProtocol.OPENVPN
+            else -> VpnGuardProtocol.WIREGUARD
+        }
+}
 
 data class VpnGuardRuntimeState(
     val connectionState: VpnGuardConnectionState = VpnGuardConnectionState.DISCONNECTED,
+    val protocol: VpnGuardProtocol = VpnGuardProtocol.WIREGUARD,
     val activeProfileId: String? = null,
     val activeProfileName: String = "",
     val endpoint: String = "",
+    val activeServerIp: String = "",
     val tunnelAddresses: String = "",
     val routingMode: VpnGuardRoutingMode = VpnGuardRoutingMode.WHOLE_SYSTEM,
     val routedPackagesCount: Int = 0,

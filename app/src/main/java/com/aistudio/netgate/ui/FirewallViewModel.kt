@@ -84,6 +84,7 @@ import com.aistudio.netgate.service.HotspotProxyManager
 import com.aistudio.netgate.service.HotspotProxyService
 import com.aistudio.netgate.service.NetGateVpnService
 import com.aistudio.netgate.service.NetworkMonitorService
+import com.aistudio.netgate.service.OpenVpnConfigHelper
 import com.aistudio.netgate.service.SystemNetworkMonitor
 import com.aistudio.netgate.service.VpnGateClient
 import com.aistudio.netgate.service.VpnGuardManager
@@ -2149,23 +2150,76 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         targetPackages: Set<String> = emptySet()
     ) {
         viewModelScope.launch {
-            val res = WireGuardConfigHelper.parseToProfile(
-                rawConfig = rawText,
-                nameHint = nameHint,
-                routingModeOverride = if (routingMode != VpnGuardRoutingMode.WHOLE_SYSTEM || targetPackages.isNotEmpty()) {
-                    routingMode
-                } else {
-                    null
-                },
-                targetPackagesOverride = if (targetPackages.isNotEmpty()) targetPackages else null
-            )
+            val isOpenVpn = OpenVpnConfigHelper.looksLikeOpenVpnConfig(rawText) ||
+                nameHint.trim().endsWith(".ovpn", ignoreCase = true)
+            val modeOverride = if (routingMode != VpnGuardRoutingMode.WHOLE_SYSTEM || targetPackages.isNotEmpty()) {
+                routingMode
+            } else {
+                null
+            }
+            val pkgsOverride = if (targetPackages.isNotEmpty()) targetPackages else null
+            val res = if (isOpenVpn) {
+                OpenVpnConfigHelper.parseToProfile(
+                    rawConfig = rawText,
+                    nameHint = nameHint,
+                    routingModeOverride = modeOverride,
+                    targetPackagesOverride = pkgsOverride
+                )
+            } else {
+                WireGuardConfigHelper.parseToProfile(
+                    rawConfig = rawText,
+                    nameHint = nameHint,
+                    routingModeOverride = modeOverride,
+                    targetPackagesOverride = pkgsOverride
+                )
+            }
             res.onSuccess { profile ->
                 repository.saveVpnGuardProfile(profile)
                 selectedVpnGuardProfileIdFlow.value = profile.id
-                _snackbarMessages.tryEmit("Imported ${profile.name} (${profile.routingMode.title})")
+                _snackbarMessages.tryEmit(
+                    "Imported ${profile.protocol.label} profile ${profile.name} (${profile.routingMode.title})"
+                )
             }.onFailure { err ->
-                _snackbarMessages.tryEmit(err.message ?: "Invalid WireGuard .conf file")
+                _snackbarMessages.tryEmit(err.message ?: "Invalid WireGuard .conf or OpenVPN .ovpn file")
             }
+        }
+    }
+
+    fun connectVpnGateServerDirect(server: com.aistudio.netgate.data.model.VpnGateServer) {
+        viewModelScope.launch {
+            val baseProfile = OpenVpnConfigHelper.fromVpnGateServer(server)
+            val existing = uiState.value.vpnGuardState.profiles.firstOrNull { it.id == baseProfile.id }
+            val profile = if (existing != null) {
+                OpenVpnConfigHelper.fromVpnGateServer(
+                    server = server,
+                    routingMode = existing.routingMode,
+                    targetPackages = existing.targetPackages
+                )
+            } else {
+                baseProfile
+            }
+            repository.saveVpnGuardProfile(profile)
+            selectedVpnGuardProfileIdFlow.value = profile.id
+            connectVpnGuardProfile(profile)
+        }
+    }
+
+    fun saveVpnGateServerProfile(server: com.aistudio.netgate.data.model.VpnGateServer) {
+        viewModelScope.launch {
+            val baseProfile = OpenVpnConfigHelper.fromVpnGateServer(server)
+            val existing = uiState.value.vpnGuardState.profiles.firstOrNull { it.id == baseProfile.id }
+            val profile = if (existing != null) {
+                OpenVpnConfigHelper.fromVpnGateServer(
+                    server = server,
+                    routingMode = existing.routingMode,
+                    targetPackages = existing.targetPackages
+                )
+            } else {
+                baseProfile
+            }
+            repository.saveVpnGuardProfile(profile)
+            selectedVpnGuardProfileIdFlow.value = profile.id
+            _snackbarMessages.tryEmit("Saved ${profile.name} to WireGuard & OpenVPN profiles")
         }
     }
 

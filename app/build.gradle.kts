@@ -27,15 +27,18 @@ android {
     val suppliedSha = System.getenv("GIT_COMMIT_SHA")?.trim().orEmpty()
     val gitSha = if (suppliedSha.isNotEmpty()) {
       suppliedSha
-    } else {
+    } else if (rootProject.file(".git").exists()) {
       // providers.exec keeps this compatible with the configuration cache; a plain
       // ProcessBuilder is rejected as an unsupported external process.
       val resolved = runCatching {
         providers.exec {
           commandLine("git", "rev-parse", "HEAD")
+          isIgnoreExitValue = true
         }.standardOutput.asText.get().trim()
       }.getOrDefault("")
       if (resolved.matches(Regex("[0-9a-f]{40}"))) resolved else ""
+    } else {
+      ""
     }
     val suppliedTimestamp = System.getenv("BUILD_TIMESTAMP")?.trim().orEmpty()
     // Note: the fully qualified `java.time.Instant` does not resolve here, because
@@ -173,6 +176,7 @@ dependencies {
   // implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.wireguard.tunnel)
+  implementation(libs.vpnprotocols.openvpn)
   implementation(libs.fletchmckee.liquid)
   coreLibraryDesugaring(libs.desugar.jdk.libs)
   // implementation(libs.play.services.location)

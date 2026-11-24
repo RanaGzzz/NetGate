@@ -34,3 +34,11 @@
 -dontwarn org.bouncycastle.jsse.**
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
+
+# OpenVPN3 C++ SWIG/JNI director callbacks and network helpers.
+-keep class net.openvpn.ovpn3.** { *; }
+-keep class com.tim.openvpn.utils.** { *; }
+-dontwarn net.openvpn.ovpn3.**
+-dontwarn com.tim.openvpn.**
+-dontwarn com.tim.basevpn.**
+-dontwarn org.koin.**

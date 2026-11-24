@@ -40,6 +40,7 @@ NetGate runs entirely on the device. It uses Android's local `VpnService`, a use
 - Real-time system-wide download/upload speed with peak and session totals, plus a live throughput chart.
 - Today's **Wi-Fi and mobile** traffic at a glance, and an optional **status bar speed readout**.
 - **Sites, regions and security audit:** see contacted domains and IPs grouped by country (GeoIP), inspect live sockets, and scan for suspicious connections or risky accessibility/admin hooks.
+- **Wi-Fi diagnostics:** inspect active, saved, and nearby Wi-Fi networks with Wi-Fi standard (`Wi-Fi 4–7`), band/frequency/channel, `dBm` signal strength, `Tx/Rx` link speed, and signal quality thresholds (`-67 dBm` or stronger = Good).
 
 ### WireGuard and WARP VPN Guard
 - Import or generate **WireGuard** profiles and **Cloudflare WARP** configurations, connect from the app, and watch tunnel status and live telemetry alongside firewall state.
@@ -113,7 +114,7 @@ The tag must still equal `versionName` exactly. Because a beta carries its own `
 - **DNS, SafeSearch and filtering:** IPv4/IPv6 UDP/53 queries are intercepted; browser DoH discovery is blocked; QUIC hints are stripped when DPI bypass is active; poisoned private/bogon answers are rejected; SafeSearch and YouTube restricted domains are rewritten; allowed queries are forwarded over DoH, DNS-over-TCP, or protected UDP sockets.
 - **HTTPS/SNI and DPI bypass:** `LocalFilteringProxyServer` and `DpiBypassEngine` run on `127.0.0.1`, enforcing host/SNI rules, stripping tracking parameters (`utm_*`, `fbclid`, `gclid`), optionally chaining to an upstream proxy, and reshaping outbound TLS `ClientHello` / HTTP `Host` headers in userspace.
 - **Hotspot proxy and automation:** `HotspotProxyService` binds an HTTP/HTTPS proxy on the detected Hotspot interface for per-client caps, blocking and filters, while `AlarmManager` and throughput checks power scheduled and idle Wi-Fi locks.
-- **Home screen widget, recents privacy & updates:** `NetGateWidgetProvider` exposes 1-tap home screen toggles for VPN, DPI Bypass, Ad Blocker, and Hotspot Proxy; Settings adds Exclude from Recents, GitHub Release update checking, changelog browsing, and passive VPN/DPI logs.
+- **Home screen widget, recents privacy & updates:** `NetGateWidgetProvider` renders a Liquid Glass & Material You dynamic-color widget with 1-tap toggles for VPN, DPI Bypass, Ad Blocker, and Hotspot Proxy; Settings adds Exclude from Recents, GitHub Release update checking, changelog browsing, and passive VPN/DPI logs.
 - **Persistence:** Room stores per-app rules, timers, filter lists, website rules, traffic snapshots, daily history and site/region logs; Jetpack DataStore stores DNS, DPI bypass, proxy, Hotspot, UI and privacy preferences.
 
 ## Permissions
@@ -124,6 +125,7 @@ The tag must still equal `versionName` exactly. Because a beta carries its own `
 | `INTERNET` | Speed tests, DoH/DoTCP forwarding, filter list sync, hotspot relay, GitHub update checks and GeoIP lookups |
 | `ACCESS_NETWORK_STATE` | Detects active Wi-Fi vs. mobile data, DNS servers, external VPN tunnels and Private DNS state |
 | `ACCESS_WIFI_STATE` | Reads Wi-Fi link telemetry and hotspot interface state |
+| `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` *(optional)* | Reveals connected Wi-Fi SSID & live nearby Wi-Fi scans in the Wi-Fi tab |
 | `PACKAGE_USAGE_STATS` *(optional)* | Reads per-app and OS tethering traffic totals |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps filtering, timers, live speed icon and the hotspot proxy alive in the background |
 | `POST_NOTIFICATIONS` *(optional)* | Shows firewall, hotspot and live status bar speed readout notifications |

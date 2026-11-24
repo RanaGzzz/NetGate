@@ -14,6 +14,9 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED"
+        tools:node="remove" />
 
     <queries>
         <intent>
@@ -142,6 +145,23 @@
             android:name="com.wireguard.android.backend.GoBackend$VpnService"
             android:exported="false"
             tools:node="merge" />
+
+        <service
+            android:name=".service.NetGateOpenVpnService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Built-in OpenVPN3 client tunnel for user-imported .ovpn profiles and VPNGate relays" />
+        </service>
+
+        <service
+            android:name="com.tim.openvpn.service.OpenVPNService"
+            tools:node="remove" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

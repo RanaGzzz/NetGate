@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Encrypted shield perimeter with opposing uplink/downlink tunnel chevrons -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,2.2 L4.6,5.3 C4.23,5.46 4,5.82 4,6.22 V11.2 C4,16.25 7.41,20.78 12,22 C16.59,20.78 20,16.25 20,11.2 V6.22 C20,5.82 19.77,5.46 19.4,5.3 L12,2.2 Z M8.9,7.4 L6.6,10.1 H8.0 V16.0 H9.8 V10.1 H11.2 Z M14.2,7.4 H16.0 V13.3 H17.4 L15.1,16.0 L12.8,13.3 H14.2 Z" />
+</vector>

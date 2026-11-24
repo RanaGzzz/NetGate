@@ -105,7 +105,7 @@ class VpnDpiLogMonitor {
             record(
                 category = VpnDpiLogCategory.VPN_GUARD,
                 severity = VpnDpiLogSeverity.SUCCESS,
-                title = "WireGuard Tunnel Established",
+                title = "${current.protocol.label} Tunnel Established",
                 detail = "${current.activeProfileName} • Endpoint ${current.endpoint.ifBlank { "auto" }}"
             )
         }

@@ -40,9 +40,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.BookmarkAdd
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -54,9 +54,7 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.VpnLock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -89,31 +87,35 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
+import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.VpnGateServer
 import com.aistudio.netgate.data.model.VpnGateSortMode
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
 import com.aistudio.netgate.data.model.VpnGuardProfile
+import com.aistudio.netgate.data.model.VpnGuardProtocol
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
 import com.aistudio.netgate.data.model.VpnGuardSubTab
 import com.aistudio.netgate.data.model.VpnGuardUiState
 import com.aistudio.netgate.data.model.formatCountdownTimer
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.data.model.formatSpeedBytesPerSec
+import com.aistudio.netgate.service.OpenVpnConfigHelper
 import com.aistudio.netgate.service.WireGuardConfigHelper
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.DataAccent
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.WifiAccent
-import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -137,6 +139,8 @@ fun VpnGuardContent(
     onVpnGateSortChange: (VpnGateSortMode) -> Unit,
     onNotifyMessage: (String) -> Unit,
     onOpenVpnLogs: (() -> Unit)? = null,
+    onConnectVpnGateServer: ((VpnGateServer) -> Unit)? = null,
+    onSaveVpnGateServer: ((VpnGateServer) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -144,6 +148,7 @@ fun VpnGuardContent(
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     var pendingConnectProfile by remember { mutableStateOf<VpnGuardProfile?>(null) }
+    var pendingConnectVpnGate by remember { mutableStateOf<VpnGateServer?>(null) }
     var pendingWarpConnectAfterPermission by rememberSaveable { mutableStateOf(false) }
     var pendingExportContent by remember { mutableStateOf<String?>(null) }
 
@@ -159,12 +164,17 @@ fun VpnGuardContent(
                 onConnectProfile(profile)
                 pendingConnectProfile = null
             }
+            pendingConnectVpnGate?.let { gateServer ->
+                pendingConnectVpnGate = null
+                onConnectVpnGateServer?.invoke(gateServer)
+            }
             if (pendingWarpConnectAfterPermission) {
                 pendingWarpConnectAfterPermission = false
                 onGenerateWarpProfile("Cloudflare WARP", VpnGuardRoutingMode.WHOLE_SYSTEM, emptySet(), true)
             }
         } else {
             pendingConnectProfile = null
+            pendingConnectVpnGate = null
             pendingWarpConnectAfterPermission = false
             onNotifyMessage("Android VPN permission denied")
         }
@@ -180,6 +190,16 @@ fun VpnGuardContent(
         }
     }
 
+    val connectVpnGateWithPermissionCheck: (VpnGateServer) -> Unit = { server ->
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent == null) {
+            onConnectVpnGateServer?.invoke(server)
+        } else {
+            pendingConnectVpnGate = server
+            vpnPermissionLauncher.launch(prepareIntent)
+        }
+    }
+
     val importFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -188,8 +208,8 @@ fun VpnGuardContent(
                 val displayName = uri.lastPathSegment
                     ?.substringAfterLast('/')
                     ?.substringAfterLast(':')
-                    ?.ifBlank { "Imported WireGuard" }
-                    ?: "Imported WireGuard"
+                    ?.ifBlank { "Imported VPN Profile" }
+                    ?: "Imported VPN Profile"
                 val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use {
                     it.readText()
                 }.orEmpty()
@@ -321,7 +341,7 @@ fun VpnGuardContent(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Generate live Cloudflare WARP WireGuard .conf files, import .conf profiles from Proton/Windscribe/Mullvad, and apply per-app or system-wide split tunneling.",
+                                text = "Generate live Cloudflare WARP configs, or import WireGuard (.conf) and OpenVPN (.ovpn) profiles to connect directly inside NetGate with per-app split tunneling.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -371,7 +391,7 @@ fun VpnGuardContent(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Load .conf File")
+                                    Text("Load .conf / .ovpn")
                                 }
 
                                 OutlinedButton(
@@ -419,21 +439,21 @@ fun VpnGuardContent(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.VpnLock,
+                                    imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(40.dp)
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "No WireGuard Profiles Yet",
+                                    text = "No VPN Profiles Yet",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Tap \"Generate WARP .conf\" for an instant free Cloudflare WARP profile, or load a .conf file from Proton VPN or your server.",
+                                    text = "Tap \"Generate WARP .conf\" for an instant free Cloudflare WARP profile, load a WireGuard .conf or OpenVPN .ovpn file, or connect directly in VPNGate Live.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -476,17 +496,23 @@ fun VpnGuardContent(
                                 )
                             },
                             onDownloadConf = {
-                                val effective = WireGuardConfigHelper.buildEffectiveConfigText(
-                                    profile.rawConfig,
-                                    profile.routingMode,
-                                    profile.targetPackages
-                                )
+                                val effective = if (profile.protocol == VpnGuardProtocol.OPENVPN) {
+                                    OpenVpnConfigHelper.prepareRuntimeConfig(profile.rawConfig)
+                                } else {
+                                    WireGuardConfigHelper.buildEffectiveConfigText(
+                                        profile.rawConfig,
+                                        profile.routingMode,
+                                        profile.targetPackages
+                                    )
+                                }
                                 val safeName = profile.name
                                     .lowercase()
                                     .replace(Regex("[^a-z0-9_-]+"), "_")
                                     .trim('_')
-                                    .ifEmpty { "netgate_wg" }
-                                startExportConfig("$safeName.conf", effective)
+                                    .ifEmpty {
+                                        if (profile.protocol == VpnGuardProtocol.OPENVPN) "netgate_ovpn" else "netgate_wg"
+                                    }
+                                startExportConfig("$safeName.${profile.protocol.fileExtension}", effective)
                             },
                             onViewConf = { viewedConfigProfile = profile },
                             onDelete = { onDeleteProfile(profile.id) }
@@ -514,7 +540,7 @@ fun VpnGuardContent(
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        text = "Live academic OpenVPN (.ovpn) relays worldwide • Download & open in OpenVPN for Android",
+                                        text = "Connect directly inside NetGate via built-in OpenVPN3 — with per-app split tunneling & live speed telemetry",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -622,14 +648,31 @@ fun VpnGuardContent(
                     }
                 } else {
                     items(state.vpnGateServers.take(80), key = { "${it.hostName}_${it.ip}" }) { server ->
+                        val deterministicId = "vpngate_${server.ip.replace(Regex("[^a-zA-Z0-9._-]"), "_")}"
+                        val matchesActive = (isConnected || isConnecting) &&
+                            (runtime.activeProfileId == deterministicId || runtime.activeServerIp == server.ip)
                         VpnGateServerCard(
                             server = server,
+                            isActive = matchesActive,
+                            isConnecting = isConnecting && matchesActive,
+                            onConnectDirect = { connectVpnGateWithPermissionCheck(server) },
+                            onDisconnect = { onDisconnect(false) },
+                            onSaveProfile = {
+                                val saveCallback = onSaveVpnGateServer
+                                if (saveCallback != null) {
+                                    saveCallback(server)
+                                } else {
+                                    onImportWireGuardConfig(
+                                        server.ovpnConfig,
+                                        "${server.countryLong} (${server.ip}).ovpn",
+                                        VpnGuardRoutingMode.WHOLE_SYSTEM,
+                                        emptySet()
+                                    )
+                                }
+                            },
                             onDownloadOvpn = {
                                 val fileName = "vpngate_${server.countryShort.lowercase()}_${server.ip.replace('.', '_')}.ovpn"
                                 startExportConfig(fileName, server.ovpnConfig)
-                            },
-                            onOpenExternalOvpn = {
-                                openOvpnInExternalClient(context, server, onNotifyMessage)
                             },
                             onCopyOvpn = {
                                 copyToClipboard(context, "VPNGate .ovpn (${server.countryLong})", server.ovpnConfig)
@@ -663,7 +706,7 @@ fun VpnGuardContent(
     }
 
     if (showPasteDialog) {
-        PasteWireGuardConfigDialog(
+        PasteVpnConfigDialog(
             onDismiss = { showPasteDialog = false },
             onSave = { name, rawConf, routingMode, packages ->
                 showPasteDialog = false
@@ -673,14 +716,18 @@ fun VpnGuardContent(
     }
 
     viewedConfigProfile?.let { profile ->
-        val effectiveText = WireGuardConfigHelper.buildEffectiveConfigText(
-            profile.rawConfig,
-            profile.routingMode,
-            profile.targetPackages
-        )
+        val effectiveText = if (profile.protocol == VpnGuardProtocol.OPENVPN) {
+            OpenVpnConfigHelper.prepareRuntimeConfig(profile.rawConfig)
+        } else {
+            WireGuardConfigHelper.buildEffectiveConfigText(
+                profile.rawConfig,
+                profile.routingMode,
+                profile.targetPackages
+            )
+        }
         AlertDialog(
             onDismissRequest = { viewedConfigProfile = null },
-            title = { Text("${profile.name} (.conf)") },
+            title = { Text("${profile.name} (.${profile.protocol.fileExtension})") },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
@@ -693,7 +740,7 @@ fun VpnGuardContent(
                 TextButton(
                     onClick = {
                         copyToClipboard(context, profile.name, effectiveText)
-                        onNotifyMessage("Copied WireGuard .conf to clipboard")
+                        onNotifyMessage("Copied ${profile.protocol.label} .${profile.protocol.fileExtension} to clipboard")
                         viewedConfigProfile = null
                     }
                 ) {
@@ -779,7 +826,7 @@ private fun VpnGuardHeroCard(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (isConnected) Icons.Rounded.Lock else Icons.Rounded.VpnLock,
+                                imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
                                 contentDescription = null,
                                 tint = accentColor,
                                 modifier = Modifier.size(25.dp)
@@ -790,8 +837,8 @@ private fun VpnGuardHeroCard(
                     Column {
                         Text(
                             text = when (runtime.connectionState) {
-                                VpnGuardConnectionState.CONNECTED -> "VPN Guard Connected"
-                                VpnGuardConnectionState.CONNECTING -> "Establishing WireGuard…"
+                                VpnGuardConnectionState.CONNECTED -> "VPN Guard Connected (${runtime.protocol.label})"
+                                VpnGuardConnectionState.CONNECTING -> "Establishing ${runtime.protocol.label}…"
                                 VpnGuardConnectionState.DISCONNECTING -> "Disconnecting…"
                                 VpnGuardConnectionState.ERROR -> "Tunnel Error"
                                 VpnGuardConnectionState.DISCONNECTED -> "VPN Guard Ready"
@@ -805,8 +852,8 @@ private fun VpnGuardHeroCard(
                                 isConnected -> "${runtime.activeProfileName} • ${runtime.endpoint}"
                                 isConnecting -> runtime.activeProfileName
                                 runtime.errorMessage != null -> runtime.errorMessage
-                                selectedProfile != null -> "Ready: ${selectedProfile.name} (${selectedProfile.routingMode.title})"
-                                else -> "Import WireGuard .conf or generate WARP for per-app or system VPN"
+                                selectedProfile != null -> "Ready: ${selectedProfile.name} (${selectedProfile.protocol.label} • ${selectedProfile.routingMode.title})"
+                                else -> "Import WireGuard (.conf), OpenVPN (.ovpn), generate WARP, or connect VPNGate directly"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = if (runtime.errorMessage != null && !isConnected) {
@@ -1122,7 +1169,7 @@ private fun VpnGuardProfileCard(
                 ) {
                     Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(17.dp))
                     Spacer(modifier = Modifier.width(5.dp))
-                    Text("Download .conf")
+                    Text("Download .${profile.protocol.fileExtension}")
                 }
 
                 OutlinedButton(
@@ -1142,12 +1189,17 @@ private fun VpnGuardProfileCard(
 @Composable
 private fun VpnGateServerCard(
     server: VpnGateServer,
+    isActive: Boolean,
+    isConnecting: Boolean,
+    onConnectDirect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onSaveProfile: () -> Unit,
     onDownloadOvpn: () -> Unit,
-    onOpenExternalOvpn: () -> Unit,
     onCopyOvpn: () -> Unit
 ) {
     FrostedSurface(
         shape = RoundedCornerShape(20.dp),
+        borderAccent = if (isActive) EmeraldPrimary else null,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -1213,22 +1265,56 @@ private fun VpnGateServerCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                Button(
+                    onClick = { if (isActive) onDisconnect() else onConnectDirect() },
+                    enabled = !isConnecting,
+                    colors = if (isActive) {
+                        ButtonDefaults.buttonColors(containerColor = BlockedRed)
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.testTag("vpngate_connect_${server.ip}")
+                ) {
+                    if (isConnecting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.PowerSettingsNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        when {
+                            isConnecting -> "Connecting…"
+                            isActive -> "Disconnect"
+                            else -> "Connect"
+                        }
+                    )
+                }
+
                 FilledTonalButton(
+                    onClick = onSaveProfile,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.BookmarkAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("Save")
+                }
+
+                OutlinedButton(
                     onClick = onDownloadOvpn,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(5.dp))
                     Text("Download .ovpn")
-                }
-
-                OutlinedButton(
-                    onClick = onOpenExternalOvpn,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text("Open in OpenVPN")
                 }
 
                 OutlinedButton(
@@ -1265,29 +1351,29 @@ private fun OpenSourceProvidersSection(
 
         ProviderGuideCard(
             title = "Proton VPN (Open-Source • Free Tier WireGuard)",
-            badge = "WireGuard .conf",
-            description = "Proton VPN's Android & WireGuard configs are open-source. Download a free WireGuard .conf from account.protonvpn.com, then load it into NetGate to route WhatsApp or your entire phone.",
-            primaryLabel = "Get Proton .conf",
-            secondaryLabel = "Load .conf in NetGate",
+            badge = "WireGuard .conf / .ovpn",
+            description = "Proton VPN's Android, WireGuard, and OpenVPN configs are open-source. Download a free .conf or .ovpn from account.protonvpn.com, then load it into NetGate to route WhatsApp or your entire phone.",
+            primaryLabel = "Get Proton Config",
+            secondaryLabel = "Load in NetGate",
             onPrimaryClick = { onOpenUrl("https://account.protonvpn.com/downloads") },
             onSecondaryClick = onImportConf
         )
 
         ProviderGuideCard(
             title = "VPNGate Academic Relays (University of Tsukuba)",
-            badge = "OpenVPN .ovpn",
-            description = "Open-source academic volunteer VPN network with live ping, speed, and Base64 .ovpn configs updated continuously.",
-            primaryLabel = "Browse Live VPNGate",
-            secondaryLabel = "OpenVPN for Android",
+            badge = "OpenVPN • Direct Connect",
+            description = "Open-source academic volunteer VPN network with live ping, speed, and Base64 .ovpn configs that connect directly inside NetGate via OpenVPN3.",
+            primaryLabel = "Connect VPNGate Live",
+            secondaryLabel = "Load .ovpn File",
             onPrimaryClick = onOpenVpnGate,
-            onSecondaryClick = { onOpenUrl("https://github.com/schwabe/ics-openvpn") }
+            onSecondaryClick = onImportConf
         )
 
         ProviderGuideCard(
             title = "RiseupVPN / Windscribe / Self-Hosted wg-easy",
             badge = "Open-Source",
-            description = "Any standard WireGuard .conf from Riseup/LEAP, Mullvad, IVPN, Windscribe, or your own VPS (wg-easy / Algo / Amnezia) loads directly into NetGate VPN Guard.",
-            primaryLabel = "Paste .conf Text",
+            description = "Any standard WireGuard (.conf) or OpenVPN (.ovpn) config from Riseup/LEAP, Mullvad, IVPN, Windscribe, or your own VPS loads directly into NetGate VPN Guard.",
+            primaryLabel = "Paste Config Text",
             secondaryLabel = "Browse RiseupVPN",
             onPrimaryClick = onPasteConf,
             onSecondaryClick = { onOpenUrl("https://riseup.net/en/vpn") }
@@ -1390,18 +1476,29 @@ private fun MetricBox(
 }
 
 @Composable
-private fun PasteWireGuardConfigDialog(
+private fun PasteVpnConfigDialog(
     onDismiss: () -> Unit,
     onSave: (String, String, VpnGuardRoutingMode, Set<String>) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var rawText by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var routingMode by remember { mutableStateOf(VpnGuardRoutingMode.WHOLE_SYSTEM) }
     var whatsappOnly by remember { mutableStateOf(false) }
 
+    val isOpenVpn = remember(rawText) { OpenVpnConfigHelper.looksLikeOpenVpnConfig(rawText) }
+    val needsCredentials = remember(rawText, isOpenVpn) {
+        isOpenVpn && OpenVpnConfigHelper.requiresAuthUserPass(rawText)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Paste WireGuard .conf") },
+        title = {
+            Text(
+                if (isOpenVpn) "Paste OpenVPN (.ovpn)" else "Paste WireGuard / OpenVPN"
+            )
+        },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -1417,11 +1514,33 @@ private fun PasteWireGuardConfigDialog(
                 OutlinedTextField(
                     value = rawText,
                     onValueChange = { rawText = it },
-                    label = { Text("[Interface] ... [Peer] ...") },
+                    label = { Text("WireGuard (.conf) or OpenVPN (.ovpn)") },
                     minLines = 6,
                     maxLines = 10,
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (needsCredentials) {
+                    Text(
+                        text = "Detected auth-user-pass in .ovpn — add credentials if required by server:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text("Username (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password (optional)") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -1457,7 +1576,12 @@ private fun PasteWireGuardConfigDialog(
             Button(
                 onClick = {
                     val pkgs = if (whatsappOnly) WireGuardConfigHelper.WHATSAPP_PACKAGES else emptySet()
-                    onSave(name, rawText, routingMode, pkgs)
+                    val finalText = if (isOpenVpn && (username.isNotBlank() || password.isNotEmpty())) {
+                        OpenVpnConfigHelper.embedCredentialsMetadata(rawText, username, password)
+                    } else {
+                        rawText
+                    }
+                    onSave(name, finalText, routingMode, pkgs)
                 },
                 enabled = rawText.isNotBlank()
             ) {
@@ -1651,26 +1775,6 @@ private fun SplitTunnelAppPickerSheet(
             }
             Spacer(modifier = Modifier.height(14.dp))
         }
-    }
-}
-
-private fun openOvpnInExternalClient(
-    context: Context,
-    server: VpnGateServer,
-    onMessage: (String) -> Unit
-) {
-    runCatching {
-        val dir = File(context.cacheDir, "vpn_configs").apply { mkdirs() }
-        val file = File(dir, "vpngate_${server.countryShort.lowercase()}_${server.ip.replace('.', '_')}.ovpn")
-        file.writeText(server.ovpnConfig)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/x-openvpn-profile")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Open .ovpn with OpenVPN client"))
-    }.onFailure {
-        onMessage("Install OpenVPN for Android (open-source) or use Download .ovpn")
     }
 }
 
