@@ -82,6 +82,14 @@ jobs:
             exit 1
           fi
 
+          # A version with a pre-release suffix (for example 3.6-beta.1) publishes a
+          # GitHub prerelease, so the stable channel keeps pointing at the last
+          # full release while testers can install the beta.
+          case "$VERSION" in
+            *-*) PRERELEASE=true ;;
+            *) PRERELEASE=false ;;
+          esac
+
           # Releasing from an unmerged branch would publish code that never passed
           # the default-branch build, so require the tagged commit to be on it.
           DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
@@ -133,6 +141,7 @@ jobs:
           echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
       - name: Run unit & Robolectric tests
         run: gradle :app:testDebugUnitTest
@@ -328,7 +337,7 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: NetGate ${{ steps.meta.outputs.version }}
           body_path: release-notes.md
-          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' || steps.meta.outputs.prerelease == 'true' }}
           files: |
             netgate-release-${{ steps.meta.outputs.version }}-*.apk
             netgate-release-${{ steps.meta.outputs.version }}-*.apk.sha256

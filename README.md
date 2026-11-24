@@ -97,6 +97,16 @@ Run the unit and Robolectric test suite:
 
 Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`. Pushing a version tag (e.g. `v3.5`) triggers the GitHub Actions release workflow to run tests, sign one APK per ABI plus a universal APK using repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`), extract release notes from `CHANGELOG.md`, and publish the GitHub Release. Release assets are named `netgate-release-<version>-<abi>.apk` (smaller, architecture-specific) and `netgate-release-<version>.apk` (universal, installs anywhere); each has a `.sha256` alongside it.
 
+### Beta releases
+
+A version with a pre-release suffix publishes a GitHub prerelease instead of a full release, so testers can install it while the stable channel keeps pointing at the last full release. To cut one:
+
+1. Set `versionName` to the beta version (for example `3.6-beta.1`) and bump `versionCode` in `app/build.gradle.kts`.
+2. Add a matching `# What's New — NetGate 3.6-beta.1` section to `CHANGELOG.md`.
+3. Tag the commit on the default branch with `v3.6-beta.1`.
+
+The tag must still equal `versionName` exactly. Because a beta carries its own `versionCode`, the next stable release must use a higher one.
+
 ## How it works
 
 - **Per-app firewall:** `NetGateVpnService` applies per-app rules for the active transport, `TunPacketInspector` rejects unauthorized packets, and global Wi-Fi lock plus UID checks prevent bypasses without root.
