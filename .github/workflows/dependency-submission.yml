@@ -31,4 +31,4 @@ jobs:
       # Gradle manifests are not parsed into a dependency graph automatically, so
       # the pull-request dependency review has nothing to inspect without this.
       - name: Submit dependency graph
-        uses: gradle/actions/dependency-submission@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+        uses: gradle/actions/dependency-submission@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
