@@ -1,6 +1,7 @@
 package com.aistudio.netgate
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -415,7 +416,11 @@ class VpnGuardTest {
             }
         }
 
-        composeRule.onNodeWithTag("vpngate_connect_203.0.113.77").performScrollTo().performClick()
+        composeRule.onNodeWithTag("vpn_guard_screen")
+            .performScrollToNode(hasTestTag("vpngate_connect_203.0.113.77"))
+        composeRule.onNodeWithTag("vpngate_connect_203.0.113.77")
+            .assertIsDisplayed()
+            .performClick()
         assertEquals(server.ip, connectedServer?.ip)
     }
 }
