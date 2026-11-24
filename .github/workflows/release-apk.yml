@@ -19,9 +19,17 @@ on:
 permissions:
   contents: read
 
+# Releases are never cancelled mid-publish (a half-uploaded release asset is
+# worse than a queued one), but two runs for the same ref must not interleave.
+concurrency:
+  group: release-apk-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-apk:
     runs-on: ubuntu-latest
+    # Bounds a stuck runner while leaving room for tests, lint and the upload.
+    timeout-minutes: 60
     # Publishing waits for a human: configure this environment with required
     # reviewers and move the signing secrets into it.
     environment:
