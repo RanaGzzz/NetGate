@@ -15,6 +15,10 @@ jobs:
   dependency-submission:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Supply the build identity so configuration never shells out to git.
+    env:
+      GIT_COMMIT_SHA: ${{ github.sha }}
+      BUILD_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
     # github.com's dependency submission API is the only thing that needs a
     # write token here; the job never touches git history or release assets.
     permissions:

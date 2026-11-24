@@ -28,15 +28,14 @@ android {
     val gitSha = if (suppliedSha.isNotEmpty()) {
       suppliedSha
     } else {
-      runCatching {
-        val process = ProcessBuilder("git", "rev-parse", "HEAD")
-          .directory(rootDir)
-          .redirectErrorStream(true)
-          .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        process.waitFor()
-        if (output.matches(Regex("[0-9a-f]{40}"))) output else ""
+      // providers.exec keeps this compatible with the configuration cache; a plain
+      // ProcessBuilder is rejected as an unsupported external process.
+      val resolved = runCatching {
+        providers.exec {
+          commandLine("git", "rev-parse", "HEAD")
+        }.standardOutput.asText.get().trim()
       }.getOrDefault("")
+      if (resolved.matches(Regex("[0-9a-f]{40}"))) resolved else ""
     }
     val suppliedTimestamp = System.getenv("BUILD_TIMESTAMP")?.trim().orEmpty()
     // Note: the fully qualified `java.time.Instant` does not resolve here, because
