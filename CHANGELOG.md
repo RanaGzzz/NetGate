@@ -1,4 +1,4 @@
-# What's New — NetGate 3.9.1
+# What's New — NetGate 3.9.2
 
 ### Stability
 - Fixed a launch crash when Android delivered a connectivity callback before the ViewModel's callback guard was initialized.

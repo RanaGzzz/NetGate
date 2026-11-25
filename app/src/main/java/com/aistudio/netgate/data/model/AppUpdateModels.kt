@@ -56,6 +56,19 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.2",
+            subtitle = "Startup Stability and Update Preferences",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Stability",
+                    bullets = listOf(
+                        "Fixed a launch crash when a connectivity callback arrived before its refresh guard was initialized.",
+                        "Automatic update checks now respect the saved preference."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9",
             subtitle = "Filter Sync, Smart Profile and VPN Switching Stability",
             sections = listOf(
