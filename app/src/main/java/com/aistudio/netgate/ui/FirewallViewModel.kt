@@ -15,6 +15,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
+import android.util.Log
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -135,6 +136,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 
 data class DataUsageUiState(
     val selectedSubTab: DataUsageSubTab = DataUsageSubTab.OVERVIEW,
@@ -400,7 +402,17 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         observeTemporaryWebsiteRuleExpiry()
         observeLiveNetworkTelemetry()
         initHotspotAndWifiObservers()
-        checkForGitHubUpdates()
+        viewModelScope.launch {
+            val shouldCheckForUpdates = try {
+                advancedPreferencesStore.snapshot().autoCheckUpdates
+            } catch (error: IOException) {
+                Log.e("FirewallViewModel", "Failed to read automatic update preference", error)
+                return@launch
+            }
+            if (shouldCheckForUpdates) {
+                checkForGitHubUpdates()
+            }
+        }
         vpnDpiLogMonitor.startObserving(
             scope = viewModelScope,
             vpnRuntimeFlow = NetGateVpnService.runtimeState,
