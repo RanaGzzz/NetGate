@@ -56,6 +56,34 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.8",
+            subtitle = "Adblock & Website Blocker Overhaul and Automatic Updates",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Ad & Website Blocker",
+                    bullets = listOf(
+                        "Added 21 trusted free filter subscriptions, with 8 high-performance lists enabled by default for balanced, fast protection on new installations.",
+                        "The live filter log shows query details, originating app, responsible list, action, block reason and hit counts, with quick allow, block, copy, Whois, VirusTotal and false-positive actions.",
+                        "Added temporary and permanent per-domain allow/block rules, editable whitelists and blacklists, domain-rule imports, Adblock text exports, and JSON backup/restore."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Insights & Performance",
+                    bullets = listOf(
+                        "The analytics dashboard tracks request totals, blocked requests, category breakdowns, top blocked domains and top apps.",
+                        "Added Balanced, Maximum Protection, Privacy Focused, Family Safe and Gaming Mode profiles, with Balanced selected by default.",
+                        "Improved filtering with rule deduplication, asynchronous default-list loading, cached DNS lookups and GZIP-compressed storage."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Updates",
+                    bullets = listOf(
+                        "NetGate checks for OTA and GitHub release updates automatically in the background when the app launches."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.7",
             subtitle = "Kill Switch, Encrypted Backup, Hotspot Controls & OTA Updates",
             sections = listOf(
