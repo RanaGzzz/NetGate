@@ -402,8 +402,8 @@ fun FirewallSettingsSheet(
                             )
 
                             SettingsAccordionCard(
-                                title = "VPN & DPI Bypass Logs",
-                                summary = "Handshake & bypass telemetry",
+                                title = "Diagnostics & Crash Logs",
+                                summary = "Handshake, bypass & crash telemetry",
                                 icon = Icons.Rounded.Terminal,
                                 statusLabel = if (vpnDpiLogsCount > 0) "$vpnDpiLogsCount logs" else "Live",
                                 expanded = logsExpanded,
@@ -418,7 +418,7 @@ fun FirewallSettingsSheet(
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Text(
-                                        text = "Inspect real-time WireGuard/VPN Guard handshakes, Firewall TUN events, QUIC downgrades, and DPI packet split telemetry.",
+                                        text = "Inspect real-time WireGuard/VPN Guard handshakes, Firewall TUN events, QUIC downgrades, DPI packet split telemetry, and any crash recorded by NetGate. Copy an entry to share it for troubleshooting.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -442,9 +442,9 @@ fun FirewallSettingsSheet(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
                                             text = if (vpnDpiLogsCount > 0) {
-                                                "Open VPN & DPI Logs ($vpnDpiLogsCount)"
+                                                "Open Diagnostics Logs ($vpnDpiLogsCount)"
                                             } else {
-                                                "Open VPN & DPI Logs"
+                                                "Open Diagnostics Logs"
                                             },
                                             style = MaterialTheme.typography.labelLarge,
                                             maxLines = 1,

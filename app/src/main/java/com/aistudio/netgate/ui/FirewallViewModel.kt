@@ -218,7 +218,9 @@ data class WebsiteBlockerUiState(
     val analytics: AdAnalyticsSummary = AdAnalyticsSummary(),
     val duplicatesRemovedCount: Int = 0,
     val compressedCacheBytes: Long = 0L,
-    val avgLookupLatencyMicros: Long = 0L
+    val avgLookupLatencyMicros: Long = 0L,
+    /** Lists skipped by the filter engine because the device memory budget was reached. */
+    val skippedFilterListCount: Int = 0
 )
 
 data class FirewallUiState(
@@ -422,7 +424,28 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             vpnGuardRuntimeFlow = VpnGuardManager.runtimeState,
             preferencesFlow = repository.preferencesFlow
         )
+        seedStoredCrashReports()
         observeWidgetSync()
+    }
+
+    /**
+     * Surfaces crashes captured by [com.aistudio.netgate.service.CrashLogRecorder] in the
+     * diagnostics log sheet so they can be read and copied out for troubleshooting.
+     */
+    private fun seedStoredCrashReports() {
+        viewModelScope.launch(Dispatchers.IO) {
+            com.aistudio.netgate.service.CrashLogRecorder.reports(getApplication<android.app.Application>())
+                .asReversed()
+                .forEach { report ->
+                    vpnDpiLogMonitor.record(
+                        category = VpnDpiLogCategory.APP,
+                        severity = com.aistudio.netgate.data.model.VpnDpiLogSeverity.ERROR,
+                        title = "App crash: ${report.headline}",
+                        detail = report.detail,
+                        timestampMs = report.timestampMs
+                    )
+                }
+        }
     }
 
     private fun observeTemporaryWebsiteRuleExpiry() {
@@ -968,7 +991,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             analytics = analytics,
             duplicatesRemovedCount = perfStats.duplicatesRemovedCount,
             compressedCacheBytes = perfStats.compressedCacheBytes,
-            avgLookupLatencyMicros = perfStats.avgLookupLatencyMicros
+            avgLookupLatencyMicros = perfStats.avgLookupLatencyMicros,
+            skippedFilterListCount = perfStats.truncatedListCount
         )
 
         val effectiveDnsCheck = if (sheets.dnsCheckState.checkedAtMs == 0L && !sheets.dnsCheckState.isChecking) {
@@ -1693,7 +1717,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun clearVpnDpiLogs() {
         vpnDpiLogMonitor.clear()
-        _snackbarMessages.tryEmit("Cleared VPN & DPI Bypass logs")
+        com.aistudio.netgate.service.CrashLogRecorder.clear(getApplication<android.app.Application>())
+        _snackbarMessages.tryEmit("Cleared diagnostics logs")
     }
 
     fun openConnectionInfo() {

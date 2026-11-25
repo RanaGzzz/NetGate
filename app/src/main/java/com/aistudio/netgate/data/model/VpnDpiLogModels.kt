@@ -4,7 +4,8 @@ enum class VpnDpiLogCategory(val label: String) {
     ALL("All"),
     VPN_GUARD("VPN Guard"),
     DPI_BYPASS("DPI Bypass"),
-    VPN_TUNNEL("Firewall TUN")
+    VPN_TUNNEL("Firewall TUN"),
+    APP("App & Crash")
 }
 
 enum class VpnDpiLogSeverity(val label: String) {

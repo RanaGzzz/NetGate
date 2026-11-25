@@ -224,6 +224,7 @@ fun AdAnalyticsDashboardCard(
     duplicatesRemovedCount: Int,
     compressedCacheBytes: Long,
     avgLookupLatencyMicros: Long,
+    skippedFilterListCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     FrostedSurface(
@@ -402,6 +403,18 @@ fun AdAnalyticsDashboardCard(
                             text = "Dedup: -${formatStatNumber(duplicatesRemovedCount.toLong())}",
                             style = MaterialTheme.typography.labelSmall,
                             color = EmeraldPrimary
+                        )
+                    }
+
+                    // Tells the user why not every enabled list is filtering: the engine stopped
+                    // adding domains once the device memory budget was reached.
+                    if (skippedFilterListCount > 0) {
+                        Text(
+                            text = "Memory budget: $skippedFilterListCount list" +
+                                (if (skippedFilterListCount == 1) "" else "s") + " skipped",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = WarningAmber,
+                            modifier = Modifier.testTag("ad_memory_budget_warning")
                         )
                     }
                 }

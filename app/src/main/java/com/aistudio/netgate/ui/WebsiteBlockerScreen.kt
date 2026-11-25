@@ -326,7 +326,8 @@ fun WebsiteBlockerContent(
                                             analytics = state.analytics,
                                             duplicatesRemovedCount = state.duplicatesRemovedCount,
                                             compressedCacheBytes = state.compressedCacheBytes,
-                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros
+                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros,
+                                            skippedFilterListCount = state.skippedFilterListCount
                                         )
                                     }
                                 }
@@ -388,7 +389,8 @@ fun WebsiteBlockerContent(
                                             analytics = state.analytics,
                                             duplicatesRemovedCount = state.duplicatesRemovedCount,
                                             compressedCacheBytes = state.compressedCacheBytes,
-                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros
+                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros,
+                                            skippedFilterListCount = state.skippedFilterListCount
                                         )
                                     }
                                     item(key = "ad_lists_header") {

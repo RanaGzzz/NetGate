@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -138,7 +139,7 @@ fun VpnDpiLogsSheet(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "VPN & DPI Bypass Logs",
+                            text = "Diagnostics & Crash Logs",
                             style = MaterialTheme.typography.headlineSmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -153,8 +154,8 @@ fun VpnDpiLogsSheet(
                     OutlinedButton(
                         onClick = {
                             val formatted = formatLogEntriesForClipboard(filteredLogs)
-                            copyToClipboard(context, "NetGate VPN & DPI Logs", formatted)
-                            onCopyLogs("Copied ${filteredLogs.size} VPN & DPI log entries")
+                            copyToClipboard(context, "NetGate Diagnostics Logs", formatted)
+                            onCopyLogs("Copied ${filteredLogs.size} log entries")
                         },
                         enabled = filteredLogs.isNotEmpty(),
                         shape = RoundedCornerShape(12.dp),
@@ -262,7 +263,7 @@ fun VpnDpiLogsSheet(
                     Box(modifier = Modifier.weight(1f)) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search VPN Guard, DPI bypass, handshake, QUIC…",
+                                text = "Search VPN, DPI bypass, crash, QUIC…",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -349,7 +350,7 @@ fun VpnDpiLogsSheet(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (logs.isEmpty()) "No VPN or DPI events yet" else "No matching log entries",
+                            text = if (logs.isEmpty()) "No VPN, DPI or crash events yet" else "No matching log entries",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -395,6 +396,7 @@ private fun VpnDpiLogRow(entry: VpnDpiLogEntry) {
         VpnDpiLogCategory.VPN_GUARD -> vpnTunnelIcon
         VpnDpiLogCategory.DPI_BYPASS -> Icons.Rounded.EnhancedEncryption
         VpnDpiLogCategory.VPN_TUNNEL, VpnDpiLogCategory.ALL -> Icons.Rounded.Shield
+        VpnDpiLogCategory.APP -> Icons.Rounded.BugReport
     }
 
     FrostedSurface(

@@ -48,7 +48,9 @@ data class AdEnginePerfStats(
     val duplicatesRemovedCount: Int = 0,
     val compressedCacheBytes: Long = 0L,
     val avgLookupLatencyMicros: Long = 0L,
-    val lastBuildDurationMs: Long = 0L
+    val lastBuildDurationMs: Long = 0L,
+    /** Enabled lists that were skipped because the in-memory domain budget was reached. */
+    val truncatedListCount: Int = 0
 )
 
 class AdBlockMatcherSnapshot(
@@ -938,12 +940,20 @@ object AdBlockFilterEngine {
      */
     internal fun domainBudgetForHeap(maxHeapBytes: Long = Runtime.getRuntime().maxMemory()): Int {
         val heapMb = (maxHeapBytes / (1024L * 1024L)).coerceAtLeast(64L)
-        return (heapMb * 700L).toInt().coerceIn(MIN_DOMAIN_BUDGET, MAX_TOTAL_DOMAINS)
+        // Clamp in Long space: converting an arbitrarily large heap straight to Int overflowed.
+        val scaled = heapMb * 700L
+        return when {
+            scaled >= MAX_TOTAL_DOMAINS.toLong() -> MAX_TOTAL_DOMAINS
+            scaled <= MIN_DOMAIN_BUDGET.toLong() -> MIN_DOMAIN_BUDGET
+            else -> scaled.toInt()
+        }
     }
 
     fun buildMatcherSnapshot(
         context: Context,
-        enabledLists: List<AdFilterListEntity>
+        enabledLists: List<AdFilterListEntity>,
+        /** Test/seam override; production always uses [domainBudgetForHeap]. */
+        domainBudget: Int = domainBudgetForHeap()
     ): AdBlockMatcherSnapshot {
         val previous = cachedMatcherRef.get()
         if (!buildLock.tryLock()) {
@@ -953,7 +963,7 @@ object AdBlockFilterEngine {
         }
         try {
             cachedMatcherRef.set(null)
-            return buildMatcherSnapshotLocked(context, enabledLists)
+            return buildMatcherSnapshotLocked(context, enabledLists, domainBudget)
         } catch (oom: OutOfMemoryError) {
             // Keep whatever was working instead of taking the whole tunnel down.
             cachedMatcherRef.set(previous)
@@ -970,10 +980,11 @@ object AdBlockFilterEngine {
 
     private fun buildMatcherSnapshotLocked(
         context: Context,
-        enabledLists: List<AdFilterListEntity>
+        enabledLists: List<AdFilterListEntity>,
+        domainBudget: Int
     ): AdBlockMatcherSnapshot {
         val startMs = System.currentTimeMillis()
-        val budget = domainBudgetForHeap()
+        val budget = domainBudget.coerceAtLeast(1)
         val blocked = HashSet<String>(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
         val ownerIndex = HashMap<String, Byte>(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
         val ownerMeta = ArrayList<AdRuleMatchMeta>(8)
@@ -1070,7 +1081,8 @@ object AdBlockFilterEngine {
             totalDomains = blocked.size,
             duplicatesRemovedCount = duplicatesRemoved,
             compressedCacheBytes = compressedBytes,
-            lastBuildDurationMs = buildDurationMs
+            lastBuildDurationMs = buildDurationMs,
+            truncatedListCount = truncatedListCount
         )
         return snapshot
     }
