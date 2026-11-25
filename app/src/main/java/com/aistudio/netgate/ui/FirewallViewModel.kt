@@ -31,6 +31,7 @@ import com.aistudio.netgate.data.model.SplitTunnelPresets
 import com.aistudio.netgate.data.network.ApkDownloadInstaller
 import com.aistudio.netgate.data.network.OtaUpdateClient
 import com.aistudio.netgate.service.backup.EncryptedBackupManager
+import com.aistudio.netgate.data.model.AdAnalyticsSummary
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.AdFilterListItem
 import com.aistudio.netgate.data.model.AppDestination
@@ -63,8 +64,10 @@ import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.SiteConnectionRecord
 import com.aistudio.netgate.data.model.SiteTrafficFilter
+import com.aistudio.netgate.data.model.SmartProtectionProfile
 import com.aistudio.netgate.data.model.SniProxyPreset
 import com.aistudio.netgate.data.model.StatusBarSpeedStyle
+import com.aistudio.netgate.data.model.TempAllowDuration
 import com.aistudio.netgate.data.model.ThemeMode
 import com.aistudio.netgate.data.model.TimerTargetNetwork
 import com.aistudio.netgate.data.model.UpstreamDnsServer
@@ -88,7 +91,9 @@ import com.aistudio.netgate.data.network.SpeedTestPhase
 import com.aistudio.netgate.data.network.SpeedTestRunner
 import com.aistudio.netgate.data.network.SpeedTestState
 import com.aistudio.netgate.data.repository.FirewallRepository
+import com.aistudio.netgate.service.AdBlockAnalyticsHub
 import com.aistudio.netgate.service.AdBlockFilterEngine
+import com.aistudio.netgate.service.AdEnginePerfStats
 import com.aistudio.netgate.service.ConnectionMonitorHub
 import com.aistudio.netgate.service.HotspotProxyManager
 import com.aistudio.netgate.service.HotspotProxyService
@@ -206,7 +211,12 @@ data class WebsiteBlockerUiState(
     val dpiBypassedConnectionsCount: Long = 0L,
     val dpiAutopilotLearnedCount: Int = 0,
     val antiDnsPoisonBlockedCount: Long = 0L,
-    val quicStrippedCount: Long = 0L
+    val quicStrippedCount: Long = 0L,
+    val smartProtectionProfile: SmartProtectionProfile = SmartProtectionProfile.BALANCED,
+    val analytics: AdAnalyticsSummary = AdAnalyticsSummary(),
+    val duplicatesRemovedCount: Int = 0,
+    val compressedCacheBytes: Long = 0L,
+    val avgLookupLatencyMicros: Long = 0L
 )
 
 data class FirewallUiState(
@@ -381,10 +391,13 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     init {
         viewModelScope.launch {
             repository.ensureDefaultAdFilterListsSeeded()
+            repository.purgeExpiredWebsiteRules()
+            repository.warmAdBlockMatcherAsync()
         }
         refreshInstalledApps()
         registerNetworkMonitor()
         observeActiveTimerTicker()
+        observeTemporaryWebsiteRuleExpiry()
         observeLiveNetworkTelemetry()
         initHotspotAndWifiObservers()
         vpnDpiLogMonitor.startObserving(
@@ -394,6 +407,22 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             preferencesFlow = repository.preferencesFlow
         )
         observeWidgetSync()
+    }
+
+    private fun observeTemporaryWebsiteRuleExpiry() {
+        viewModelScope.launch {
+            repository.websiteRulesFlow.collectLatest { rules ->
+                val tempRules = rules.filter { it.isEnabled && it.expiresAtMillis > 0L }
+                if (tempRules.isEmpty()) return@collectLatest
+                val nextExpiry = tempRules.minOf { it.expiresAtMillis }
+                val waitMs = (nextExpiry - System.currentTimeMillis()).coerceAtLeast(200L)
+                delay(waitMs)
+                val removed = repository.purgeExpiredWebsiteRules(System.currentTimeMillis())
+                if (removed > 0) {
+                    _snackbarMessages.tryEmit("Temporary domain allow expired ($removed rule${if (removed == 1) "" else "s"})")
+                }
+            }
+        }
     }
 
     private fun observeWidgetSync() {
@@ -770,9 +799,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     private val websiteAndAdRepoFlow = combine(
         repository.websiteRulesFlow,
         repository.adFilterListsFlow,
-        isSyncingAdListsFlow
-    ) { websiteRules, adLists, isSyncingAds ->
-        Triple(websiteRules, adLists, isSyncingAds)
+        isSyncingAdListsFlow,
+        AdBlockAnalyticsHub.summaryFlow,
+        AdBlockFilterEngine.perfStatsFlow
+    ) { websiteRules, adLists, isSyncingAds, analytics, perfStats ->
+        WebAndAdSnapshot(websiteRules, adLists, isSyncingAds, analytics, perfStats)
     }
 
     private val hotspotAndIdleFlow = combine(
@@ -854,7 +885,12 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     ) { base, interaction, connDetails, sheets, tail ->
         val destination = tail.destination
         val dataUsage = tail.dataUsage
-        val (websiteRules, adLists, isSyncingAds) = tail.webAndAd
+        val webAndAd = tail.webAndAd
+        val websiteRules = webAndAd.websiteRules
+        val adLists = webAndAd.adLists
+        val isSyncingAds = webAndAd.isSyncingAds
+        val analytics = webAndAd.analytics
+        val perfStats = webAndAd.perfStats
         val liveTelemetry = tail.liveTelemetry
         val hotspotState = tail.hotspotProxyState
         val idleStatus = tail.wifiIdleStatus
@@ -864,6 +900,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
         val loadedDomainsCount = if (base.vpnState.loadedAdDomainsCount > 0) {
             base.vpnState.loadedAdDomainsCount
+        } else if (perfStats.totalDomains > AdBlockFilterEngine.BUILTIN_AD_CORE_DOMAINS.size) {
+            perfStats.totalDomains
         } else {
             AdBlockFilterEngine.BUILTIN_AD_CORE_DOMAINS.size +
                 adLists.filter { it.isEnabled }.sumOf { it.domainCount }
@@ -909,7 +947,12 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             dpiBypassedConnectionsCount = base.vpnState.dpiBypassedConnectionsCount,
             dpiAutopilotLearnedCount = base.vpnState.dpiAutopilotLearnedCount,
             antiDnsPoisonBlockedCount = base.vpnState.antiDnsPoisonBlockedCount,
-            quicStrippedCount = base.vpnState.quicStrippedCount
+            quicStrippedCount = base.vpnState.quicStrippedCount,
+            smartProtectionProfile = base.prefs.smartProtectionProfile,
+            analytics = analytics,
+            duplicatesRemovedCount = perfStats.duplicatesRemovedCount,
+            compressedCacheBytes = perfStats.compressedCacheBytes,
+            avgLookupLatencyMicros = perfStats.avgLookupLatencyMicros
         )
 
         val effectiveDnsCheck = if (sheets.dnsCheckState.checkedAtMs == 0L && !sheets.dnsCheckState.isChecking) {
@@ -2172,7 +2215,109 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun clearDnsLogs() {
         NetGateVpnService.clearRecentDnsLogs()
-        _snackbarMessages.tryEmit("Cleared DNS query log")
+        AdBlockAnalyticsHub.clear()
+        _snackbarMessages.tryEmit("Cleared Filter Log & analytics")
+    }
+
+    fun applySmartProtectionProfile(profile: SmartProtectionProfile) {
+        viewModelScope.launch {
+            repository.applySmartProtectionProfile(profile)
+            _snackbarMessages.tryEmit("Smart Protection profile: ${profile.title}")
+        }
+    }
+
+    fun allowDomainTemporarily(rawDomain: String, duration: TempAllowDuration) {
+        viewModelScope.launch {
+            val expiresAt = System.currentTimeMillis() + duration.durationMillis
+            val result = repository.addWebsiteRule(
+                rawDomain = rawDomain,
+                isWhitelist = true,
+                expiresAtMillis = expiresAt
+            )
+            result.onSuccess { domain ->
+                _snackbarMessages.tryEmit("Temporarily allowed $domain (${duration.label})")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Enter a valid domain like example.com")
+            }
+        }
+    }
+
+    fun allowDomainPermanently(rawDomain: String) {
+        viewModelScope.launch {
+            val result = repository.addWebsiteRule(
+                rawDomain = rawDomain,
+                isWhitelist = true,
+                expiresAtMillis = 0L
+            )
+            result.onSuccess { domain ->
+                _snackbarMessages.tryEmit("Permanently allowed $domain")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Enter a valid domain like example.com")
+            }
+        }
+    }
+
+    fun blockDomainPermanently(rawDomain: String) {
+        viewModelScope.launch {
+            val result = repository.addWebsiteRule(
+                rawDomain = rawDomain,
+                isWhitelist = false,
+                expiresAtMillis = 0L
+            )
+            result.onSuccess { domain ->
+                if (uiState.value.preferences.websiteFilterMode == WebsiteFilterMode.OFF) {
+                    preferences.setWebsiteFilterMode(WebsiteFilterMode.BLOCKLIST)
+                }
+                _snackbarMessages.tryEmit("Permanently blocked $domain")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Enter a valid domain like example.com")
+            }
+        }
+    }
+
+    fun reportFalsePositive(domain: String) {
+        viewModelScope.launch {
+            val res = repository.addWebsiteRule(
+                rawDomain = domain,
+                isWhitelist = true,
+                expiresAtMillis = 0L
+            )
+            res.onSuccess { normalized ->
+                _snackbarMessages.tryEmit("Reported false positive & allowed $normalized")
+            }.onFailure {
+                _snackbarMessages.tryEmit("Recorded false positive feedback for $domain")
+            }
+        }
+    }
+
+    fun importWebsiteRules(rawText: String, defaultIsWhitelist: Boolean = false) {
+        viewModelScope.launch {
+            val result = repository.importWebsiteRules(rawText, defaultIsWhitelist)
+            result.onSuccess { count ->
+                _snackbarMessages.tryEmit("Imported $count domain rule${if (count == 1) "" else "s"}")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Failed to import rules")
+            }
+        }
+    }
+
+    suspend fun exportWebsiteRulesText(): String = repository.exportWebsiteRulesText()
+
+    suspend fun exportAdBlockBackupJson(): String = repository.exportAdBlockBackupJson()
+
+    fun restoreAdBlockBackupJson(rawJson: String) {
+        viewModelScope.launch {
+            val result = repository.restoreAdBlockBackupJson(rawJson)
+            result.onSuccess { count ->
+                _snackbarMessages.tryEmit("Restored backup ($count rules + filter profile)")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.message ?: "Invalid AdBlock backup file")
+            }
+        }
+    }
+
+    fun notifyFilterLogAction(message: String) {
+        _snackbarMessages.tryEmit(message)
     }
 
     fun setStatusBarSpeedEnabled(enabled: Boolean) {
@@ -2691,10 +2836,18 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         val sortMode: VpnGateSortMode
     )
 
+    private data class WebAndAdSnapshot(
+        val websiteRules: List<WebsiteRuleItem>,
+        val adLists: List<AdFilterListItem>,
+        val isSyncingAds: Boolean,
+        val analytics: AdAnalyticsSummary,
+        val perfStats: AdEnginePerfStats
+    )
+
     private data class TailSnapshot(
         val destination: AppDestination,
         val dataUsage: DataUsageUiState,
-        val webAndAd: Triple<List<WebsiteRuleItem>, List<AdFilterListItem>, Boolean>,
+        val webAndAd: WebAndAdSnapshot,
         val liveTelemetry: LiveNetworkTelemetry,
         val hotspotProxyState: HotspotProxyRuntimeState,
         val wifiIdleStatus: WifiIdleStatus,

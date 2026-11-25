@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ConnectionEventEntity::class,
         VpnGuardProfileEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class NetGateDatabase : RoomDatabase() {
@@ -200,6 +200,12 @@ abstract class NetGateDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `website_rules` ADD COLUMN `expiresAtMillis` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): NetGateDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -215,7 +221,8 @@ abstract class NetGateDatabase : RoomDatabase() {
                         MIGRATION_5_6,
                         MIGRATION_6_7,
                         MIGRATION_7_8,
-                        MIGRATION_8_9
+                        MIGRATION_8_9,
+                        MIGRATION_9_10
                     )
                     .build()
                     .also { INSTANCE = it }

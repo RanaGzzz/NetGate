@@ -679,20 +679,6 @@ class ScreenshotGeneratorTest {
                                 }
                             },
                             actions = {
-                                if (destination == AppDestination.FIREWALL) {
-                                    FilledTonalButton(
-                                        onClick = {},
-                                        shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.Checklist, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Select", style = MaterialTheme.typography.labelLarge)
-                                    }
-                                }
-                                IconButton(onClick = {}) {
-                                    Icon(Icons.Rounded.DarkMode, contentDescription = "Theme")
-                                }
                                 IconButton(onClick = {}) {
                                     Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
                                 }

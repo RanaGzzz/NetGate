@@ -26,6 +26,7 @@ import com.aistudio.netgate.data.local.FirewallPreferences
 import com.aistudio.netgate.data.local.NetGateDatabase
 import com.aistudio.netgate.data.local.WebsiteRuleEntity
 import com.aistudio.netgate.data.model.ActiveNetworkType
+import com.aistudio.netgate.data.model.AdBlockReason
 import com.aistudio.netgate.data.model.DnsQueryLogEntry
 import com.aistudio.netgate.data.model.DnsQueryStatus
 import com.aistudio.netgate.data.model.DnsTransportMode
@@ -262,6 +263,7 @@ class NetGateVpnService : VpnService() {
     private val recentBlockedLock = Any()
     private val recentBlockedQueue = ArrayDeque<String>()
     private val packetLogThrottleMap = HashMap<String, Long>()
+    private val appLabelCache = ConcurrentHashMap<String, String>(64)
 
     private lateinit var preferences: FirewallPreferences
 
@@ -425,6 +427,14 @@ class NetGateVpnService : VpnService() {
                         prefs = prefs
                     )
                 }
+                val nowMs = System.currentTimeMillis()
+                if (latestWebsiteRules.any { it.isEnabled && it.expiresAtMillis in 1..nowMs }) {
+                    runCatching {
+                        NetGateDatabase.getInstance(applicationContext)
+                            .websiteRuleDao()
+                            .deleteExpiredRules(nowMs)
+                    }
+                }
             }
         }
     }
@@ -433,7 +443,20 @@ class NetGateVpnService : VpnService() {
         val db = NetGateDatabase.getInstance(applicationContext)
         rulesJob = serviceScope.launch {
             withContext(Dispatchers.IO) {
-                db.adFilterListDao().insertMissingFilterLists(AdBlockFilterEngine.DEFAULT_AD_FILTER_LISTS)
+                db.websiteRuleDao().deleteExpiredRules(System.currentTimeMillis())
+                val adDao = db.adFilterListDao()
+                adDao.deleteFilterListsByIds(AdBlockFilterEngine.LEGACY_REMOVED_LIST_IDS.toList())
+                adDao.insertMissingFilterLists(AdBlockFilterEngine.DEFAULT_AD_FILTER_LISTS)
+                if (preferences.markBalancedDefaultsV2AppliedIfUnset()) {
+                    adDao.getAllFilterListsOnce()
+                        .filter { !it.id.startsWith("custom_") }
+                        .forEach { entity ->
+                            val shouldEnable = entity.id in AdBlockFilterEngine.BALANCED_DEFAULT_LIST_IDS
+                            if (entity.isEnabled != shouldEnable) {
+                                adDao.setListEnabled(entity.id, shouldEnable)
+                            }
+                        }
+                }
             }
             combine(
                 db.appNetworkRuleDao().observeAllRules(),
@@ -515,7 +538,8 @@ class NetGateVpnService : VpnService() {
                             websiteRules = snapshot.websiteRules,
                             adMatcher = latestAdMatcherSnapshot,
                             blockedUids = latestBlockedUids,
-                            blockedPackages = latestBlockedPackages
+                            blockedPackages = latestBlockedPackages,
+                            nowMillis = System.currentTimeMillis()
                         )
                     )
                 }
@@ -979,7 +1003,8 @@ class NetGateVpnService : VpnService() {
                             dpiBypassed = decision.allow && latestDpiBypassMode != DpiBypassMode.OFF
                         )
                     }
-                }
+                },
+                resolveClientApp = ::resolveProxyClientApp
             )
         }
         return result.isRunning
@@ -1120,9 +1145,38 @@ class NetGateVpnService : VpnService() {
                 scheduleFlushLifetimeAds()
             }
             recordBlockedDomain(host)
-            recordDnsLog(host, DnsQueryStatus.BLOCKED_HTTPS, decision.reason)
+            recordDnsLog(
+                domain = host,
+                status = DnsQueryStatus.BLOCKED_HTTPS,
+                reason = decision.reason,
+                fullUrl = decision.fullUrl,
+                appName = decision.appName,
+                appPackage = decision.appPackage,
+                filterListName = decision.filterListName.ifBlank { "HTTPS Proxy Filter" },
+                blockReason = if (decision.blockReason != AdBlockReason.NONE) {
+                    decision.blockReason
+                } else if (decision.isAdBlock) {
+                    AdBlockReason.ADS
+                } else {
+                    AdBlockReason.CUSTOM_RULE
+                },
+                latencyMicros = decision.latencyMicros
+            )
         } else {
             allowedProxyCount.incrementAndGet()
+            if (decision.fullUrl.isNotBlank()) {
+                recordDnsLog(
+                    domain = host,
+                    status = DnsQueryStatus.ALLOWED,
+                    reason = decision.reason,
+                    fullUrl = decision.fullUrl,
+                    appName = decision.appName,
+                    appPackage = decision.appPackage,
+                    filterListName = "HTTPS Proxy",
+                    blockReason = AdBlockReason.NONE,
+                    latencyMicros = decision.latencyMicros
+                )
+            }
         }
         publishDnsStatsOnly()
     }
@@ -1226,7 +1280,15 @@ class NetGateVpnService : VpnService() {
         if (!shouldRecord) return
 
         recordBlockedDomain(target)
-        recordDnsLog(target, DnsQueryStatus.BLOCKED_APP, "App Firewall (${parsed.protocolName})")
+        recordDnsLog(
+            domain = target,
+            status = DnsQueryStatus.BLOCKED_APP,
+            reason = "App Firewall (${parsed.protocolName})",
+            appName = resolveAppLabel(ownerPkg),
+            appPackage = ownerPkg,
+            filterListName = "App Firewall",
+            blockReason = AdBlockReason.CUSTOM_RULE
+        )
         if (latestIsDeepMonitorEnabled) {
             ConnectionMonitorHub.recordConnection(
                 context = applicationContext,
@@ -1335,6 +1397,7 @@ class NetGateVpnService : VpnService() {
         val isCanary = DnsPacketFilter.isInternalBypassCanary(query.domain)
         val owner = if (!isCanary) resolveDnsQueryOwner(query) else null
         val ownerPackage = owner?.primaryPackage.orEmpty()
+        val ownerAppName = resolveAppLabel(ownerPackage)
         val policyContext = PolicyContext.forFirewall(
             appPackage = ownerPackage.takeIf { it.isNotEmpty() },
             appUid = owner?.uid,
@@ -1363,7 +1426,16 @@ class NetGateVpnService : VpnService() {
                         if (!isCanary) {
                             blockedDnsCount.incrementAndGet()
                             recordBlockedDomain(query.domain)
-                            recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_APP, outcome.reason)
+                            recordDnsLog(
+                                domain = query.domain,
+                                status = DnsQueryStatus.BLOCKED_APP,
+                                reason = outcome.reason,
+                                appName = ownerAppName,
+                                appPackage = ownerPackage,
+                                filterListName = "App Firewall",
+                                blockReason = AdBlockReason.CUSTOM_RULE,
+                                latencyMicros = outcome.latencyMicros
+                            )
                             if (latestIsDeepMonitorEnabled) {
                                 ConnectionMonitorHub.recordConnection(
                                     context = applicationContext,
@@ -1385,7 +1457,16 @@ class NetGateVpnService : VpnService() {
                         if (!isCanary) {
                             blockedDnsCount.incrementAndGet()
                             recordBlockedDomain(query.domain)
-                            recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_WEBSITE, outcome.reason)
+                            recordDnsLog(
+                                domain = query.domain,
+                                status = DnsQueryStatus.BLOCKED_WEBSITE,
+                                reason = outcome.reason,
+                                appName = ownerAppName,
+                                appPackage = ownerPackage,
+                                filterListName = outcome.filterListName.ifBlank { "Custom Website Rule" },
+                                blockReason = AdBlockReason.CUSTOM_RULE,
+                                latencyMicros = outcome.latencyMicros
+                            )
                             if (latestIsDeepMonitorEnabled) {
                                 ConnectionMonitorHub.recordConnection(
                                     context = applicationContext,
@@ -1411,7 +1492,20 @@ class NetGateVpnService : VpnService() {
                         blockedAdsCount.incrementAndGet()
                         scheduleFlushLifetimeAds()
                         recordBlockedDomain(query.domain)
-                        recordDnsLog(query.domain, DnsQueryStatus.BLOCKED_AD, outcome.reason)
+                        recordDnsLog(
+                            domain = query.domain,
+                            status = DnsQueryStatus.BLOCKED_AD,
+                            reason = outcome.reason,
+                            appName = ownerAppName,
+                            appPackage = ownerPackage,
+                            filterListName = outcome.filterListName.ifBlank { "NetGate Core Ad Shield" },
+                            blockReason = if (outcome.blockReason != AdBlockReason.NONE) {
+                                outcome.blockReason
+                            } else {
+                                AdBlockReason.ADS
+                            },
+                            latencyMicros = outcome.latencyMicros
+                        )
                         if (latestIsDeepMonitorEnabled) {
                             ConnectionMonitorHub.recordConnection(
                                 context = applicationContext,
@@ -1438,7 +1532,14 @@ class NetGateVpnService : VpnService() {
             is DnsOutcome.QuicDowngraded -> {
                 writeToTun(outcome.responsePacket, output)
                 quicStrippedCount.incrementAndGet()
-                recordDnsLog(query.domain, DnsQueryStatus.PASSTHROUGH, "QUIC Downgrade (DPI Bypass)")
+                recordDnsLog(
+                    domain = query.domain,
+                    status = DnsQueryStatus.PASSTHROUGH,
+                    reason = "QUIC Downgrade (DPI Bypass)",
+                    appName = ownerAppName,
+                    appPackage = ownerPackage,
+                    filterListName = "DPI Bypass Engine"
+                )
                 publishDnsStatsOnly()
             }
 
@@ -1447,9 +1548,13 @@ class NetGateVpnService : VpnService() {
                 safeRewriteCount.incrementAndGet()
                 allowedDnsCount.incrementAndGet()
                 recordDnsLog(
-                    query.domain,
-                    DnsQueryStatus.SAFE_REWRITE,
-                    "${outcome.label} (${outcome.aliasDomain})"
+                    domain = query.domain,
+                    status = DnsQueryStatus.SAFE_REWRITE,
+                    reason = "${outcome.label} (${outcome.aliasDomain})",
+                    appName = ownerAppName,
+                    appPackage = ownerPackage,
+                    filterListName = "SafeSearch Rewrite",
+                    latencyMicros = outcome.latencyMicros
                 )
                 publishDnsStatsOnly()
             }
@@ -1463,7 +1568,15 @@ class NetGateVpnService : VpnService() {
                 } else {
                     outcome.transportLabel
                 }
-                recordDnsLog(query.domain, status, reason)
+                recordDnsLog(
+                    domain = query.domain,
+                    status = status,
+                    reason = reason,
+                    appName = ownerAppName,
+                    appPackage = ownerPackage,
+                    filterListName = if (outcome.isPassthrough) "Essential Passthrough" else outcome.transportLabel,
+                    latencyMicros = outcome.latencyMicros
+                )
                 if (latestIsDeepMonitorEnabled && !isCanary) {
                     val resolvedIps = DnsPacketFilter.extractResolvedIpsFromDnsResponse(outcome.upstreamPayload)
                     val primaryIp = resolvedIps.firstOrNull().orEmpty()
@@ -1567,6 +1680,38 @@ class NetGateVpnService : VpnService() {
         }.getOrNull()
     }
 
+    private fun resolveAppLabel(pkg: String): String {
+        if (pkg.isBlank()) return ""
+        appLabelCache[pkg]?.let { return it }
+        val resolved = runCatching {
+            val appInfo = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(appInfo).toString().ifBlank { pkg }
+        }.getOrDefault(pkg)
+        if (appLabelCache.size > 256) {
+            appLabelCache.clear()
+        }
+        appLabelCache[pkg] = resolved
+        return resolved
+    }
+
+    private fun resolveProxyClientApp(client: java.net.Socket): Pair<String, String>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val cm = connectivityManager ?: return null
+        val clientLocal = client.remoteSocketAddress as? InetSocketAddress ?: return null
+        val proxyRemote = client.localSocketAddress as? InetSocketAddress ?: return null
+        return runCatching {
+            val uid = cm.getConnectionOwnerUid(
+                TunPacketInspector.IPPROTO_TCP,
+                clientLocal,
+                proxyRemote
+            )
+            if (uid <= 0) return null
+            val pkg = packageManager.getPackagesForUid(uid)?.firstOrNull().orEmpty()
+            if (pkg.isEmpty()) return null
+            pkg to resolveAppLabel(pkg)
+        }.getOrNull()
+    }
+
     private fun recordBlockedDomain(domain: String) {
         synchronized(recentBlockedLock) {
             recentBlockedQueue.remove(domain)
@@ -1577,13 +1722,38 @@ class NetGateVpnService : VpnService() {
         }
     }
 
-    private fun recordDnsLog(domain: String, status: DnsQueryStatus, reason: String) {
+    private fun recordDnsLog(
+        domain: String,
+        status: DnsQueryStatus,
+        reason: String,
+        fullUrl: String = "",
+        appName: String = "",
+        appPackage: String = "",
+        filterListName: String = "",
+        blockReason: AdBlockReason = AdBlockReason.NONE,
+        latencyMicros: Long = 0L
+    ) {
+        val hitCount = AdBlockAnalyticsHub.recordEvent(
+            domain = domain,
+            status = status,
+            blockReason = blockReason,
+            filterListName = filterListName,
+            appPackage = appPackage,
+            appName = appName
+        )
         val entry = DnsQueryLogEntry(
             id = dnsLogSeq.getAndIncrement(),
             domain = domain,
             status = status,
             reason = reason,
-            timestampMs = System.currentTimeMillis()
+            timestampMs = System.currentTimeMillis(),
+            fullUrl = fullUrl,
+            appName = appName,
+            appPackage = appPackage,
+            filterListName = filterListName,
+            blockReason = blockReason,
+            hitCount = hitCount,
+            latencyMicros = latencyMicros
         )
         synchronized(dnsLogLock) {
             dnsLogQueue.addFirst(entry)
@@ -1888,6 +2058,7 @@ class NetGateVpnService : VpnService() {
             synchronized(dnsLogLock) {
                 dnsLogQueue.clear()
             }
+            AdBlockAnalyticsHub.clear()
             _runtimeState.value = _runtimeState.value.copy(recentDnsLogs = emptyList())
         }
 

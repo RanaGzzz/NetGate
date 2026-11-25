@@ -19,16 +19,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
-import androidx.compose.material.icons.rounded.BatterySaver
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Restore
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,14 +31,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,10 +49,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.AdvancedPreferencesState
-import com.aistudio.netgate.data.model.AppUpdateStatus
 import com.aistudio.netgate.data.model.AppUpdateUiState
 import com.aistudio.netgate.data.model.BackupUiState
-import com.aistudio.netgate.service.BackgroundPowerHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -95,7 +86,6 @@ fun AdvancedProtectionSheet(
     var pendingExportUri by remember { mutableStateOf<Uri?>(null) }
     var pendingImportPayload by remember { mutableStateOf<String?>(null) }
     var pendingImportName by remember { mutableStateOf("") }
-    var batteryRefresh by remember { mutableIntStateOf(0) }
 
     val createBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -134,24 +124,25 @@ fun AdvancedProtectionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.93f)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp)
-                .padding(bottom = 28.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        FrostedSheetContainer {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 28.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             Text(
-                text = "Advanced Protection",
+                text = "Kill Switch, Backup & Automation",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Kill switch, auto-reconnect, trusted Wi-Fi, battery-saver fixes, backup and OTA updates.",
+                text = "VPN kill switch, auto-reconnect, trusted Wi-Fi & AES-256 encrypted backup.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -233,50 +224,6 @@ fun AdvancedProtectionSheet(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-            }
-
-            SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.BatterySaver,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.padding(4.dp))
-                    Column {
-                        Text(
-                            text = "Background & Battery Saver (Android 16/17)",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = batterySummary(context, batteryRefresh),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            onRequestBatteryExemption()
-                            batteryRefresh++
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("advanced_battery_exemption")
-                    ) {
-                        Text("Allow background")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            onOpenNotificationSettings()
-                            batteryRefresh++
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Notifications")
-                    }
                 }
             }
 
@@ -378,94 +325,18 @@ fun AdvancedProtectionSheet(
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
-
-            SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.SystemUpdate,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.padding(4.dp))
-                    Column {
-                        Text(
-                            text = "In-App Updates (OTA)",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = appUpdateState.otaReason.ifBlank {
-                                "Detects new versions and new builds of the same version"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onCheckUpdates,
-                        enabled = appUpdateState.status != AppUpdateStatus.CHECKING,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Rounded.Security, contentDescription = null)
-                        Spacer(modifier = Modifier.padding(3.dp))
-                        Text(if (appUpdateState.status == AppUpdateStatus.CHECKING) "Checking…" else "Check")
-                    }
-                    Button(
-                        onClick = onDownloadUpdate,
-                        enabled = appUpdateState.canInstallDirectly && !appUpdateState.isDownloadingUpdate,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("advanced_download_update")
-                    ) {
-                        Icon(Icons.Rounded.Download, contentDescription = null)
-                        Spacer(modifier = Modifier.padding(3.dp))
-                        Text("Install")
-                    }
-                }
-                if (appUpdateState.isDownloadingUpdate) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LinearProgressIndicator(
-                        progress = { appUpdateState.downloadProgress / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "Downloading ${appUpdateState.downloadProgress}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                appUpdateState.otaBuild?.let { build ->
-                    Text(
-                        text = "Latest build: ${build.versionName} (code ${build.versionCode}) • ${build.source}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            FilterChip(
-                selected = false,
-                onClick = onDismiss,
-                label = { Text("Close") },
-                modifier = Modifier.testTag("advanced_close")
-            )
+        }
         }
     }
 }
 
 @Composable
 private fun SectionCard(content: @Composable () -> Unit) {
-    Surface(
+    FrostedSurface(
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             content()
         }
     }
@@ -499,24 +370,6 @@ private fun SwitchRow(
             onCheckedChange = onCheckedChange,
             modifier = Modifier.testTag(testTag)
         )
-    }
-}
-
-private fun batterySummary(context: Context, refreshKey: Int): String {
-    // refreshKey forces recomposition with fresh system values.
-    val unusedRefresh = refreshKey
-    @Suppress("UNUSED_VARIABLE") val refreshToken = unusedRefresh
-    val exempt = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
-    val powerSave = BackgroundPowerHelper.isPowerSaveMode(context)
-    val idle = BackgroundPowerHelper.isDeviceIdleMode(context)
-    val restricted = BackgroundPowerHelper.isBackgroundRestricted(context)
-    val notifications = BackgroundPowerHelper.areNotificationsEnabled(context)
-    return buildString {
-        append(if (exempt) "Battery optimization exempt" else "Battery optimized (may pause VPN)")
-        if (powerSave) append(" • Saver ON")
-        if (idle) append(" • Doze")
-        if (restricted) append(" • Background restricted")
-        if (!notifications) append(" • Notifications OFF")
     }
 }
 

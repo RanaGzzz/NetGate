@@ -28,4 +28,7 @@ interface AdFilterListDao {
 
     @Query("DELETE FROM ad_filter_lists WHERE id = :id")
     suspend fun deleteFilterList(id: String)
+
+    @Query("DELETE FROM ad_filter_lists WHERE id IN (:ids)")
+    suspend fun deleteFilterListsByIds(ids: List<String>)
 }

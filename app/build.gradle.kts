@@ -51,10 +51,13 @@ android {
 
   // WireGuard ships libwg.so/libwg-go.so/libwg-quick.so for every ABI (~11.5 MB in
   // total), so a single universal APK pays for all four architectures. Emit one APK
-  // per ABI and keep a universal APK as the "installs anywhere" download.
+  // per ABI and keep a universal APK in CI/Release builds, while keeping standard
+  // single app-debug.apk output for local/Streaming Emulator debug previews.
+  val isCiOrRelease = providers.environmentVariable("GITHUB_ACTIONS").orNull == "true" ||
+    gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
   splits {
     abi {
-      isEnable = true
+      isEnable = isCiOrRelease
       reset()
       include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
       isUniversalApk = true

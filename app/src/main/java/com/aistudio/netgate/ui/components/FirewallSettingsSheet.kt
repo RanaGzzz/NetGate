@@ -3,12 +3,17 @@ package com.aistudio.netgate.ui.components
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,44 +28,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import com.aistudio.netgate.R
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.BlurOn
-import androidx.compose.material.icons.rounded.BrightnessAuto
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.DeleteSweep
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Layers
-import androidx.compose.material.icons.rounded.LightMode
-import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.VerifiedUser
-import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NewReleases
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
-import com.aistudio.netgate.service.BackgroundPowerHelper
-import com.aistudio.netgate.ui.theme.WarningAmber
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,46 +51,47 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.aistudio.netgate.BuildConfig
 import com.aistudio.netgate.data.model.AppIconStyle
 import com.aistudio.netgate.data.model.AppUpdateStatus
 import com.aistudio.netgate.data.model.AppUpdateUiState
-import com.aistudio.netgate.data.model.BackgroundAnimationStyle
 import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.ThemeMode
 import com.aistudio.netgate.data.model.formatDataBytes
+import com.aistudio.netgate.service.BackgroundPowerHelper
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
-import com.aistudio.netgate.ui.theme.LiquidGlassAqua
-import com.aistudio.netgate.ui.theme.LiquidGlassCyan
-import com.aistudio.netgate.ui.theme.LiquidGlassPrismViolet
-import com.aistudio.netgate.ui.theme.LocalBackdropLiquidState
-import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.LocalThemeStyle
+import com.aistudio.netgate.ui.theme.WarningAmber
 import com.aistudio.netgate.ui.theme.WifiAccent
-import io.github.fletchmckee.liquid.liquefiable
-import io.github.fletchmckee.liquid.rememberLiquidState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private enum class SettingsPage {
+    MAIN,
+    APPEARANCE,
+    BACKGROUND_SYSTEM
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,1193 +131,698 @@ fun FirewallSettingsSheet(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         isIgnoringBatteryOptimizations = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
     }
-    val themeStyle = LocalThemeStyle.current
-    val isDark = LocalIsDarkTheme.current
-    val sheetLiquidState = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) {
-        rememberLiquidState()
-    } else {
-        null
+
+    var currentPage by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
+    var monitorExpanded by rememberSaveable { mutableStateOf(false) }
+    var architectureExpanded by rememberSaveable { mutableStateOf(false) }
+    var logsExpanded by rememberSaveable { mutableStateOf(false) }
+    var protectionExpanded by rememberSaveable { mutableStateOf(false) }
+    var aboutExpanded by rememberSaveable(appUpdateState.status) {
+        mutableStateOf(appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE)
     }
+    var resetExpanded by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = currentPage != SettingsPage.MAIN) {
+        currentPage = SettingsPage.MAIN
+    }
+
+    val themeStyle = LocalThemeStyle.current
     val sheetSurfaceColor = MaterialTheme.colorScheme.surface
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = sheetSurfaceColor.copy(alpha = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) 0.96f else 0.94f)
+        containerColor = sheetSurfaceColor.copy(
+            alpha = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) 0.94f else 0.92f
+        )
     ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            if (sheetLiquidState != null) {
-                Canvas(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .liquefiable(sheetLiquidState)
-                ) {
-                    drawRect(color = sheetSurfaceColor)
-                    val blobAlpha = if (isDark) 0.24f else 0.22f
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(LiquidGlassCyan.copy(alpha = blobAlpha), Color.Transparent),
-                            center = Offset(size.width * 0.16f, size.height * 0.18f),
-                            radius = size.maxDimension * 0.55f
-                        ),
-                        center = Offset(size.width * 0.16f, size.height * 0.18f),
-                        radius = size.maxDimension * 0.55f
-                    )
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(LiquidGlassAqua.copy(alpha = blobAlpha * 0.9f), Color.Transparent),
-                            center = Offset(size.width * 0.88f, size.height * 0.45f),
-                            radius = size.maxDimension * 0.48f
-                        ),
-                        center = Offset(size.width * 0.88f, size.height * 0.45f),
-                        radius = size.maxDimension * 0.48f
-                    )
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(LiquidGlassPrismViolet.copy(alpha = blobAlpha * 0.85f), Color.Transparent),
-                            center = Offset(size.width * 0.30f, size.height * 0.82f),
-                            radius = size.maxDimension * 0.52f
-                        ),
-                        center = Offset(size.width * 0.30f, size.height * 0.82f),
-                        radius = size.maxDimension * 0.52f
-                    )
-                }
-            }
-
-            CompositionLocalProvider(LocalBackdropLiquidState provides sheetLiquidState) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 24.dp)
-                        .testTag("firewall_settings_sheet")
-                ) {
-            Text(
-                text = "Appearance & Firewall",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Theme Mode: Auto / Day / Night
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Text(
-                        text = "Theme Mode",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Follow system, or force Day or Night appearance",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ThemeMode.entries.forEach { mode ->
-                            val selected = preferences.themeMode == mode
-                            val icon = when (mode) {
-                                ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-                                ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                                ThemeMode.DARK -> Icons.Rounded.DarkMode
-                            }
-                            FilledTonalButton(
-                                onClick = { onThemeModeChange(mode) },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (selected) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
-                                    },
-                                    contentColor = if (selected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                ),
-                                contentPadding = PaddingValues(horizontal = 6.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("theme_mode_${mode.name.lowercase()}")
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = mode.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+        FrostedSheetContainer {
+            AnimatedContent(
+                targetState = currentPage,
+                transitionSpec = {
+                    val forward = targetState != SettingsPage.MAIN && initialState == SettingsPage.MAIN
+                    val enter = if (forward) {
+                        slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 5 } +
+                            fadeIn(tween(180))
+                    } else {
+                        slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 5 } +
+                            fadeIn(tween(180))
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Theme Style & Motion Presets (Liquid Glass, Material 3 Expressive, Material You Lite, Cyber Slate)
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("theme_style_settings_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Layers,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Theme Style & Motion",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        FrostedSurface(
-                            shape = RoundedCornerShape(50),
-                            tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                            borderAccent = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.testTag("theme_style_preview_pill")
-                        ) {
-                            Text(
-                                text = preferences.themeStyle.badgeLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
+                    val exit = if (forward) {
+                        slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { -it / 6 } +
+                            fadeOut(tween(130))
+                    } else {
+                        slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { it / 6 } +
+                            fadeOut(tween(130))
                     }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = preferences.themeStyle.subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        NetGateThemeStyle.entries.chunked(2).forEach { rowStyles ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                rowStyles.forEach { style ->
-                                    val selected = preferences.themeStyle == style
-                                    FilledTonalButton(
-                                        onClick = { onThemeStyleChange(style) },
-                                        shape = RoundedCornerShape(
-                                            when (style) {
-                                                NetGateThemeStyle.LIQUID_GLASS -> 16.dp
-                                                NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> 18.dp
-                                                else -> 12.dp
-                                            }
-                                        ),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = if (selected) {
-                                                MaterialTheme.colorScheme.primaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
-                                            },
-                                            contentColor = if (selected) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 6.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(48.dp)
-                                            .testTag("theme_style_${style.name.lowercase()}")
-                                    ) {
-                                        Text(
-                                            text = style.title,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Spacer(modifier = Modifier.height(10.dp))
-                SettingsSwitchRow(
-                    title = "Material You Dynamic Color",
-                    subtitle = "Match your device wallpaper palette",
-                    checked = preferences.useDynamicColor,
-                    icon = Icons.Rounded.Palette,
-                    onCheckedChange = onToggleDynamicColor,
-                    testTag = "settings_material_you_switch"
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Blur Engine Effect Presets
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("blur_engine_settings_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.BlurOn,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Blur Engine Effect",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        FrostedSurface(
-                            shape = RoundedCornerShape(50),
-                            tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                            borderAccent = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.testTag("blur_engine_preview_pill")
-                        ) {
-                            Text(
-                                text = preferences.blurEngineStyle.title,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = preferences.blurEngineStyle.subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        BlurEngineStyle.entries.chunked(2).forEach { rowStyles ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                rowStyles.forEach { style ->
-                                    val selected = preferences.blurEngineStyle == style
-                                    FilledTonalButton(
-                                        onClick = { onBlurStyleChange(style) },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = if (selected) {
-                                                MaterialTheme.colorScheme.primaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
-                                            },
-                                            contentColor = if (selected) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        ),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(48.dp)
-                                            .testTag("blur_style_${style.name.lowercase()}")
-                                    ) {
-                                        Text(
-                                            text = style.title,
-                                            style = MaterialTheme.typography.labelLarge
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            SettingsSwitchRow(
-                title = "Ambient Motion & Depth Blur",
-                subtitle = "Spring-animated backdrop drift & modal blur depth",
-                checked = preferences.isBlurAnimationEnabled,
-                icon = Icons.Rounded.AutoAwesome,
-                onCheckedChange = onToggleBlurAnimation,
-                testTag = "settings_blur_animation_switch"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settings_background_animation_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.Wallpaper,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Background animation",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "${preferences.backgroundAnimation.title} · animation behind every screen",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    FilledTonalButton(
-                        onClick = onOpenBackgroundAnimation,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .testTag("settings_open_background_animation")
-                    ) {
-                        Text(
-                            text = "Choose animation",
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settings_app_icon_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.Shield,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "App Icon",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Adaptive launcher icon style",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AppIconStyle.entries.forEach { style ->
-                            val selected = preferences.appIconStyle == style
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = iconPreviewColor(style).copy(alpha = if (selected) 0.24f else 0.12f),
-                                border = BorderStroke(
-                                    if (selected) 2.dp else 1.dp,
-                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onAppIconChange(style) }
-                                    .testTag("app_icon_${style.name.lowercase()}")
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    AppIconTilePreview(style = style)
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = style.title,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            SettingsSwitchRow(
-                title = "Show System Apps",
-                subtitle = "Include pre-installed Android system apps",
-                checked = preferences.showSystemApps,
-                onCheckedChange = onToggleShowSystemApps,
-                testTag = "settings_show_system_apps_switch"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            SettingsSwitchRow(
-                title = "Show Offline Apps",
-                subtitle = "Include apps without INTERNET permission",
-                checked = preferences.showOfflineApps,
-                onCheckedChange = onToggleShowOfflineApps,
-                testTag = "settings_show_offline_apps_switch"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            SettingsSwitchRow(
-                title = "Status Bar Speed Icon",
-                subtitle = "Pin live upload/download speed & daily usage in status bar",
-                checked = preferences.isStatusBarSpeedEnabled,
-                icon = Icons.Rounded.NotificationsActive,
-                onCheckedChange = onToggleStatusBarSpeed,
-                testTag = "settings_status_bar_speed_switch"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            SettingsSwitchRow(
-                title = "Deep Site & Region Monitor",
-                subtitle = "Log contacted domains, GeoIP countries, Rx/Tx bytes & threat score in Room",
-                checked = preferences.isDeepMonitorEnabled,
-                icon = Icons.Rounded.Public,
-                onCheckedChange = onToggleDeepMonitor,
-                testTag = "settings_deep_monitor_switch"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            SettingsSwitchRow(
-                title = "Exclude from Recents",
-                subtitle = "Hide NetGate card from Android's Recent Apps switcher while running",
-                checked = preferences.excludeFromRecents,
-                icon = Icons.Rounded.VisibilityOff,
-                onCheckedChange = onToggleExcludeFromRecents,
-                testTag = "settings_exclude_from_recents_switch"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            val batteryAccent = if (isIgnoringBatteryOptimizations) EmeraldPrimary else WarningAmber
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                borderAccent = batteryAccent.copy(alpha = 0.45f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settings_battery_saver_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = if (isIgnoringBatteryOptimizations) {
-                                    Icons.Rounded.CheckCircle
-                                } else {
-                                    Icons.Rounded.BatteryChargingFull
-                                },
-                                contentDescription = null,
-                                tint = batteryAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Background & Battery Saver",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (isIgnoringBatteryOptimizations) {
-                                        "Unrestricted — Firewall, Speed Icon & Hotspot stay alive in background"
-                                    } else {
-                                        "Allow NetGate in background so Battery Saver cannot pause speed icon or VPN"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = batteryAccent.copy(alpha = 0.16f),
-                            border = BorderStroke(1.dp, batteryAccent.copy(alpha = 0.4f)),
-                            modifier = Modifier.testTag("settings_battery_status_badge")
-                        ) {
-                            Text(
-                                text = if (isIgnoringBatteryOptimizations) "Allowed" else "Restricted",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = batteryAccent,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    FilledTonalButton(
-                        onClick = {
-                            BackgroundPowerHelper.requestIgnoreBatteryOptimizations(context)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("settings_battery_optimization_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.BatteryChargingFull,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isIgnoringBatteryOptimizations) {
-                                "Manage Battery Optimization"
-                            } else {
-                                "Allow Unrestricted Background"
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                tintColor = EmeraldPrimary.copy(alpha = 0.12f),
-                borderAccent = EmeraldPrimary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("banking_safe_badge")
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.VerifiedUser,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Banking-Safe: Zero Accessibility Services",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "NetGate never requests Accessibility permissions, screen overlays, or root access, so your banking and payment apps remain unaffected.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Info,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Uses Android's built-in local VPN interface. Only blocked apps are routed into the local sinkhole on the active network (Wi-Fi or Mobile Data), keeping allowed apps at full native speed. Note: Android allows one active VPN at a time.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Diagnostics & Live VPN / DPI Bypass Logs
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settings_diagnostics_logs_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Terminal,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "VPN & DPI Bypass Logs",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Inspect VPN Guard transitions, handshake events & DPI bypass telemetry",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    FilledTonalButton(
-                        onClick = {
-                            onDismiss()
-                            onOpenVpnDpiLogs()
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("settings_open_vpn_dpi_logs_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Terminal,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (vpnDpiLogsCount > 0) {
-                                "Open VPN & DPI Logs ($vpnDpiLogsCount)"
-                            } else {
-                                "Open VPN & DPI Logs"
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            val updateAccent = when (appUpdateState.status) {
-                AppUpdateStatus.UPDATE_AVAILABLE -> EmeraldPrimary
-                AppUpdateStatus.UP_TO_DATE -> WifiAccent
-                AppUpdateStatus.ERROR -> BlockedRed
-                else -> MaterialTheme.colorScheme.primary
-            }
-
-            FrostedSurface(
-                shape = RoundedCornerShape(16.dp),
-                borderAccent = if (appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE) {
-                    EmeraldPrimary.copy(alpha = 0.6f)
-                } else {
-                    null
+                    enter togetherWith exit
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settings_about_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "About & Updates",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.testTag("settings_app_version")
-                            )
-                            buildIdentityText()?.let { identity ->
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = identity,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.testTag("settings_build_identity")
-                                )
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = updateAccent.copy(alpha = 0.16f),
-                            border = BorderStroke(1.dp, updateAccent.copy(alpha = 0.4f)),
-                            modifier = Modifier
-                                .semantics(mergeDescendants = true) {}
-                                .testTag("settings_update_status_badge")
-                        ) {
-                            Text(
-                                text = when (appUpdateState.status) {
-                                    AppUpdateStatus.IDLE -> "v${BuildConfig.VERSION_NAME}"
-                                    AppUpdateStatus.CHECKING -> "Checking…"
-                                    AppUpdateStatus.UP_TO_DATE -> "Up to date"
-                                    AppUpdateStatus.UPDATE_AVAILABLE -> "Update ${appUpdateState.latestRelease?.tagName.orEmpty()}"
-                                    AppUpdateStatus.ERROR -> "Check failed"
-                                },
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = updateAccent,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
+                label = "settings_subpage_drilldown"
+            ) { page ->
+                when (page) {
+                    SettingsPage.APPEARANCE -> {
+                        AppearanceSettingsContent(
+                            preferences = preferences,
+                            onThemeModeChange = onThemeModeChange,
+                            onThemeStyleChange = onThemeStyleChange,
+                            onToggleDynamicColor = onToggleDynamicColor,
+                            onBlurStyleChange = onBlurStyleChange,
+                            onToggleBlurAnimation = onToggleBlurAnimation,
+                            onOpenBackgroundAnimation = onOpenBackgroundAnimation,
+                            onAppIconChange = onAppIconChange,
+                            onBack = { currentPage = SettingsPage.MAIN }
+                        )
                     }
 
-                    appUpdateState.latestRelease?.let { release ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = updateAccent.copy(alpha = 0.10f),
-                            border = BorderStroke(1.dp, updateAccent.copy(alpha = 0.28f)),
+                    SettingsPage.BACKGROUND_SYSTEM -> {
+                        BackgroundSystemSettingsContent(
+                            context = context,
+                            preferences = preferences,
+                            isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
+                            onToggleStatusBarSpeed = onToggleStatusBarSpeed,
+                            onToggleExcludeFromRecents = onToggleExcludeFromRecents,
+                            onBack = { currentPage = SettingsPage.MAIN }
+                        )
+                    }
+
+                    SettingsPage.MAIN -> {
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("settings_latest_release_summary")
+                                .verticalScroll(rememberScrollState())
+                                .navigationBarsPadding()
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 28.dp)
+                                .testTag("firewall_settings_sheet")
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.NewReleases,
-                                        contentDescription = null,
-                                        tint = updateAccent,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                            // Sheet Header
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "${release.title} (${release.tagName})",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        text = "Settings",
+                                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Appearance, background controls & protection",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                val metaParts = buildList {
-                                    if (release.publishedAt.isNotBlank()) add("Released ${release.publishedAt}")
-                                    if (!release.apkName.isNullOrBlank()) {
-                                        val size = if (release.apkSizeBytes > 0L) " (${formatDataBytes(release.apkSizeBytes)})" else ""
-                                        add("${release.apkName}$size")
-                                    }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                SettingsStatusPill(
+                                    label = "v${BuildConfig.VERSION_NAME}",
+                                    accent = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(18.dp))
+
+                            // ─────────────────────────────────────────────────────────────
+                            // SECTION 1: PERSONALIZATION & SYSTEM MENUS
+                            // ─────────────────────────────────────────────────────────────
+                            SettingsSectionHeader(
+                                title = "Personalization & System",
+                                icon = Icons.Rounded.Palette
+                            )
+
+                            SettingsNavigationCard(
+                                title = "Appearance",
+                                summary = "${preferences.themeMode.label} • ${preferences.themeStyle.title} • ${preferences.appIconStyle.title}",
+                                icon = Icons.Rounded.Palette,
+                                statusLabel = preferences.themeStyle.badgeLabel,
+                                onClick = { currentPage = SettingsPage.APPEARANCE },
+                                modifier = Modifier.testTag("settings_open_appearance")
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            val systemActiveCount = listOf(
+                                preferences.isStatusBarSpeedEnabled,
+                                preferences.excludeFromRecents,
+                                isIgnoringBatteryOptimizations
+                            ).count { it }
+                            SettingsNavigationCard(
+                                title = "Background & System",
+                                summary = "Status Bar Speed Icon • Exclude from Recents • Background & Battery",
+                                icon = Icons.Rounded.Tune,
+                                iconAccent = if (isIgnoringBatteryOptimizations) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    WarningAmber
+                                },
+                                statusLabel = "$systemActiveCount/3",
+                                statusAccent = if (isIgnoringBatteryOptimizations) {
+                                    EmeraldPrimary
+                                } else {
+                                    WarningAmber
+                                },
+                                onClick = { currentPage = SettingsPage.BACKGROUND_SYSTEM },
+                                modifier = Modifier.testTag("settings_open_background_system")
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            // ─────────────────────────────────────────────────────────────
+                            // SECTION 2: FIREWALL & MONITORING
+                            // ─────────────────────────────────────────────────────────────
+                            SettingsSectionHeader(
+                                title = "Firewall & Monitoring",
+                                icon = Icons.Rounded.Shield
+                            )
+
+                            val enabledMonitorCount = listOf(
+                                preferences.showSystemApps,
+                                preferences.showOfflineApps,
+                                preferences.isDeepMonitorEnabled
+                            ).count { it }
+                            val monitorSummaryParts = buildList {
+                                if (preferences.showSystemApps) add("System")
+                                if (preferences.showOfflineApps) add("Offline")
+                                if (preferences.isDeepMonitorEnabled) add("Deep Monitor")
+                            }
+                            SettingsAccordionCard(
+                                title = "App Visibility & Monitor",
+                                summary = if (monitorSummaryParts.isEmpty()) {
+                                    "User internet apps • Deep Monitor off"
+                                } else {
+                                    monitorSummaryParts.joinToString(" • ") + " enabled"
+                                },
+                                icon = Icons.Rounded.Shield,
+                                statusLabel = "$enabledMonitorCount/3 On",
+                                statusAccent = if (enabledMonitorCount > 0) {
+                                    EmeraldPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                expanded = monitorExpanded,
+                                onToggleExpand = { monitorExpanded = !monitorExpanded },
+                                modifier = Modifier.testTag("settings_firewall_monitor_card"),
+                                headerModifier = Modifier.testTag("settings_firewall_monitor_header")
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    CompactSwitchRow(
+                                        title = "Show System Apps",
+                                        summary = "Include pre-installed Android system apps",
+                                        checked = preferences.showSystemApps,
+                                        onCheckedChange = onToggleShowSystemApps,
+                                        testTag = "settings_show_system_apps_switch"
+                                    )
+                                    SettingsCardDivider()
+                                    CompactSwitchRow(
+                                        title = "Show Offline Apps",
+                                        summary = "Include apps without INTERNET permission",
+                                        checked = preferences.showOfflineApps,
+                                        onCheckedChange = onToggleShowOfflineApps,
+                                        testTag = "settings_show_offline_apps_switch"
+                                    )
+                                    SettingsCardDivider()
+                                    CompactSwitchRow(
+                                        title = "Deep Site & Region Monitor",
+                                        summary = "Log contacted domains & GeoIP in Room",
+                                        expandedDescription = "Logs contacted domains, GeoIP countries, Rx/Tx byte counters, and threat scores locally in Room database.",
+                                        checked = preferences.isDeepMonitorEnabled,
+                                        icon = Icons.Rounded.Public,
+                                        onCheckedChange = onToggleDeepMonitor,
+                                        testTag = "settings_deep_monitor_switch"
+                                    )
                                 }
-                                if (metaParts.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(2.dp))
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            SettingsAccordionCard(
+                                title = "Banking-Safe Architecture",
+                                summary = "Zero Accessibility • Local VPN sinkhole",
+                                icon = Icons.Rounded.VerifiedUser,
+                                iconAccent = EmeraldPrimary,
+                                tintColor = EmeraldPrimary.copy(alpha = 0.10f),
+                                borderAccent = EmeraldPrimary.copy(alpha = 0.65f),
+                                statusLabel = "Verified",
+                                statusAccent = EmeraldPrimary,
+                                expanded = architectureExpanded,
+                                onToggleExpand = { architectureExpanded = !architectureExpanded },
+                                modifier = Modifier.testTag("banking_safe_badge"),
+                                headerModifier = Modifier.testTag("banking_safe_header")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     Text(
-                                        text = metaParts.joinToString(" • "),
-                                        style = MaterialTheme.typography.labelSmall,
+                                        text = "• Zero Accessibility Services: NetGate never requests Accessibility permissions, screen overlays, or root access, so banking and payment apps remain unaffected.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "• Local VPN Sinkhole: Only blocked apps are routed into the local sinkhole on the active network (Wi-Fi or Mobile Data), keeping allowed apps at full native speed. Android allows one active VPN at a time.",
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                        }
-                    }
 
-                    appUpdateState.errorMessage?.let { err ->
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = err,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = BlockedRed,
-                            modifier = Modifier.testTag("settings_update_error_text")
-                        )
-                    }
+                            Spacer(modifier = Modifier.height(20.dp))
 
-                    if (appUpdateState.lastCheckedAtMs > 0L) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Last checked ${formatCheckedTime(appUpdateState.lastCheckedAtMs)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilledTonalButton(
-                            onClick = onCheckForUpdates,
-                            enabled = appUpdateState.status != AppUpdateStatus.CHECKING,
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("settings_check_updates_button")
-                        ) {
-                            if (appUpdateState.status == AppUpdateStatus.CHECKING) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Rounded.SystemUpdate,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (appUpdateState.status == AppUpdateStatus.CHECKING) {
-                                    "Checking…"
-                                } else {
-                                    "Check Updates"
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                            // ─────────────────────────────────────────────────────────────
+                            // SECTION 3: PROTECTION, LOGS & UPDATES
+                            // ─────────────────────────────────────────────────────────────
+                            SettingsSectionHeader(
+                                title = "Protection, Logs & Updates",
+                                icon = Icons.Rounded.Terminal
                             )
-                        }
 
-                        OutlinedButton(
-                            onClick = {
-                                onDismiss()
-                                onOpenChangelog()
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("settings_open_changelog_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.History,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Changelog",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    appUpdateState.latestRelease?.let { release ->
-                        if (appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = { openUrlInBrowser(context, release.preferredOpenUrl) },
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("settings_download_update_button")
+                            SettingsAccordionCard(
+                                title = "VPN & DPI Bypass Logs",
+                                summary = "Handshake & bypass telemetry",
+                                icon = Icons.Rounded.Terminal,
+                                statusLabel = if (vpnDpiLogsCount > 0) "$vpnDpiLogsCount logs" else "Live",
+                                expanded = logsExpanded,
+                                onToggleExpand = { logsExpanded = !logsExpanded },
+                                modifier = Modifier.testTag("settings_diagnostics_logs_card"),
+                                headerModifier = Modifier.testTag("settings_diagnostics_logs_header")
                             ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (!release.apkName.isNullOrBlank()) {
-                                        "Download ${release.tagName} APK"
-                                    } else {
-                                        "Open Release ${release.tagName}"
-                                    },
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = "Inspect real-time WireGuard/VPN Guard handshakes, Firewall TUN events, QUIC downgrades, and DPI packet split telemetry.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    FilledTonalButton(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenVpnDpiLogs()
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("settings_open_vpn_dpi_logs_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Terminal,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (vpnDpiLogsCount > 0) {
+                                                "Open VPN & DPI Logs ($vpnDpiLogsCount)"
+                                            } else {
+                                                "Open VPN & DPI Logs"
+                                            },
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            SettingsAccordionCard(
+                                title = "Kill Switch, Backup & Automation",
+                                summary = "Auto-reconnect, trusted Wi-Fi & AES-256 backup",
+                                icon = Icons.Rounded.Security,
+                                iconAccent = MaterialTheme.colorScheme.secondary,
+                                statusLabel = "Suite",
+                                statusAccent = MaterialTheme.colorScheme.secondary,
+                                expanded = protectionExpanded,
+                                onToggleExpand = { protectionExpanded = !protectionExpanded },
+                                modifier = Modifier.testTag("settings_advanced_protection_card"),
+                                headerModifier = Modifier.testTag("settings_advanced_protection_header")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = "Configure Android VPN Kill Switch, trusted Wi-Fi automation rules, and encrypted AES-256 rule export & restore.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    FilledTonalButton(
+                                        onClick = onOpenAdvancedProtection,
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("settings_advanced_protection")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Security,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Open Kill Switch & Backup",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // About & Updates Accordion Card
+                            val updateAccent = when (appUpdateState.status) {
+                                AppUpdateStatus.UPDATE_AVAILABLE -> EmeraldPrimary
+                                AppUpdateStatus.UP_TO_DATE -> WifiAccent
+                                AppUpdateStatus.ERROR -> BlockedRed
+                                else -> MaterialTheme.colorScheme.primary
+                            }
+                            val updateBadgeLabel = when (appUpdateState.status) {
+                                AppUpdateStatus.IDLE -> "v${BuildConfig.VERSION_NAME}"
+                                AppUpdateStatus.CHECKING -> "Checking…"
+                                AppUpdateStatus.UP_TO_DATE -> "Up to date"
+                                AppUpdateStatus.UPDATE_AVAILABLE -> "Update ${appUpdateState.latestRelease?.tagName.orEmpty()}"
+                                AppUpdateStatus.ERROR -> "Check failed"
+                            }
+
+                            SettingsAccordionCard(
+                                title = "About & Updates",
+                                summary = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                                icon = Icons.Rounded.SystemUpdate,
+                                iconAccent = updateAccent,
+                                borderAccent = if (appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE) {
+                                    EmeraldPrimary.copy(alpha = 0.6f)
+                                } else {
+                                    null
+                                },
+                                statusLabel = updateBadgeLabel,
+                                statusAccent = updateAccent,
+                                statusModifier = Modifier.testTag("settings_update_status_badge"),
+                                summaryModifier = Modifier.testTag("settings_app_version"),
+                                expanded = aboutExpanded,
+                                onToggleExpand = { aboutExpanded = !aboutExpanded },
+                                modifier = Modifier.testTag("settings_about_card"),
+                                headerModifier = Modifier.testTag("settings_about_header")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    appUpdateState.latestRelease?.let { release ->
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = updateAccent.copy(alpha = 0.10f),
+                                            border = BorderStroke(1.dp, updateAccent.copy(alpha = 0.28f)),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("settings_latest_release_summary")
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.NewReleases,
+                                                        contentDescription = null,
+                                                        tint = updateAccent,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "${release.title} (${release.tagName})",
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                val metaParts = buildList {
+                                                    if (release.publishedAt.isNotBlank()) add("Released ${release.publishedAt}")
+                                                    if (!release.apkName.isNullOrBlank()) {
+                                                        val size = if (release.apkSizeBytes > 0L) " (${formatDataBytes(release.apkSizeBytes)})" else ""
+                                                        add("${release.apkName}$size")
+                                                    }
+                                                }
+                                                if (metaParts.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = metaParts.joinToString(" • "),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    appUpdateState.errorMessage?.let { err ->
+                                        Text(
+                                            text = err,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = BlockedRed,
+                                            modifier = Modifier.testTag("settings_update_error_text")
+                                        )
+                                    }
+
+                                    if (appUpdateState.lastCheckedAtMs > 0L) {
+                                        Text(
+                                            text = "Last checked ${formatCheckedTime(appUpdateState.lastCheckedAtMs)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        FilledTonalButton(
+                                            onClick = onCheckForUpdates,
+                                            enabled = appUpdateState.status != AppUpdateStatus.CHECKING,
+                                            shape = RoundedCornerShape(12.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .testTag("settings_check_updates_button")
+                                        ) {
+                                            if (appUpdateState.status == AppUpdateStatus.CHECKING) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.SystemUpdate,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (appUpdateState.status == AppUpdateStatus.CHECKING) {
+                                                    "Checking…"
+                                                } else {
+                                                    "Check Updates"
+                                                },
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                onDismiss()
+                                                onOpenChangelog()
+                                            },
+                                            shape = RoundedCornerShape(12.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .testTag("settings_open_changelog_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.History,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Changelog",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    appUpdateState.latestRelease?.let { release ->
+                                        if (appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE) {
+                                            Button(
+                                                onClick = { openUrlInBrowser(context, release.preferredOpenUrl) },
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(48.dp)
+                                                    .testTag("settings_download_update_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Refresh,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = if (!release.apkName.isNullOrBlank()) {
+                                                        "Download ${release.tagName} APK"
+                                                    } else {
+                                                        "Open Release ${release.tagName}"
+                                                    },
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (appUpdateState.canInstallDirectly) {
+                                        Button(
+                                            onClick = onDownloadUpdate,
+                                            enabled = !appUpdateState.isDownloadingUpdate,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                                .testTag("settings_download_update")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.SystemUpdate,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                if (appUpdateState.isDownloadingUpdate) {
+                                                    "Downloading ${appUpdateState.downloadProgress}%"
+                                                } else {
+                                                    "Download & install update"
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    SettingsCardDivider()
+
+                                    buildIdentityText()?.let { identity ->
+                                        Text(
+                                            text = identity,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.testTag("settings_build_identity")
+                                        )
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { openRepository(context) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("settings_github_link")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "GitHub Repository (RanaGzzz/NetGate)",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Reset All App Rules Accordion Card
+                            SettingsAccordionCard(
+                                title = "Reset All App Rules",
+                                summary = "Restore default Wi-Fi & Mobile Data access",
+                                icon = Icons.Rounded.DeleteSweep,
+                                iconAccent = MaterialTheme.colorScheme.error,
+                                borderAccent = MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
+                                statusLabel = "Reset",
+                                statusAccent = MaterialTheme.colorScheme.error,
+                                expanded = resetExpanded,
+                                onToggleExpand = { resetExpanded = !resetExpanded },
+                                modifier = Modifier.testTag("settings_reset_rules_card"),
+                                headerModifier = Modifier.testTag("settings_reset_rules_header")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = "Clears every per-app Wi-Fi and Mobile Data block rule immediately and restores full network access for all installed apps.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            onClearAllRules()
+                                            onDismiss()
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error
+                                        ),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("clear_all_rules_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.DeleteSweep,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Reset All App Rules")
+                                    }
+                                }
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { openRepository(context) },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("settings_github_link")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.OpenInNew,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "GitHub Repository",
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    if (appUpdateState.canInstallDirectly) {
-                        Button(
-                            onClick = onDownloadUpdate,
-                            enabled = !appUpdateState.isDownloadingUpdate,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("settings_download_update")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SystemUpdate,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                if (appUpdateState.isDownloadingUpdate) {
-                                    "Downloading ${appUpdateState.downloadProgress}%"
-                                } else {
-                                    "Download & install update"
-                                }
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onOpenAdvancedProtection,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("settings_advanced_protection")
-                    ) {
-                        Text("Kill Switch, Backup & Automation")
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "github.com/RanaGzzz/NetGate",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedButton(
-                onClick = {
-                    onClearAllRules()
-                    onDismiss()
-                },
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("clear_all_rules_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.DeleteSweep,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Reset All App Rules")
-            }
-        }
-            }
         }
     }
-}
-
-@Composable
-private fun AppIconTilePreview(style: AppIconStyle) {
-    val bgColor = when (style) {
-        AppIconStyle.EMERALD -> Color(0xFF0D1225)
-        AppIconStyle.NEON -> Color(0xFF061626)
-        AppIconStyle.VIOLET -> Color(0xFF0E142C)
-        AppIconStyle.AMBER -> Color(0xFF0D181A)
-    }
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(bgColor)
-    ) {
-        when (style) {
-            AppIconStyle.EMERALD -> Icon(
-                imageVector = Icons.Rounded.VerifiedUser,
-                contentDescription = style.title,
-                tint = Color(0xFFD9E533),
-                modifier = Modifier.size(22.dp)
-            )
-            AppIconStyle.NEON -> Image(
-                painter = painterResource(id = R.drawable.ic_launcher_gate_img),
-                contentDescription = style.title,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .size(28.dp)
-                    .padding(1.dp)
-            )
-            AppIconStyle.VIOLET -> Image(
-                painter = painterResource(id = R.drawable.ic_launcher_tunnel_img),
-                contentDescription = style.title,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .size(28.dp)
-                    .padding(1.dp)
-            )
-            AppIconStyle.AMBER -> Image(
-                painter = painterResource(id = R.drawable.ic_launcher_bastion_img),
-                contentDescription = style.title,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .size(28.dp)
-                    .padding(1.dp)
-            )
-        }
-    }
-}
-
-private fun iconPreviewColor(style: AppIconStyle): Color = when (style) {
-    AppIconStyle.EMERALD -> Color(0xFFD9E533)
-    AppIconStyle.NEON -> Color(0xFF22D3EE)
-    AppIconStyle.VIOLET -> Color(0xFF60A5FA)
-    AppIconStyle.AMBER -> Color(0xFF34D399)
 }
 
 private fun openRepository(context: Context) {
@@ -1355,67 +841,6 @@ private fun formatCheckedTime(millis: Long): String {
     return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(millis))
 }
 
-@Composable
-private fun SettingsSwitchRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    testTag: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null
-) {
-    FrostedSurface(
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                }
-                Column {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                modifier = Modifier.testTag(testTag)
-            )
-        }
-    }
-}
-
-/**
- * Short build identity for the About card: the commit the APK was built from and
- * when it was built, or null when neither is known (for example a build from a
- * source archive without git metadata).
- */
 private fun buildIdentityText(): String? {
     val sha = BuildConfig.GIT_COMMIT_SHA.trim()
     val timestamp = BuildConfig.BUILD_TIMESTAMP.trim()

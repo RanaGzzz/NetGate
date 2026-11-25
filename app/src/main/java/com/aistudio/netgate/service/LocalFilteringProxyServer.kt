@@ -1,5 +1,6 @@
 package com.aistudio.netgate.service
 
+import com.aistudio.netgate.data.model.AdBlockReason
 import com.aistudio.netgate.data.model.DpiBypassMode
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
@@ -22,7 +23,13 @@ import java.util.concurrent.atomic.AtomicLong
 data class ProxyFilterDecision(
     val allow: Boolean,
     val reason: String,
-    val isAdBlock: Boolean = false
+    val isAdBlock: Boolean = false,
+    val filterListName: String = "",
+    val blockReason: AdBlockReason = AdBlockReason.NONE,
+    val fullUrl: String = "",
+    val latencyMicros: Long = 0L,
+    val appPackage: String = "",
+    val appName: String = ""
 )
 
 /**
@@ -69,7 +76,8 @@ class LocalFilteringProxyServer(
         bytesSent: Long,
         bytesReceived: Long,
         decision: ProxyFilterDecision
-    ) -> Unit = { _, _, _, _, _, _, _ -> }
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
+    private val resolveClientApp: ((Socket) -> Pair<String, String>?)? = null
 ) {
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
@@ -242,9 +250,11 @@ class LocalFilteringProxyServer(
         }
 
         val initialDecision = decisionFor(clientIp, host, null)
+        val connectFullUrl = "https://$host${if (targetPort != 443) ":$targetPort" else ""}"
         if (!initialDecision.allow) {
-            onRequestLogged(host, initialDecision)
-            onTrafficRelayed(host, targetPort, "HTTPS", null, authority.length.toLong(), 0L, initialDecision)
+            val logged = enrichDecisionForLog(client, initialDecision, connectFullUrl)
+            onRequestLogged(host, logged)
+            onTrafficRelayed(host, targetPort, "HTTPS", null, authority.length.toLong(), 0L, logged)
             if (clientIp.isNotEmpty()) {
                 onClientTraffic(clientIp, host, authority.length.toLong(), 0L, false)
             }
@@ -289,9 +299,11 @@ class LocalFilteringProxyServer(
                 val sniHost = if (isClientHello) extractTlsSniHostname(initialPayload, peekLen) else null
                 if (!sniHost.isNullOrEmpty() && !sniHost.equals(host, ignoreCase = true)) {
                     val sniDecision = decisionFor(clientIp, sniHost, null)
+                    val sniFullUrl = "https://$sniHost${if (targetPort != 443) ":$targetPort" else ""}"
                     if (!sniDecision.allow) {
-                        onRequestLogged(sniHost, sniDecision)
-                        onTrafficRelayed(sniHost, targetPort, "HTTPS", remoteIp, peekLen.toLong(), 0L, sniDecision)
+                        val logged = enrichDecisionForLog(client, sniDecision, sniFullUrl)
+                        onRequestLogged(sniHost, logged)
+                        onTrafficRelayed(sniHost, targetPort, "HTTPS", remoteIp, peekLen.toLong(), 0L, logged)
                         if (clientIp.isNotEmpty()) {
                             onClientTraffic(clientIp, sniHost, peekLen.toLong(), 0L, false)
                         }
@@ -301,7 +313,8 @@ class LocalFilteringProxyServer(
                     }
                     activeHost = sniHost
                 }
-                onRequestLogged(activeHost, initialDecision)
+                val activeUrl = "https://$activeHost${if (targetPort != 443) ":$targetPort" else ""}"
+                onRequestLogged(activeHost, enrichDecisionForLog(client, initialDecision, activeUrl))
 
                 if (!isClientHello) {
                     // Non-TLS CONNECT tunnel (e.g. WebSocket/raw TCP): forward intact without splitting
@@ -409,7 +422,7 @@ class LocalFilteringProxyServer(
                     initialBytesSent = peekLen.toLong()
                 }
             } else {
-                onRequestLogged(host, initialDecision)
+                onRequestLogged(host, enrichDecisionForLog(client, initialDecision, connectFullUrl))
             }
 
             relayBidirectional(
@@ -624,6 +637,19 @@ class LocalFilteringProxyServer(
         evaluateRequestForClient?.invoke(clientIp, host, pathAndQuery)
             ?: evaluateRequest(host, pathAndQuery)
 
+    private fun enrichDecisionForLog(
+        client: Socket,
+        decision: ProxyFilterDecision,
+        fullUrl: String
+    ): ProxyFilterDecision {
+        val owner = runCatching { resolveClientApp?.invoke(client) }.getOrNull()
+        return decision.copy(
+            fullUrl = fullUrl,
+            appPackage = owner?.first ?: decision.appPackage,
+            appName = owner?.second ?: decision.appName
+        )
+    }
+
     private fun writePacResponse(out: OutputStream, body: String) {
         val bodyBytes = body.toByteArray(Charsets.UTF_8)
         val header = "HTTP/1.1 200 OK\r\n" +
@@ -703,9 +729,11 @@ class LocalFilteringProxyServer(
         }
 
         val decision = decisionFor(clientIp, host, pathAndQuery)
-        onRequestLogged(host, decision)
+        val fullUrl = "http://$host${if (targetPort != 80) ":$targetPort" else ""}$cleanedTarget"
+        val enrichedDecision = enrichDecisionForLog(client, decision, fullUrl)
+        onRequestLogged(host, enrichedDecision)
         if (!decision.allow) {
-            onTrafficRelayed(host, targetPort, "HTTP", null, cleanedTarget.length.toLong(), 0L, decision)
+            onTrafficRelayed(host, targetPort, "HTTP", null, cleanedTarget.length.toLong(), 0L, enrichedDecision)
             if (clientIp.isNotEmpty()) {
                 onClientTraffic(clientIp, host, cleanedTarget.length.toLong(), 0L, false)
             }

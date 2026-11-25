@@ -1,5 +1,6 @@
 package com.aistudio.netgate.service.dns
 
+import com.aistudio.netgate.data.model.AdBlockReason
 import com.aistudio.netgate.data.model.DnsTransportMode
 import com.aistudio.netgate.service.policy.PolicyDecision
 import java.net.DatagramSocket
@@ -99,7 +100,10 @@ sealed interface DnsOutcome {
     data class Blocked(
         val category: PolicyDecision.BlockCategory,
         val reason: String,
-        val responsePacket: ByteArray
+        val responsePacket: ByteArray,
+        val filterListName: String = "",
+        val blockReason: AdBlockReason = AdBlockReason.NONE,
+        val latencyMicros: Long = 0L
     ) : DnsOutcome
 
     /** QTYPE 65 (SVCB/HTTPS) was answered with NODATA to force QUIC downgrade. */
@@ -112,7 +116,8 @@ sealed interface DnsOutcome {
         val responsePacket: ByteArray,
         val label: String,
         val aliasDomain: String,
-        val antiPoisonTrips: Int = 0
+        val antiPoisonTrips: Int = 0,
+        val latencyMicros: Long = 0L
     ) : DnsOutcome
 
     /** Query was resolved upstream and [responsePacket] carries the upstream answer. */
@@ -121,7 +126,8 @@ sealed interface DnsOutcome {
         val upstreamPayload: ByteArray,
         val transportLabel: String,
         val isPassthrough: Boolean,
-        val antiPoisonTrips: Int = 0
+        val antiPoisonTrips: Int = 0,
+        val latencyMicros: Long = 0L
     ) : DnsOutcome
 
     /** No transport produced an answer; nothing is written back (original behaviour). */

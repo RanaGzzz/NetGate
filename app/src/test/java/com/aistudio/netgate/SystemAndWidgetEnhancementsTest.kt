@@ -137,7 +137,7 @@ class SystemAndWidgetEnhancementsTest {
     }
 
     @Test
-    fun `FirewallSettingsSheet renders Exclude from Recents toggle and Battery Saver card`() {
+    fun `FirewallSettingsSheet moves Status Bar Speed Icon, Exclude from Recents and Background & Battery into Background & System menu`() {
         var currentPrefs by mutableStateOf(FirewallPreferencesState())
 
         composeRule.setContent {
@@ -150,7 +150,9 @@ class SystemAndWidgetEnhancementsTest {
                     onToggleBlurAnimation = {},
                     onToggleShowSystemApps = {},
                     onToggleShowOfflineApps = {},
-                    onToggleStatusBarSpeed = {},
+                    onToggleStatusBarSpeed = { enabled ->
+                        currentPrefs = currentPrefs.copy(isStatusBarSpeedEnabled = enabled)
+                    },
                     onToggleDeepMonitor = {},
                     onToggleExcludeFromRecents = { enabled ->
                         currentPrefs = currentPrefs.copy(excludeFromRecents = enabled)
@@ -161,6 +163,29 @@ class SystemAndWidgetEnhancementsTest {
             }
         }
 
+        composeRule.onNodeWithTag("settings_open_background_system")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("background_system_settings_view").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("settings_status_bar_speed_header")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_status_bar_speed_switch")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.waitForIdle()
+        assertTrue(currentPrefs.isStatusBarSpeedEnabled)
+
+        composeRule.onNodeWithTag("settings_exclude_from_recents_header")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_exclude_from_recents_switch")
             .performScrollTo()
             .assertIsDisplayed()
@@ -171,7 +196,19 @@ class SystemAndWidgetEnhancementsTest {
         composeRule.onNodeWithTag("settings_battery_saver_card")
             .performScrollTo()
             .assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_battery_saver_header")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_battery_optimization_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+
+        composeRule.onNodeWithTag("background_system_back_button")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_open_background_system")
             .performScrollTo()
             .assertIsDisplayed()
     }

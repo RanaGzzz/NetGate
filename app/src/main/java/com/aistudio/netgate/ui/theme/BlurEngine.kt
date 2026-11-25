@@ -219,6 +219,67 @@ object BlurEngine {
     }
 
     /**
+     * Adds an optical frosted glass top specular sheen and subtle chromatic edge rim highlight
+     * across Cyber Slate, Liquid Glass, and Material 3 Expressive cards when blur is enabled.
+     * Foreground content stays razor-sharp with zero text blurring.
+     */
+    fun Modifier.frostedChromaticEdge(
+        shape: Shape = RoundedCornerShape(20.dp),
+        borderAccent: Color? = null
+    ): Modifier = composed {
+        val blurConfig = LocalBlurEngineConfig.current
+        if (blurConfig.style == BlurEngineStyle.OFF ||
+            blurConfig.themeStyle == NetGateThemeStyle.MATERIAL_YOU_LITE
+        ) {
+            return@composed this
+        }
+        val isDark = LocalIsDarkTheme.current
+        val isLiquid = blurConfig.themeStyle == NetGateThemeStyle.LIQUID_GLASS
+        val frostScale = when (blurConfig.style) {
+            BlurEngineStyle.OFF -> 0f
+            BlurEngineStyle.SOFT_GLASS -> 0.55f
+            BlurEngineStyle.ACRYLIC_PRO -> 0.82f
+            BlurEngineStyle.ULTRA_FROST -> 1.0f
+        }
+        val primaryEdge = borderAccent ?: if (isLiquid) LiquidGlassCyan else EmeraldBright
+        val secondaryEdge = if (isLiquid) LiquidGlassPrismViolet else LiquidGlassCyan
+
+        this
+            .clip(shape)
+            .drawWithContent {
+                drawContent()
+                val bandHeight = (size.height * 0.28f).coerceIn(8.dp.toPx(), 32.dp.toPx())
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = (if (isDark) 0.08f else 0.26f) * frostScale),
+                            Color.Transparent
+                        ),
+                        startY = 0f,
+                        endY = bandHeight
+                    )
+                )
+                val outline = shape.createOutline(
+                    size = Size(size.width, size.height),
+                    layoutDirection = layoutDirection,
+                    density = this
+                )
+                drawOutline(
+                    outline = outline,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = (if (isDark) 0.22f else 0.60f) * frostScale),
+                            primaryEdge.copy(alpha = (if (isDark) 0.16f else 0.22f) * frostScale),
+                            secondaryEdge.copy(alpha = (if (isDark) 0.12f else 0.16f) * frostScale),
+                            Color.White.copy(alpha = (if (isDark) 0.08f else 0.24f) * frostScale)
+                        )
+                    ),
+                    style = Stroke(width = 1.15.dp.toPx())
+                )
+            }
+    }
+
+    /**
      * Physics-driven spring touch feedback inspired by Expressive-launcher:
      * - Liquid Glass stretches fluidly horizontally and squishes vertically on press.
      * - Material 3 Expressive uses a joyful bouncy spring squash-and-rebound.

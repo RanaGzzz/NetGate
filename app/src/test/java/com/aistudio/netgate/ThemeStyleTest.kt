@@ -170,8 +170,13 @@ class ThemeStyleTest {
             }
         }
 
+        composeRule.onNodeWithTag("settings_open_appearance").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
         composeRule.onNodeWithTag("theme_style_settings_card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("theme_style_preview_pill").assertIsDisplayed()
+        composeRule.onNodeWithTag("theme_style_accordion_toggle").performScrollTo().performClick()
+        composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("theme_style_liquid_glass").performScrollTo().performClick()
         composeRule.waitForIdle()
@@ -181,8 +186,18 @@ class ThemeStyleTest {
         composeRule.waitForIdle()
         assertEquals(NetGateThemeStyle.MATERIAL_3_EXPRESSIVE, currentPrefs.themeStyle)
 
+        composeRule.onNodeWithTag("theme_mode_accordion_toggle").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("theme_mode_dark").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertEquals(com.aistudio.netgate.data.model.ThemeMode.DARK, currentPrefs.themeMode)
+
         composeRule.onNodeWithTag("theme_style_material_you_lite").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertEquals(NetGateThemeStyle.MATERIAL_YOU_LITE, currentPrefs.themeStyle)
+
+        composeRule.onNodeWithTag("appearance_back_button").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_open_appearance").performScrollTo().assertIsDisplayed()
     }
 }

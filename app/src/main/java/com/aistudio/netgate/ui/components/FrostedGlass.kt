@@ -38,9 +38,17 @@ import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.BackgroundAnimationStyle
 import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.NetGateThemeStyle
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineBackdrop
 import com.aistudio.netgate.ui.theme.BlurEngine.expressiveLiquidTouch
+import com.aistudio.netgate.ui.theme.BlurEngine.frostedChromaticEdge
 import com.aistudio.netgate.ui.theme.BlurEngine.liquidGlassRefractionEdge
+import com.aistudio.netgate.ui.theme.LiquidGlassAqua
+import com.aistudio.netgate.ui.theme.LiquidGlassCyan
 import com.aistudio.netgate.ui.theme.LiquidGlassPrismStops
+import com.aistudio.netgate.ui.theme.LiquidGlassPrismViolet
 import com.aistudio.netgate.ui.theme.LocalBackdropLiquidState
 import com.aistudio.netgate.ui.theme.LocalBlurEngineConfig
 import com.aistudio.netgate.ui.theme.LocalExpressiveMotion
@@ -511,6 +519,12 @@ fun FrostedSurface(
     }
 
     val cardFrostDp = blurConfig.style.liquidFrostDp()
+    val enableOpticalFrostLayer = blurConfig.style != BlurEngineStyle.OFF &&
+        themeStyle != NetGateThemeStyle.MATERIAL_YOU_LITE
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
     Surface(
         modifier = modifier
             .then(
@@ -549,20 +563,164 @@ fun FrostedSurface(
         ) {
             Box(
                 modifier = Modifier
+                    .clip(shape)
                     .then(
-                        if (!useFletchLiquid) {
+                        if (motionSpec.enableRefractionShader) {
                             Modifier.liquidGlassRefractionEdge(
-                                enabled = motionSpec.enableRefractionShader,
+                                enabled = true,
                                 shape = shape
                             )
+                        } else {
+                            Modifier.frostedChromaticEdge(
+                                shape = shape,
+                                borderAccent = borderAccent
+                            )
+                        }
+                    )
+                    .background(sheenBrush)
+                    .then(glintModifier)
+            ) {
+                // Optical frosted underlay: RenderEffect-blurred ambient glow behind card controls
+                if (enableOpticalFrostLayer && !useFletchLiquid) {
+                    val glowStrength = when (blurConfig.style) {
+                        BlurEngineStyle.OFF -> 0f
+                        BlurEngineStyle.SOFT_GLASS -> if (isDark) 0.07f else 0.05f
+                        BlurEngineStyle.ACRYLIC_PRO -> if (isDark) 0.11f else 0.08f
+                        BlurEngineStyle.ULTRA_FROST -> if (isDark) 0.16f else 0.11f
+                    }
+                    val blurRadius = (blurConfig.style.modalBlurDp * 1.15f).dp
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .blurEngineBackdrop(
+                                radius = blurRadius,
+                                saturation = blurConfig.style.saturationBoost
+                            )
+                            .drawBehind {
+                                val topSpot = Offset(size.width * 0.14f, size.height * 0.08f)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            (borderAccent ?: primaryColor).copy(alpha = glowStrength),
+                                            Color.Transparent
+                                        ),
+                                        center = topSpot,
+                                        radius = size.maxDimension * 0.55f
+                                    ),
+                                    center = topSpot,
+                                    radius = size.maxDimension * 0.55f
+                                )
+                                val bottomSpot = Offset(size.width * 0.90f, size.height * 0.92f)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            secondaryColor.copy(alpha = glowStrength * 0.85f),
+                                            tertiaryColor.copy(alpha = glowStrength * 0.45f),
+                                            Color.Transparent
+                                        ),
+                                        center = bottomSpot,
+                                        radius = size.maxDimension * 0.50f
+                                    ),
+                                    center = bottomSpot,
+                                    radius = size.maxDimension * 0.50f
+                                )
+                            }
+                    )
+                }
+                content()
+            }
+        }
+    }
+}
+
+/**
+ * Provides a frosted/liquid glass ambient aurora backdrop & LocalBackdropLiquidState
+ * inside ModalBottomSheets so cards over sheets receive real backdrop refraction & blur.
+ */
+@Composable
+fun FrostedSheetContainer(
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val themeStyle = LocalThemeStyle.current
+    val blurConfig = LocalBlurEngineConfig.current
+    val isDark = LocalIsDarkTheme.current
+    val sheetSurfaceColor = MaterialTheme.colorScheme.surface
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
+    val sheetLiquidState = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS &&
+        blurConfig.style != BlurEngineStyle.OFF
+    ) {
+        rememberLiquidState()
+    } else {
+        null
+    }
+
+    val showMesh = themeStyle != NetGateThemeStyle.MATERIAL_YOU_LITE &&
+        blurConfig.style != BlurEngineStyle.OFF
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        if (showMesh) {
+            val meshAlpha = when (blurConfig.style) {
+                BlurEngineStyle.OFF -> 0f
+                BlurEngineStyle.SOFT_GLASS -> if (isDark) 0.16f else 0.14f
+                BlurEngineStyle.ACRYLIC_PRO -> if (isDark) 0.22f else 0.18f
+                BlurEngineStyle.ULTRA_FROST -> if (isDark) 0.28f else 0.24f
+            }
+            val c1 = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) LiquidGlassCyan else primaryColor
+            val c2 = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) LiquidGlassAqua else secondaryColor
+            val c3 = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) LiquidGlassPrismViolet else tertiaryColor
+
+            Canvas(
+                modifier = Modifier
+                    .matchParentSize()
+                    .then(
+                        if (sheetLiquidState != null) {
+                            Modifier.liquefiable(sheetLiquidState)
                         } else {
                             Modifier
                         }
                     )
-                    .background(sheenBrush)
-                    .then(glintModifier),
-                content = content
-            )
+                    .blurEngineBackdrop(
+                        radius = (blurConfig.style.modalBlurDp * 1.4f).dp,
+                        saturation = blurConfig.style.saturationBoost
+                    )
+            ) {
+                drawRect(color = sheetSurfaceColor)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(c1.copy(alpha = meshAlpha), Color.Transparent),
+                        center = Offset(size.width * 0.16f, size.height * 0.16f),
+                        radius = size.maxDimension * 0.56f
+                    ),
+                    center = Offset(size.width * 0.16f, size.height * 0.16f),
+                    radius = size.maxDimension * 0.56f
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(c2.copy(alpha = meshAlpha * 0.90f), Color.Transparent),
+                        center = Offset(size.width * 0.88f, size.height * 0.44f),
+                        radius = size.maxDimension * 0.48f
+                    ),
+                    center = Offset(size.width * 0.88f, size.height * 0.44f),
+                    radius = size.maxDimension * 0.48f
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(c3.copy(alpha = meshAlpha * 0.82f), Color.Transparent),
+                        center = Offset(size.width * 0.28f, size.height * 0.82f),
+                        radius = size.maxDimension * 0.52f
+                    ),
+                    center = Offset(size.width * 0.28f, size.height * 0.82f),
+                    radius = size.maxDimension * 0.52f
+                )
+            }
+        }
+
+        CompositionLocalProvider(LocalBackdropLiquidState provides sheetLiquidState) {
+            content()
         }
     }
 }

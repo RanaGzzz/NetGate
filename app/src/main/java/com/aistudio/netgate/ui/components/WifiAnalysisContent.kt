@@ -108,7 +108,6 @@ fun WifiAnalysisContent(
         item(key = "wifi_connected_hero") {
             ConnectedWifiHeroCard(
                 state = state,
-                onRefresh = onRefreshWifi,
                 onGrantLocation = {
                     locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                 }
@@ -201,7 +200,6 @@ fun WifiAnalysisContent(
 @Composable
 private fun ConnectedWifiHeroCard(
     state: WifiDiagnosticsUiState,
-    onRefresh: () -> Unit,
     onGrantLocation: () -> Unit
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -278,21 +276,13 @@ private fun ConnectedWifiHeroCard(
                     }
                 }
 
-                IconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.testTag("wifi_refresh_button")
-                ) {
-                    if (state.isRefreshing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Refresh Wi-Fi diagnostics"
-                        )
-                    }
+                if (state.isRefreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .size(20.dp),
+                        strokeWidth = 2.dp
+                    )
                 }
             }
 

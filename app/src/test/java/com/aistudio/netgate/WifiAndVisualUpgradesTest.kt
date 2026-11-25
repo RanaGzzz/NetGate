@@ -278,6 +278,12 @@ class WifiAndVisualUpgradesTest {
             }
         }
 
+        composeRule.onNodeWithTag("settings_open_appearance").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("settings_app_icon_header").performScrollTo().assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
         composeRule.onNodeWithTag("app_icon_neon").performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitForIdle()
         assertEquals(AppIconStyle.NEON, selectedIcon)

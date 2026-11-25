@@ -17,6 +17,7 @@ import com.aistudio.netgate.data.model.DnsTransportMode
 import com.aistudio.netgate.data.model.DpiBypassMode
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.NetGateThemeStyle
+import com.aistudio.netgate.data.model.SmartProtectionProfile
 import com.aistudio.netgate.data.model.SniProxyPreset
 import com.aistudio.netgate.data.model.StatusBarSpeedStyle
 import com.aistudio.netgate.data.model.ThemeMode
@@ -49,6 +50,8 @@ class FirewallPreferences(private val context: Context) {
         val WEBSITE_FILTER_MODE = stringPreferencesKey("website_filter_mode")
         val WEBSITE_BYPASS_PACKAGES = stringSetPreferencesKey("website_bypass_packages")
         val IS_AD_BLOCKER_ENABLED = booleanPreferencesKey("is_ad_blocker_enabled")
+        val SMART_PROTECTION_PROFILE = stringPreferencesKey("smart_protection_profile")
+        val BALANCED_DEFAULTS_V2_APPLIED = booleanPreferencesKey("balanced_defaults_v2_applied")
         val IS_ESSENTIAL_PASSTHROUGH_ENABLED = booleanPreferencesKey("is_essential_passthrough_enabled")
         val USE_DOH_UPSTREAM = booleanPreferencesKey("use_doh_upstream")
         val LIFETIME_ADS_BLOCKED_COUNT = longPreferencesKey("lifetime_ads_blocked_count")
@@ -133,6 +136,9 @@ class FirewallPreferences(private val context: Context) {
         val dnsTransportName = prefs[Keys.DNS_TRANSPORT_MODE] ?: DnsTransportMode.DOH_WITH_FALLBACK.name
         val dnsTransport = DnsTransportMode.entries.firstOrNull { it.name == dnsTransportName }
             ?: DnsTransportMode.DOH_WITH_FALLBACK
+        val smartProfileName = prefs[Keys.SMART_PROTECTION_PROFILE] ?: SmartProtectionProfile.BALANCED.name
+        val smartProfile = SmartProtectionProfile.entries.firstOrNull { it.name == smartProfileName }
+            ?: SmartProtectionProfile.BALANCED
 
         FirewallPreferencesState(
             isFirewallEnabled = prefs[Keys.IS_FIREWALL_ENABLED] ?: false,
@@ -146,6 +152,7 @@ class FirewallPreferences(private val context: Context) {
             websiteFilterMode = websiteMode,
             websiteBypassPackages = prefs[Keys.WEBSITE_BYPASS_PACKAGES] ?: emptySet(),
             isAdBlockerEnabled = prefs[Keys.IS_AD_BLOCKER_ENABLED] ?: false,
+            smartProtectionProfile = smartProfile,
             isEssentialPassthroughEnabled = prefs[Keys.IS_ESSENTIAL_PASSTHROUGH_ENABLED] ?: true,
             useDohUpstream = prefs[Keys.USE_DOH_UPSTREAM] ?: true,
             lifetimeAdsBlockedCount = prefs[Keys.LIFETIME_ADS_BLOCKED_COUNT] ?: 0L,
@@ -247,6 +254,53 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setAdBlockerEnabled(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.IS_AD_BLOCKER_ENABLED] = enabled }
+    }
+
+    suspend fun setSmartProtectionProfile(profile: SmartProtectionProfile) {
+        context.firewallDataStore.edit { prefs ->
+            prefs[Keys.SMART_PROTECTION_PROFILE] = profile.name
+            prefs[Keys.BALANCED_DEFAULTS_V2_APPLIED] = true
+            when (profile) {
+                SmartProtectionProfile.BALANCED -> {
+                    prefs[Keys.IS_ESSENTIAL_PASSTHROUGH_ENABLED] = true
+                }
+                SmartProtectionProfile.MAXIMUM_PROTECTION -> {
+                    prefs[Keys.IS_ESSENTIAL_PASSTHROUGH_ENABLED] = true
+                    prefs[Keys.IS_YOUTUBE_AD_BLOCK_ENABLED] = true
+                    prefs[Keys.IS_PROXY_STRIP_TRACKING_PARAMS] = true
+                }
+                SmartProtectionProfile.PRIVACY_FOCUSED -> {
+                    prefs[Keys.IS_ESSENTIAL_PASSTHROUGH_ENABLED] = true
+                    prefs[Keys.IS_PROXY_STRIP_TRACKING_PARAMS] = true
+                }
+                SmartProtectionProfile.FAMILY_SAFE -> {
+                    prefs[Keys.IS_ESSENTIAL_PASSTHROUGH_ENABLED] = true
+                    prefs[Keys.IS_SAFE_SEARCH_ENABLED] = true
+                    prefs[Keys.IS_YOUTUBE_AD_BLOCK_ENABLED] = true
+                    if ((prefs[Keys.YOUTUBE_RESTRICTED_MODE] ?: YouTubeRestrictedMode.OFF.name) == YouTubeRestrictedMode.OFF.name) {
+                        prefs[Keys.YOUTUBE_RESTRICTED_MODE] = YouTubeRestrictedMode.MODERATE.name
+                    }
+                }
+                SmartProtectionProfile.GAMING_MODE -> {
+                    prefs[Keys.IS_ESSENTIAL_PASSTHROUGH_ENABLED] = true
+                }
+            }
+        }
+    }
+
+    suspend fun markBalancedDefaultsV2AppliedIfUnset(): Boolean {
+        var appliedNow = false
+        context.firewallDataStore.edit { prefs ->
+            val alreadyApplied = prefs[Keys.BALANCED_DEFAULTS_V2_APPLIED] ?: false
+            if (!alreadyApplied) {
+                prefs[Keys.BALANCED_DEFAULTS_V2_APPLIED] = true
+                if (prefs[Keys.SMART_PROTECTION_PROFILE].isNullOrBlank()) {
+                    prefs[Keys.SMART_PROTECTION_PROFILE] = SmartProtectionProfile.BALANCED.name
+                }
+                appliedNow = true
+            }
+        }
+        return appliedNow
     }
 
     suspend fun setEssentialPassthroughEnabled(enabled: Boolean) {

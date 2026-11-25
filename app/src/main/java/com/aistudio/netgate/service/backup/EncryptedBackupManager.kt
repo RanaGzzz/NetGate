@@ -95,6 +95,7 @@ object EncryptedBackupManager {
                                     .put("ruleType", rule.ruleType)
                                     .put("isEnabled", rule.isEnabled)
                                     .put("createdAt", rule.createdAt)
+                                    .put("expiresAtMillis", rule.expiresAtMillis)
                             )
                         }
                     }
@@ -205,7 +206,8 @@ object EncryptedBackupManager {
                         domain = domain,
                         ruleType = obj.optString("ruleType", "BLOCK"),
                         isEnabled = obj.optBoolean("isEnabled", true),
-                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        expiresAtMillis = obj.optLong("expiresAtMillis", 0L)
                     )
                 }
                 if (websiteEntities.isNotEmpty()) {

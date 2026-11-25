@@ -13,5 +13,6 @@ data class WebsiteRuleEntity(
     @PrimaryKey val domain: String,
     val ruleType: String,
     val isEnabled: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val expiresAtMillis: Long = 0L
 )

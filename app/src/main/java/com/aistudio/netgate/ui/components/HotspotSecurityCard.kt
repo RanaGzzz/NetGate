@@ -60,10 +60,8 @@ fun HotspotSecurityCard(
 ) {
     val pacUrl = "http://${hotspotState.suggestedProxyHost}:${hotspotState.activePort}/proxy.pac"
 
-    Surface(
+    FrostedSurface(
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("hotspot_security_card")
@@ -80,7 +78,8 @@ fun HotspotSecurityCard(
                 Text(
                     text = "Hotspot Security & Device Rules",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
@@ -219,6 +218,7 @@ private fun HotspotClientRuleRow(
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(
             1.dp,
             when {
@@ -240,6 +240,7 @@ private fun HotspotClientRuleRow(
                         text = client.displayName,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

@@ -141,7 +141,8 @@ object DnsPacketFilter {
     fun shouldBlockDomain(
         domain: String,
         mode: WebsiteFilterMode,
-        rules: List<WebsiteRuleEntity>
+        rules: List<WebsiteRuleEntity>,
+        nowMillis: Long = System.currentTimeMillis()
     ): Boolean {
         if (mode == WebsiteFilterMode.OFF) return false
 
@@ -158,6 +159,7 @@ object DnsPacketFilter {
         val blocklist = HashSet<String>()
         for (rule in rules) {
             if (!rule.isEnabled) continue
+            if (rule.expiresAtMillis in 1..nowMillis) continue
             val cleanRule = DomainNormalizer.normalize(rule.domain)
                 ?: DomainNormalizer.normalizeHost(rule.domain)
             if (cleanRule.isEmpty()) continue

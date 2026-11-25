@@ -1,5 +1,6 @@
 package com.aistudio.netgate.service.policy
 
+import com.aistudio.netgate.data.model.AdBlockReason
 import com.aistudio.netgate.data.model.WebsiteFilterMode
 import com.aistudio.netgate.service.AdBlockFilterEngine
 import com.aistudio.netgate.service.DnsPacketFilter
@@ -113,7 +114,9 @@ object NetworkPolicyEngine {
                 return PolicyDecision.Block(
                     reason = reason,
                     isAdBlock = false,
-                    category = category
+                    category = category,
+                    filterListName = "Custom Website Rule",
+                    blockReason = AdBlockReason.CUSTOM_RULE
                 )
             }
         }
@@ -139,7 +142,9 @@ object NetworkPolicyEngine {
                 return PolicyDecision.Block(
                     reason = reason,
                     isAdBlock = true,
-                    category = PolicyDecision.BlockCategory.YOUTUBE_AD
+                    category = PolicyDecision.BlockCategory.YOUTUBE_AD,
+                    filterListName = "YouTube Ad Blocker",
+                    blockReason = AdBlockReason.ADS
                 )
             }
         }
@@ -151,8 +156,11 @@ object NetworkPolicyEngine {
             policy.isAdBlockerEnabled || policy.isHttpsProxyEnabled
         }
 
+        var adLookupLatencyMicros = 0L
         if (!isWhitelisted && isAdBlockEvaluated) {
-            val isAdDomain = policy.adMatcherSnapshot.isBlockedByAdFilter(domain)
+            val adMatch = policy.adMatcherSnapshot.matchBlockedRule(domain)
+            adLookupLatencyMicros = adMatch.latencyMicros
+            val isAdDomain = adMatch.isBlocked
             val isAdPath = AdBlockFilterEngine.isAdOrTrackerUrlPath(context.pathAndQuery)
             if (isAdDomain || isAdPath) {
                 val reason = when {
@@ -161,10 +169,23 @@ object NetworkPolicyEngine {
                     context.protocol == "DNS" -> "Ad & Tracker Filter"
                     else -> "HTTPS Ad/Tracker Domain"
                 }
+                val listName = if (isAdDomain) {
+                    adMatch.filterListTitle.ifBlank { "NetGate Core Ad Shield" }
+                } else {
+                    "NetGate URL Path Filter"
+                }
+                val resolvedReason = if (isAdDomain && adMatch.blockReason != AdBlockReason.NONE) {
+                    adMatch.blockReason
+                } else {
+                    AdBlockReason.ADS
+                }
                 return PolicyDecision.Block(
                     reason = reason,
                     isAdBlock = true,
-                    category = PolicyDecision.BlockCategory.AD_TRACKER
+                    category = PolicyDecision.BlockCategory.AD_TRACKER,
+                    filterListName = listName,
+                    blockReason = resolvedReason,
+                    lookupLatencyMicros = adLookupLatencyMicros
                 )
             }
         }
@@ -179,7 +200,8 @@ object NetworkPolicyEngine {
         return PolicyDecision.Allow(
             reason = defaultReason,
             isWhitelisted = isWhitelisted,
-            isPassthrough = false
+            isPassthrough = false,
+            lookupLatencyMicros = adLookupLatencyMicros
         )
     }
 

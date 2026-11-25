@@ -49,13 +49,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
-import androidx.compose.material.icons.rounded.BrightnessAuto
-import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.FilterListOff
-import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -63,9 +59,9 @@ import android.net.VpnService
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WifiTethering
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -76,7 +72,6 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -95,6 +90,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -104,7 +100,6 @@ import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.AppDestination
 import com.aistudio.netgate.data.model.AppFilterMode
 import com.aistudio.netgate.data.model.NetGateThemeStyle
-import com.aistudio.netgate.data.model.ThemeMode
 import com.aistudio.netgate.data.model.VpnDpiLogCategory
 import com.aistudio.netgate.ui.components.AppChangelogSheet
 import com.aistudio.netgate.ui.components.AppDetailBottomSheet
@@ -202,7 +197,7 @@ fun FirewallScreen(
                     WindowInsetsSides.Top + WindowInsetsSides.Horizontal
                 ),
                 topBar = {
-                    TopAppBar(
+                    CenterAlignedTopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = Color.Transparent,
                             titleContentColor = MaterialTheme.colorScheme.onBackground
@@ -216,7 +211,7 @@ fun FirewallScreen(
                                 },
                                 label = "topbar_title_transition"
                             ) { destination ->
-                                Column {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = when (destination) {
                                             AppDestination.DATA_USAGE -> stringResource(R.string.data_usage_title)
@@ -226,7 +221,9 @@ fun FirewallScreen(
                                             AppDestination.VPN_GUARD -> stringResource(R.string.vpn_guard_title)
                                             AppDestination.FIREWALL -> stringResource(R.string.app_name)
                                         },
-                                        style = MaterialTheme.typography.headlineSmall
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = when (destination) {
@@ -238,108 +235,74 @@ fun FirewallScreen(
                                             AppDestination.FIREWALL -> "Wi-Fi & Data Controller"
                                         },
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                         },
                         actions = {
-                            if (uiState.currentDestination == AppDestination.FIREWALL) {
-                                FilledTonalButton(
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(end = 4.dp)
+                            ) {
+                                IconButton(
                                     onClick = {
-                                        if (uiState.isSelectionMode) {
-                                            viewModel.exitSelectionMode()
-                                        } else {
-                                            viewModel.enterSelectionMode()
+                                        when (uiState.currentDestination) {
+                                            AppDestination.DATA_USAGE -> {
+                                                viewModel.refreshDataUsage()
+                                                if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.SECURITY_AUDIT) {
+                                                    viewModel.runDeviceSecurityAudit()
+                                                } else if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.SPEED_TEST) {
+                                                    viewModel.refreshConnectionDetails()
+                                                } else if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.WIFI) {
+                                                    viewModel.refreshWifiDiagnostics()
+                                                }
+                                            }
+                                            AppDestination.DNS -> {
+                                                viewModel.refreshConnectionDetails()
+                                                viewModel.runDnsCheck()
+                                            }
+                                            AppDestination.HOTSPOT -> {
+                                                viewModel.refreshConnectionDetails()
+                                                viewModel.refreshHotspotEnvironment()
+                                            }
+                                            AppDestination.VPN_GUARD -> {
+                                                viewModel.refreshVpnGateServers(force = true)
+                                            }
+                                            AppDestination.FIREWALL, AppDestination.WEBSITES ->
+                                                viewModel.refreshInstalledApps()
                                         }
                                     },
-                                    shape = RoundedCornerShape(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                     modifier = Modifier
-                                        .padding(end = 2.dp)
-                                        .testTag("batch_mode_toggle_button")
+                                        .size(48.dp)
+                                        .testTag("refresh_apps_button")
                                 ) {
                                     Icon(
-                                        imageVector = if (uiState.isSelectionMode) {
-                                            Icons.Rounded.Close
-                                        } else {
-                                            Icons.Rounded.Checklist
-                                        },
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (uiState.isSelectionMode) "Done" else "Select",
-                                        style = MaterialTheme.typography.labelLarge
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = when (uiState.currentDestination) {
+                                            AppDestination.DATA_USAGE -> "Sync data usage"
+                                            AppDestination.DNS -> "Refresh connection status"
+                                            AppDestination.HOTSPOT -> "Refresh hotspot status"
+                                            AppDestination.VPN_GUARD -> "Refresh VPNGate servers"
+                                            AppDestination.FIREWALL, AppDestination.WEBSITES -> "Refresh installed apps"
+                                        }
                                     )
                                 }
-                            }
 
-                            IconButton(
-                                onClick = { viewModel.cycleThemeMode() },
-                                modifier = Modifier.testTag("theme_cycle_button")
-                            ) {
-                                Icon(
-                                    imageVector = when (uiState.preferences.themeMode) {
-                                        ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-                                        ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                                        ThemeMode.DARK -> Icons.Rounded.DarkMode
-                                    },
-                                    contentDescription = "Switch Day or Night theme"
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    when (uiState.currentDestination) {
-                                        AppDestination.DATA_USAGE -> {
-                                            viewModel.refreshDataUsage()
-                                            if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.SECURITY_AUDIT) {
-                                                viewModel.runDeviceSecurityAudit()
-                                            } else if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.SPEED_TEST) {
-                                                viewModel.refreshConnectionDetails()
-                                            } else if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.WIFI) {
-                                                viewModel.refreshWifiDiagnostics()
-                                            }
-                                        }
-                                        AppDestination.DNS -> {
-                                            viewModel.refreshConnectionDetails()
-                                            viewModel.runDnsCheck()
-                                        }
-                                        AppDestination.HOTSPOT -> {
-                                            viewModel.refreshConnectionDetails()
-                                            viewModel.refreshHotspotEnvironment()
-                                        }
-                                        AppDestination.VPN_GUARD -> {
-                                            viewModel.refreshVpnGateServers(force = true)
-                                        }
-                                        AppDestination.FIREWALL, AppDestination.WEBSITES ->
-                                            viewModel.refreshInstalledApps()
-                                    }
-                                },
-                                modifier = Modifier.testTag("refresh_apps_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = when (uiState.currentDestination) {
-                                        AppDestination.DATA_USAGE -> "Sync data usage"
-                                        AppDestination.DNS -> "Refresh connection status"
-                                        AppDestination.HOTSPOT -> "Refresh hotspot status"
-                                        AppDestination.VPN_GUARD -> "Refresh VPNGate servers"
-                                        AppDestination.FIREWALL, AppDestination.WEBSITES -> "Refresh installed apps"
-                                    }
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.openSettings() },
-                                modifier = Modifier.testTag("open_settings_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Tune,
-                                    contentDescription = stringResource(R.string.action_settings)
-                                )
+                                IconButton(
+                                    onClick = { viewModel.openSettings() },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("open_settings_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Tune,
+                                        contentDescription = stringResource(R.string.action_settings)
+                                    )
+                                }
                             }
                         }
                     )
@@ -1120,7 +1083,7 @@ private fun SearchAndFiltersBlock(
             text = if (uiState.isSelectionMode) {
                 "Tap apps to select, then apply Wi-Fi or Data rules below."
             } else {
-                "Tap an app for Countdown Timer, or tap Wi-Fi / Data to toggle."
+                "Tap an app for Timer, long-press to select, or toggle Wi-Fi / Data."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1332,7 +1295,7 @@ private fun EmptyAppsPlaceholder(
                 text = if (hasFilters) {
                     "Try clearing your search or switching back to All Apps."
                 } else {
-                    "Use Batch Select or tap Wi-Fi / Data toggles on any app."
+                    "Long-press an app to multi-select, or tap Wi-Fi / Data toggles."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

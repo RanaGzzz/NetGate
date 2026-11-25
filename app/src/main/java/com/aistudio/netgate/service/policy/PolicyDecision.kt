@@ -1,5 +1,6 @@
 package com.aistudio.netgate.service.policy
 
+import com.aistudio.netgate.data.model.AdBlockReason
 import com.aistudio.netgate.service.ProxyFilterDecision
 
 /**
@@ -17,7 +18,8 @@ sealed interface PolicyDecision {
         override val reason: String = "Allowed",
         val isWhitelisted: Boolean = false,
         val isPassthrough: Boolean = false,
-        val aliasHost: String? = null
+        val aliasHost: String? = null,
+        val lookupLatencyMicros: Long = 0L
     ) : PolicyDecision {
         override val isAllowed: Boolean get() = true
         override val isAdBlock: Boolean get() = false
@@ -29,7 +31,10 @@ sealed interface PolicyDecision {
     data class Block(
         override val reason: String,
         override val isAdBlock: Boolean = false,
-        val category: BlockCategory = BlockCategory.GENERIC
+        val category: BlockCategory = BlockCategory.GENERIC,
+        val filterListName: String = "",
+        val blockReason: AdBlockReason = AdBlockReason.NONE,
+        val lookupLatencyMicros: Long = 0L
     ) : PolicyDecision {
         override val isAllowed: Boolean get() = false
     }
@@ -47,11 +52,22 @@ sealed interface PolicyDecision {
     }
 
     fun toProxyFilterDecision(): ProxyFilterDecision {
-        return ProxyFilterDecision(
-            allow = isAllowed,
-            reason = reason,
-            isAdBlock = isAdBlock
-        )
+        return when (this) {
+            is Allow -> ProxyFilterDecision(
+                allow = true,
+                reason = reason,
+                isAdBlock = false,
+                latencyMicros = lookupLatencyMicros
+            )
+            is Block -> ProxyFilterDecision(
+                allow = false,
+                reason = reason,
+                isAdBlock = isAdBlock,
+                filterListName = filterListName,
+                blockReason = blockReason,
+                latencyMicros = lookupLatencyMicros
+            )
+        }
     }
 }
 

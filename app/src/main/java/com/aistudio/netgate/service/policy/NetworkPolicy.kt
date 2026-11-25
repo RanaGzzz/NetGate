@@ -87,13 +87,15 @@ data class NetworkPolicy(
             websiteRules: List<WebsiteRuleEntity>,
             adMatcher: AdBlockMatcherSnapshot,
             blockedUids: Set<Int> = emptySet(),
-            blockedPackages: Set<String> = emptySet()
+            blockedPackages: Set<String> = emptySet(),
+            nowMillis: Long = System.currentTimeMillis()
         ): NetworkPolicy {
             val whitelist = HashSet<String>()
             val blocklist = HashSet<String>()
 
             for (rule in websiteRules) {
                 if (!rule.isEnabled) continue
+                if (rule.expiresAtMillis in 1..nowMillis) continue
                 val clean = DomainNormalizer.normalize(rule.domain) ?: DomainNormalizer.normalizeHost(rule.domain)
                 if (clean.isEmpty()) continue
                 if (rule.ruleType == WebsiteRuleType.ALLOW) {

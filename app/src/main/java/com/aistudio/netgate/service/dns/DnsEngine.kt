@@ -84,13 +84,17 @@ class DnsEngine(
             return DnsOutcome.Blocked(
                 category = decision.category,
                 reason = decision.reason,
-                responsePacket = responder.buildBlockedDnsResponsePacket(query)
+                responsePacket = responder.buildBlockedDnsResponsePacket(query),
+                filterListName = decision.filterListName,
+                blockReason = decision.blockReason,
+                latencyMicros = decision.lookupLatencyMicros
             )
         }
 
         val allow = decision as? PolicyDecision.Allow
         val isWhitelisted = allow?.isWhitelisted ?: false
         val isPassthrough = allow?.isPassthrough ?: false
+        val lookupLatencyMicros = allow?.lookupLatencyMicros ?: 0L
 
         // Strip HTTP/3 QUIC SVCB/HTTPS records so browsers downgrade onto TLS/TCP for SNI DPI bypass.
         if (!isWhitelisted &&
@@ -124,7 +128,8 @@ class DnsEngine(
                             responsePacket = responder.buildDnsResponsePacket(query, rewrittenAnswer),
                             label = safeRewrite.label,
                             aliasDomain = safeRewrite.aliasDomain,
-                            antiPoisonTrips = aliasResolution.antiPoisonTrips
+                            antiPoisonTrips = aliasResolution.antiPoisonTrips,
+                            latencyMicros = lookupLatencyMicros
                         )
                     }
                 }
@@ -144,7 +149,8 @@ class DnsEngine(
             upstreamPayload = upstreamPayload,
             transportLabel = upstream.label,
             isPassthrough = isPassthrough,
-            antiPoisonTrips = upstream.antiPoisonTrips
+            antiPoisonTrips = upstream.antiPoisonTrips,
+            latencyMicros = lookupLatencyMicros
         )
     }
 }

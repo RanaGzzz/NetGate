@@ -29,6 +29,9 @@ interface WebsiteRuleDao {
     @Query("DELETE FROM website_rules WHERE ruleType = :ruleType")
     suspend fun clearRulesByType(ruleType: String)
 
+    @Query("DELETE FROM website_rules WHERE expiresAtMillis > 0 AND expiresAtMillis <= :nowMillis")
+    suspend fun deleteExpiredRules(nowMillis: Long): Int
+
     @Query("DELETE FROM website_rules")
     suspend fun clearAllRules()
 }

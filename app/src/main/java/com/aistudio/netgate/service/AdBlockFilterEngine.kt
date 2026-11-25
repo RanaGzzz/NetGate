@@ -2,13 +2,26 @@ package com.aistudio.netgate.service
 
 import android.content.Context
 import com.aistudio.netgate.data.local.AdFilterListEntity
+import com.aistudio.netgate.data.model.AdBlockReason
+import com.aistudio.netgate.data.model.SmartProtectionProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import javax.net.ssl.HttpsURLConnection
 
 data class ParsedFilterRule(
@@ -16,22 +29,119 @@ data class ParsedFilterRule(
     val isException: Boolean
 )
 
+data class AdRuleMatchMeta(
+    val listId: String,
+    val listTitle: String,
+    val blockReason: AdBlockReason
+)
+
+data class AdLookupResult(
+    val isBlocked: Boolean,
+    val matchedRuleDomain: String = "",
+    val filterListTitle: String = "",
+    val blockReason: AdBlockReason = AdBlockReason.NONE,
+    val latencyMicros: Long = 0L
+)
+
+data class AdEnginePerfStats(
+    val totalDomains: Int = AdBlockFilterEngine.BUILTIN_AD_CORE_DOMAINS.size,
+    val duplicatesRemovedCount: Int = 0,
+    val compressedCacheBytes: Long = 0L,
+    val avgLookupLatencyMicros: Long = 0L,
+    val lastBuildDurationMs: Long = 0L
+)
+
 class AdBlockMatcherSnapshot(
     val blockedDomains: Set<String>,
-    val exceptionDomains: Set<String>
+    val exceptionDomains: Set<String>,
+    val domainMeta: Map<String, AdRuleMatchMeta> = emptyMap(),
+    val duplicatesRemovedCount: Int = 0,
+    val buildDurationMs: Long = 0L
 ) {
+    private val lookupCache = ConcurrentHashMap<String, AdLookupResult>(512)
+    private val lookupCount = AtomicLong(0L)
+    private val totalLatencyNanos = AtomicLong(0L)
+
     val totalBlockedCount: Int get() = blockedDomains.size
+
+    val averageLookupMicros: Long
+        get() {
+            val count = lookupCount.get()
+            return if (count <= 0L) 0L else (totalLatencyNanos.get() / count) / 1_000L
+        }
 
     fun isEssentialPassthrough(domain: String): Boolean {
         return matchesDomainOrParent(domain, ESSENTIAL_PASSTHROUGH_DOMAINS)
     }
 
     fun isBlockedByAdFilter(domain: String): Boolean {
-        val normalized = cleanQueriedDomain(domain) ?: return false
-        if (matchesNormalizedOrParent(normalized, exceptionDomains)) {
-            return false
+        return matchBlockedRule(domain).isBlocked
+    }
+
+    fun matchBlockedRule(domain: String): AdLookupResult {
+        val startNs = System.nanoTime()
+        val normalized = cleanQueriedDomain(domain) ?: return AdLookupResult(isBlocked = false)
+
+        val cached = lookupCache[normalized]
+        if (cached != null) {
+            val elapsedNs = (System.nanoTime() - startNs).coerceAtLeast(1_000L)
+            recordLatency(elapsedNs)
+            return cached.copy(latencyMicros = elapsedNs / 1_000L)
         }
-        return matchesNormalizedOrParent(normalized, blockedDomains)
+
+        val computed = if (matchesNormalizedOrParent(normalized, exceptionDomains)) {
+            AdLookupResult(isBlocked = false)
+        } else {
+            findBlockedMatch(normalized)
+        }
+
+        val elapsedNs = (System.nanoTime() - startNs).coerceAtLeast(1_000L)
+        val resultWithTiming = computed.copy(latencyMicros = elapsedNs / 1_000L)
+        if (lookupCache.size >= MAX_LOOKUP_CACHE_ENTRIES) {
+            lookupCache.clear()
+        }
+        lookupCache[normalized] = resultWithTiming
+        recordLatency(elapsedNs)
+        return resultWithTiming
+    }
+
+    private fun recordLatency(elapsedNs: Long) {
+        val count = lookupCount.incrementAndGet()
+        totalLatencyNanos.addAndGet(elapsedNs)
+        AdBlockFilterEngine.reportLookupLatencyMicros((totalLatencyNanos.get() / count) / 1_000L)
+    }
+
+    private fun findBlockedMatch(normalized: String): AdLookupResult {
+        if (blockedDomains.isEmpty()) return AdLookupResult(isBlocked = false)
+        var candidate = normalized
+        while (true) {
+            if (candidate in blockedDomains) {
+                val meta = domainMeta[candidate]
+                return AdLookupResult(
+                    isBlocked = true,
+                    matchedRuleDomain = candidate,
+                    filterListTitle = meta?.listTitle ?: "NetGate Core Ad Shield",
+                    blockReason = meta?.blockReason ?: inferReasonFromDomain(candidate)
+                )
+            }
+            val dotIdx = candidate.indexOf('.')
+            if (dotIdx < 0 || dotIdx == candidate.lastIndex) break
+            candidate = candidate.substring(dotIdx + 1)
+        }
+        return AdLookupResult(isBlocked = false)
+    }
+
+    private fun inferReasonFromDomain(domain: String): AdBlockReason {
+        return when {
+            "telemetry" in domain || "metrics" in domain || "xiaomi" in domain ||
+                "samsung" in domain || "huawei" in domain -> AdBlockReason.TELEMETRY
+            "analytics" in domain || "mixpanel" in domain || "amplitude" in domain ||
+                "hotjar" in domain || "segment" in domain || "adjust" in domain ||
+                "appsflyer" in domain || "branch" in domain || "pixel" in domain -> AdBlockReason.TRACKER
+            "phish" in domain -> AdBlockReason.PHISHING
+            "malware" in domain -> AdBlockReason.MALWARE
+            else -> AdBlockReason.ADS
+        }
     }
 
     private fun matchesDomainOrParent(domain: String, targetSet: Set<String>): Boolean {
@@ -58,6 +168,7 @@ class AdBlockMatcherSnapshot(
     }
 
     companion object {
+        private const val MAX_LOOKUP_CACHE_ENTRIES = 4096
         val EMPTY = AdBlockMatcherSnapshot(emptySet(), emptySet())
 
         val ESSENTIAL_PASSTHROUGH_DOMAINS: Set<String> = setOf(
@@ -108,14 +219,29 @@ object AdBlockFilterEngine {
     private val HOSTNAME_REGEX = Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 
     private val cachedMatcherRef = AtomicReference<AdBlockMatcherSnapshot?>(null)
+    private val _perfStatsFlow = MutableStateFlow(AdEnginePerfStats())
+    val perfStatsFlow: StateFlow<AdEnginePerfStats> = _perfStatsFlow.asStateFlow()
+
+    val LEGACY_REMOVED_LIST_IDS: Set<String> = setOf("hagezi_pro")
+
+    val BALANCED_DEFAULT_LIST_IDS: Set<String> = setOf(
+        "oisd_big",
+        "adguard_dns",
+        "hagezi_normal",
+        "hagezi_tif",
+        "easylist_privacy",
+        "adaway_hosts",
+        "urlhaus_malware",
+        "oem_telemetry"
+    )
 
     val DEFAULT_AD_FILTER_LISTS: List<AdFilterListEntity> = listOf(
         AdFilterListEntity(
-            id = "stevenblack",
-            title = "StevenBlack Unified Hosts",
-            description = "Consolidates adware, malvertising, and tracking hosts across major curated lists.",
-            sourceUrl = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-            category = "Ads & Malware",
+            id = "oisd_big",
+            title = "OISD Big",
+            description = "High-coverage anti-ad & tracker list tuned for near-zero false positives.",
+            sourceUrl = "https://big.oisd.nl/domainswild",
+            category = "Ads & Trackers",
             isEnabled = true,
             domainCount = 0,
             lastSyncedAt = 0L
@@ -131,86 +257,258 @@ object AdBlockFilterEngine {
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
-            id = "oisd_big",
-            title = "OISD Big Blocklist",
-            description = "High-coverage anti-ad & tracker list tuned for near-zero false positives.",
-            sourceUrl = "https://big.oisd.nl/domainswild",
-            category = "Comprehensive",
+            id = "hagezi_normal",
+            title = "HaGeZi Multi NORMAL",
+            description = "Balanced multi-source filter against ads, affiliate links, tracking & telemetry.",
+            sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/multi.txt",
+            category = "Ads & Trackers",
             isEnabled = true,
-            domainCount = 0,
-            lastSyncedAt = 0L
-        ),
-        AdFilterListEntity(
-            id = "hagezi_pro",
-            title = "HaGeZi Multi Pro",
-            description = "Sweeping protection against ads, analytics, tracking pixels, and native telemetry.",
-            sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.txt",
-            category = "Privacy & Trackers",
-            isEnabled = false,
             domainCount = 0,
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
             id = "hagezi_tif",
             title = "HaGeZi Threat Intelligence",
-            description = "Blocks phishing, scam links, crypto drainers, spyware, and C2 infrastructure.",
+            description = "Blocks malware, phishing, scam links, crypto drainers, spyware & C2 infrastructure.",
             sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.txt",
-            category = "Phishing & Security",
+            category = "Malware & Threat",
             isEnabled = true,
             domainCount = 0,
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
             id = "easylist_privacy",
-            title = "EasyPrivacy Trackers",
+            title = "EasyPrivacy",
             description = "Blocks invasive behavioral analytics, ad pixels, and cross-site trackers.",
             sourceUrl = "https://v.firebog.net/hosts/Easyprivacy.txt",
             category = "Trackers",
-            isEnabled = false,
+            isEnabled = true,
             domainCount = 0,
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
             id = "adaway_hosts",
-            title = "AdAway Mobile Blocklist",
+            title = "AdAway Mobile Ads",
             description = "Targets in-app mobile ad SDK banners, video interstitials, and SDK beacons.",
             sourceUrl = "https://adaway.org/hosts.txt",
             category = "Mobile Ads",
+            isEnabled = true,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "urlhaus_malware",
+            title = "URLHaus Malware",
+            description = "Abuse.ch curated threat feed blocking active malware distribution domains.",
+            sourceUrl = "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-hosts-online.txt",
+            category = "Malware",
+            isEnabled = true,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "oem_telemetry",
+            title = "OEM & Device Telemetry",
+            description = "Blocks vendor diagnostics, Android SDK metrics, and background device telemetry.",
+            sourceUrl = "https://raw.githubusercontent.com/Perflyst/PiHoleBlocklist/master/android-tracking.txt",
+            category = "Telemetry",
+            isEnabled = true,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "stevenblack",
+            title = "StevenBlack Unified Hosts",
+            description = "Consolidates adware, malvertising, and tracking hosts across major curated lists.",
+            sourceUrl = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+            category = "Ads & Malware",
             isEnabled = false,
             domainCount = 0,
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
             id = "peter_lowe",
-            title = "Peter Lowe's Ad & Tracker List",
+            title = "Peter Lowe's Ad & Tracking Servers",
             description = "Lightweight, zero-bloat list targeting major ad networks and analytics beacons.",
             sourceUrl = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
-            category = "Ad Servers",
+            category = "Trackers",
             isEnabled = false,
             domainCount = 0,
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
-            id = "urlhaus_malware",
-            title = "URLHaus Malware Shield",
-            description = "Abuse.ch curated threat feed blocking active malware distribution domains.",
-            sourceUrl = "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-hosts-online.txt",
+            id = "phishing_army",
+            title = "Phishing Army",
+            description = "Curated real-time feed of verified phishing & credential-harvesting domains.",
+            sourceUrl = "https://phishing.army/download/phishing_army_blocklist.txt",
+            category = "Phishing",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "openphish",
+            title = "OpenPhish",
+            description = "Live phishing URL feed automatically extracted into blocked threat hostnames.",
+            sourceUrl = "https://openphish.com/feed.txt",
+            category = "Phishing",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "hagezi_badware",
+            title = "HaGeZi Badware Hoster",
+            description = "Blocks abusive hosting providers & compromised free hosts serving payloads.",
+            sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/hoster.txt",
             category = "Malware",
             isEnabled = false,
             domainCount = 0,
             lastSyncedAt = 0L
         ),
         AdFilterListEntity(
-            id = "oem_telemetry",
-            title = "OEM & Device Telemetry Shield",
-            description = "Blocks vendor diagnostics, smart-device analytics, and background telemetry.",
+            id = "hagezi_dyndns",
+            title = "HaGeZi Dynamic DNS",
+            description = "Blocks abused dynamic DNS subdomains frequently used for phishing & RATs.",
+            sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/dyndns.txt",
+            category = "Malware & Threat",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "notrack_tracker",
+            title = "NoTrack Tracker Blocklist",
+            description = "Dedicated tracker list stopping cross-site profiling & telemetry beacons.",
+            sourceUrl = "https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-blocklist.txt",
+            category = "Trackers",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "windows_spy_blocker",
+            title = "WindowsSpyBlocker",
+            description = "Blocks Microsoft Windows diagnostic, telemetry, and tracking endpoints.",
+            sourceUrl = "https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt",
+            category = "Telemetry",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "samsung_telemetry",
+            title = "Samsung Telemetry Blocklist",
+            description = "HaGeZi native shield blocking Samsung smart-device telemetry & ad beacons.",
+            sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.samsung.txt",
+            category = "Telemetry",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "xiaomi_telemetry",
+            title = "Xiaomi Telemetry Blocklist",
+            description = "HaGeZi native shield blocking Xiaomi MIUI telemetry & system analytics.",
             sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.xiaomi.txt",
-            category = "OEM Telemetry",
+            category = "Telemetry",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "huawei_telemetry",
+            title = "Huawei Telemetry Blocklist",
+            description = "HaGeZi native shield blocking Huawei device analytics & background reporting.",
+            sourceUrl = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.huawei.txt",
+            category = "Telemetry",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "firebog_advertising",
+            title = "Firebog Advertising",
+            description = "Firebog ticked advertising list filtering web & in-app display ads.",
+            sourceUrl = "https://v.firebog.net/hosts/Easylist.txt",
+            category = "Ads",
+            isEnabled = false,
+            domainCount = 0,
+            lastSyncedAt = 0L
+        ),
+        AdFilterListEntity(
+            id = "firebog_tracking",
+            title = "Firebog Tracking & Telemetry",
+            description = "Firebog ticked tracking list covering analytics & behavioral scripts.",
+            sourceUrl = "https://v.firebog.net/hosts/static/w3kbl.txt",
+            category = "Trackers",
             isEnabled = false,
             domainCount = 0,
             lastSyncedAt = 0L
         )
     )
+
+    fun blockReasonForList(listId: String, category: String = ""): AdBlockReason {
+        return when {
+            listId in setOf("phishing_army", "openphish") ||
+                category.contains("Phishing", ignoreCase = true) -> AdBlockReason.PHISHING
+            listId in setOf("urlhaus_malware", "hagezi_tif", "hagezi_badware", "hagezi_dyndns") ||
+                category.contains("Malware", ignoreCase = true) -> AdBlockReason.MALWARE
+            listId in setOf(
+                "oem_telemetry",
+                "windows_spy_blocker",
+                "samsung_telemetry",
+                "xiaomi_telemetry",
+                "huawei_telemetry"
+            ) || category.contains("Telemetry", ignoreCase = true) -> AdBlockReason.TELEMETRY
+            listId in setOf("easylist_privacy", "peter_lowe", "notrack_tracker", "firebog_tracking") ||
+                category.contains("Tracker", ignoreCase = true) -> AdBlockReason.TRACKER
+            else -> AdBlockReason.ADS
+        }
+    }
+
+    fun enabledListIdsForProfile(
+        profile: SmartProtectionProfile,
+        availableListIds: Collection<String>
+    ): Set<String> {
+        val availableSet = availableListIds.toSet()
+        return when (profile) {
+            SmartProtectionProfile.BALANCED -> BALANCED_DEFAULT_LIST_IDS intersect availableSet
+            SmartProtectionProfile.MAXIMUM_PROTECTION -> availableSet
+            SmartProtectionProfile.PRIVACY_FOCUSED -> setOf(
+                "oisd_big",
+                "adguard_dns",
+                "hagezi_normal",
+                "stevenblack",
+                "easylist_privacy",
+                "peter_lowe",
+                "notrack_tracker",
+                "windows_spy_blocker",
+                "oem_telemetry",
+                "samsung_telemetry",
+                "xiaomi_telemetry",
+                "huawei_telemetry",
+                "firebog_tracking"
+            ) intersect availableSet
+            SmartProtectionProfile.FAMILY_SAFE -> (BALANCED_DEFAULT_LIST_IDS + setOf(
+                "phishing_army",
+                "openphish"
+            )) intersect availableSet
+            SmartProtectionProfile.GAMING_MODE -> setOf(
+                "oisd_big",
+                "adaway_hosts",
+                "hagezi_tif",
+                "urlhaus_malware"
+            ) intersect availableSet
+        }
+    }
+
+    internal fun reportLookupLatencyMicros(avgMicros: Long) {
+        val current = _perfStatsFlow.value
+        if (current.avgLookupLatencyMicros != avgMicros) {
+            _perfStatsFlow.value = current.copy(avgLookupLatencyMicros = avgMicros)
+        }
+    }
 
     val BUILTIN_AD_CORE_DOMAINS: Set<String> = setOf(
         // Major ad networks & SSPs
@@ -443,6 +741,13 @@ object AdBlockFilterEngine {
             return ParsedFilterRule(domain = domain, isException = isException)
         }
 
+        // Full URL feeds (e.g. OpenPhish feed lines "https://bad.site/login")
+        if (line.startsWith("http://", ignoreCase = true) || line.startsWith("https://", ignoreCase = true)) {
+            val host = runCatching { URL(line).host }.getOrNull().orEmpty()
+            val domain = validateNormalizedDomain(host) ?: return null
+            return ParsedFilterRule(domain = domain, isException = isException)
+        }
+
         // Standard hosts file format: "0.0.0.0 example.com" or "127.0.0.1 example.com"
         val parts = line.split(Regex("\\s+"))
         val candidate = when {
@@ -470,12 +775,70 @@ object AdBlockFilterEngine {
         return cleaned
     }
 
-    fun getCacheFile(context: Context, listId: String): File {
+    private fun adCacheDir(context: Context): File {
         val dir = File(context.filesDir, AD_CACHE_DIR)
         if (!dir.exists()) {
             dir.mkdirs()
         }
-        return File(dir, "$listId.hosts")
+        return dir
+    }
+
+    fun getCacheFile(context: Context, listId: String): File {
+        return File(adCacheDir(context), "$listId.hosts.gz")
+    }
+
+    fun getLegacyCacheFile(context: Context, listId: String): File {
+        return File(adCacheDir(context), "$listId.hosts")
+    }
+
+    fun deleteCacheFiles(context: Context, listId: String) {
+        runCatching { getCacheFile(context, listId).delete() }
+        runCatching { getLegacyCacheFile(context, listId).delete() }
+    }
+
+    fun getCompressedCacheBytes(context: Context, lists: List<AdFilterListEntity>): Long {
+        var total = 0L
+        for (list in lists) {
+            if (!list.isEnabled) continue
+            val gz = getCacheFile(context, list.id)
+            if (gz.exists()) {
+                total += gz.length()
+            } else {
+                val legacy = getLegacyCacheFile(context, list.id)
+                if (legacy.exists()) total += legacy.length()
+            }
+        }
+        return total
+    }
+
+    fun writeCompressedCache(
+        context: Context,
+        listId: String,
+        blockedDomains: Collection<String>,
+        exceptionDomains: Collection<String> = emptyList()
+    ): File {
+        val cacheFile = getCacheFile(context, listId)
+        val tempFile = File(cacheFile.parentFile, "$listId.hosts.gz.tmp")
+        GZIPOutputStream(FileOutputStream(tempFile)).bufferedWriter(Charsets.UTF_8).use { writer ->
+            for (ex in exceptionDomains) {
+                writer.write("@@")
+                writer.write(ex)
+                writer.newLine()
+            }
+            for (domain in blockedDomains) {
+                writer.write(domain)
+                writer.newLine()
+            }
+        }
+        if (cacheFile.exists()) {
+            cacheFile.delete()
+        }
+        tempFile.renameTo(cacheFile)
+        val legacy = getLegacyCacheFile(context, listId)
+        if (legacy.exists()) {
+            runCatching { legacy.delete() }
+        }
+        return cacheFile
     }
 
     fun downloadAndCacheFilterList(context: Context, list: AdFilterListEntity): Result<Int> {
@@ -487,7 +850,7 @@ object AdBlockFilterEngine {
                 connectTimeout = 12_000
                 readTimeout = 20_000
                 useCaches = false
-                setRequestProperty("User-Agent", "NetGate-AdBlock/1.0")
+                setRequestProperty("User-Agent", "NetGate-AdBlock/2.0")
                 setRequestProperty("Accept", "text/plain,*/*")
             }
 
@@ -514,24 +877,7 @@ object AdBlockFilterEngine {
                 }
             }
 
-            val cacheFile = getCacheFile(context, list.id)
-            val tempFile = File(cacheFile.parentFile, "${list.id}.tmp")
-            tempFile.bufferedWriter(Charsets.UTF_8).use { writer ->
-                for (ex in exceptions) {
-                    writer.write("@@")
-                    writer.write(ex)
-                    writer.newLine()
-                }
-                for (domain in blocked) {
-                    writer.write(domain)
-                    writer.newLine()
-                }
-            }
-            if (cacheFile.exists()) {
-                cacheFile.delete()
-            }
-            tempFile.renameTo(cacheFile)
-
+            writeCompressedCache(context, list.id, blocked, exceptions)
             cachedMatcherRef.set(null)
             Result.success(blocked.size)
         } catch (e: Exception) {
@@ -541,21 +887,59 @@ object AdBlockFilterEngine {
         }
     }
 
+    suspend fun buildMatcherSnapshotAsync(
+        context: Context,
+        enabledLists: List<AdFilterListEntity>
+    ): AdBlockMatcherSnapshot = withContext(Dispatchers.IO) {
+        buildMatcherSnapshot(context, enabledLists)
+    }
+
     fun buildMatcherSnapshot(
         context: Context,
         enabledLists: List<AdFilterListEntity>
     ): AdBlockMatcherSnapshot {
-        val blocked = HashSet<String>(BUILTIN_AD_CORE_DOMAINS.size + 4096).apply {
-            addAll(BUILTIN_AD_CORE_DOMAINS)
+        val startMs = System.currentTimeMillis()
+        val blocked = HashSet<String>(BUILTIN_AD_CORE_DOMAINS.size + 4096)
+        val domainMeta = HashMap<String, AdRuleMatchMeta>(BUILTIN_AD_CORE_DOMAINS.size + 4096)
+        var rawEntriesCount = 0
+
+        for (coreDomain in BUILTIN_AD_CORE_DOMAINS) {
+            rawEntriesCount++
+            if (blocked.add(coreDomain)) {
+                domainMeta[coreDomain] = AdRuleMatchMeta(
+                    listId = "builtin_core",
+                    listTitle = "NetGate Core Ad Shield",
+                    blockReason = inferCoreDomainReason(coreDomain)
+                )
+            }
         }
         val exceptions = HashSet<String>(256)
 
         for (list in enabledLists) {
             if (!list.isEnabled) continue
-            val cacheFile = getCacheFile(context, list.id)
-            if (!cacheFile.exists() || !cacheFile.canRead()) continue
+            val gzFile = getCacheFile(context, list.id)
+            val legacyFile = getLegacyCacheFile(context, list.id)
+            val useGzip = gzFile.exists() && gzFile.canRead()
+            val targetFile = when {
+                useGzip -> gzFile
+                legacyFile.exists() && legacyFile.canRead() -> legacyFile
+                else -> null
+            } ?: continue
+
+            val listReason = blockReasonForList(list.id, list.category)
+            val meta = AdRuleMatchMeta(
+                listId = list.id,
+                listTitle = list.title,
+                blockReason = listReason
+            )
+
             runCatching {
-                cacheFile.bufferedReader(Charsets.UTF_8).useLines { lines ->
+                val inputStream = if (useGzip) {
+                    GZIPInputStream(FileInputStream(targetFile))
+                } else {
+                    FileInputStream(targetFile)
+                }
+                BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8), 16_384).useLines { lines ->
                     lines.forEach { raw ->
                         val line = raw.trim()
                         if (line.isEmpty()) return@forEach
@@ -563,19 +947,45 @@ object AdBlockFilterEngine {
                             val ex = line.removePrefix("@@")
                             if (ex.isNotEmpty()) exceptions.add(ex)
                         } else {
-                            blocked.add(line)
+                            rawEntriesCount++
+                            if (blocked.add(line)) {
+                                domainMeta[line] = meta
+                            }
                         }
                     }
                 }
             }
         }
 
+        val duplicatesRemoved = (rawEntriesCount - blocked.size).coerceAtLeast(0)
+        val buildDurationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L)
         val snapshot = AdBlockMatcherSnapshot(
             blockedDomains = blocked,
-            exceptionDomains = exceptions
+            exceptionDomains = exceptions,
+            domainMeta = domainMeta,
+            duplicatesRemovedCount = duplicatesRemoved,
+            buildDurationMs = buildDurationMs
         )
         cachedMatcherRef.set(snapshot)
+        val compressedBytes = getCompressedCacheBytes(context, enabledLists)
+        _perfStatsFlow.value = _perfStatsFlow.value.copy(
+            totalDomains = blocked.size,
+            duplicatesRemovedCount = duplicatesRemoved,
+            compressedCacheBytes = compressedBytes,
+            lastBuildDurationMs = buildDurationMs
+        )
         return snapshot
+    }
+
+    private fun inferCoreDomainReason(domain: String): AdBlockReason {
+        return when {
+            "telemetry" in domain || "xiaomi" in domain || "samsung" in domain ||
+                "metrics" in domain -> AdBlockReason.TELEMETRY
+            "analytics" in domain || "mixpanel" in domain || "amplitude" in domain ||
+                "hotjar" in domain || "segment" in domain || "adjust" in domain ||
+                "appsflyer" in domain || "branch" in domain || "pixel" in domain -> AdBlockReason.TRACKER
+            else -> AdBlockReason.ADS
+        }
     }
 
     fun getLastLoadedDomainsCount(context: Context, enabledLists: List<AdFilterListEntity>): Int {

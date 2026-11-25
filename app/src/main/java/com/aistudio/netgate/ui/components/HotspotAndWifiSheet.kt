@@ -163,7 +163,6 @@ fun HotspotAndWifiContent(
                         onSelectHotspotPort = onSelectHotspotPort,
                         onOpenCustomPortDialog = { showCustomPortDialog = true },
                         onToggleApplyNetGateFilters = onToggleApplyNetGateFilters,
-                        onRefreshHotspot = onRefreshHotspot,
                         onCopyEndpoint = { endpoint ->
                             copyText(context, "NetGate Hotspot Proxy", endpoint)
                             onCopiedEndpoint(endpoint)
@@ -236,7 +235,6 @@ fun HotspotAndWifiContent(
                         onSelectHotspotPort = onSelectHotspotPort,
                         onOpenCustomPortDialog = { showCustomPortDialog = true },
                         onToggleApplyNetGateFilters = onToggleApplyNetGateFilters,
-                        onRefreshHotspot = onRefreshHotspot,
                         onCopyEndpoint = { endpoint ->
                             copyText(context, "NetGate Hotspot Proxy", endpoint)
                             onCopiedEndpoint(endpoint)
@@ -336,7 +334,6 @@ private fun HotspotProxyCard(
     onSelectHotspotPort: (Int) -> Unit,
     onOpenCustomPortDialog: () -> Unit,
     onToggleApplyNetGateFilters: (Boolean) -> Unit,
-    onRefreshHotspot: () -> Unit,
     onCopyEndpoint: (String) -> Unit,
     onOpenHotspotSettings: () -> Unit
 ) {
@@ -392,16 +389,6 @@ private fun HotspotProxyCard(
                             color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                }
-
-                IconButton(
-                    onClick = onRefreshHotspot,
-                    modifier = Modifier.testTag("refresh_hotspot_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Refresh,
-                        contentDescription = "Refresh Hotspot interface"
-                    )
                 }
 
                 Switch(

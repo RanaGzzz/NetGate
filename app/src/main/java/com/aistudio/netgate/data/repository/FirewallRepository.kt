@@ -53,6 +53,7 @@ import com.aistudio.netgate.data.model.HistoricalUsageTotals
 import com.aistudio.netgate.data.model.InstalledAppInfo
 import com.aistudio.netgate.data.model.SavedWifiNetworkInfo
 import com.aistudio.netgate.data.model.SiteConnectionRecord
+import com.aistudio.netgate.data.model.SmartProtectionProfile
 import com.aistudio.netgate.data.model.VpnGuardProfile
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
 import com.aistudio.netgate.data.model.WebsiteRuleItem
@@ -71,6 +72,7 @@ import com.aistudio.netgate.service.ConnectionMonitorHub
 import com.aistudio.netgate.service.DnsPacketFilter
 import com.aistudio.netgate.service.SecurityAuditEngine
 import com.aistudio.netgate.service.VpnRuntimeState
+import com.aistudio.netgate.service.backup.RulesBackupCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -117,7 +119,8 @@ class FirewallRepository(
                     domain = entity.domain,
                     isWhitelist = entity.ruleType == WebsiteRuleType.ALLOW,
                     isEnabled = entity.isEnabled,
-                    createdAt = entity.createdAt
+                    createdAt = entity.createdAt,
+                    expiresAtMillis = entity.expiresAtMillis
                 )
             }
         }
@@ -390,7 +393,11 @@ class FirewallRepository(
         return expired
     }
 
-    suspend fun addWebsiteRule(rawDomain: String, isWhitelist: Boolean): Result<String> {
+    suspend fun addWebsiteRule(
+        rawDomain: String,
+        isWhitelist: Boolean,
+        expiresAtMillis: Long = 0L
+    ): Result<String> {
         val normalized = DnsPacketFilter.normalizeDomainInput(rawDomain)
             ?: return Result.failure(IllegalArgumentException("Enter a valid domain like example.com"))
         websiteRuleDao.upsertRule(
@@ -398,11 +405,17 @@ class FirewallRepository(
                 domain = normalized,
                 ruleType = if (isWhitelist) WebsiteRuleType.ALLOW else WebsiteRuleType.BLOCK,
                 isEnabled = true,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                expiresAtMillis = expiresAtMillis
             )
         )
         return Result.success(normalized)
     }
+
+    suspend fun purgeExpiredWebsiteRules(nowMillis: Long = System.currentTimeMillis()): Int =
+        withContext(Dispatchers.IO) {
+            websiteRuleDao.deleteExpiredRules(nowMillis)
+        }
 
     suspend fun setWebsiteRuleEnabled(domain: String, enabled: Boolean) {
         websiteRuleDao.setRuleEnabled(domain, enabled)
@@ -418,8 +431,129 @@ class FirewallRepository(
         )
     }
 
+    suspend fun importWebsiteRules(
+        rawText: String,
+        defaultIsWhitelist: Boolean = false
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        val parsed = RulesBackupCodec.parseImportedRules(
+            rawText = rawText,
+            defaultIsWhitelist = defaultIsWhitelist
+        )
+        if (parsed.isEmpty()) {
+            return@withContext Result.failure(
+                IllegalArgumentException("No valid domains found in rules text")
+            )
+        }
+        websiteRuleDao.upsertRules(parsed)
+        Result.success(parsed.size)
+    }
+
+    suspend fun exportWebsiteRulesText(): String = withContext(Dispatchers.IO) {
+        val items = websiteRuleDao.getAllRulesOnce().map { entity ->
+            WebsiteRuleItem(
+                domain = entity.domain,
+                isWhitelist = entity.ruleType == WebsiteRuleType.ALLOW,
+                isEnabled = entity.isEnabled,
+                createdAt = entity.createdAt,
+                expiresAtMillis = entity.expiresAtMillis
+            )
+        }
+        RulesBackupCodec.exportRulesAsText(items)
+    }
+
+    suspend fun exportAdBlockBackupJson(): String = withContext(Dispatchers.IO) {
+        val rules = websiteRuleDao.getAllRulesOnce().map { entity ->
+            WebsiteRuleItem(
+                domain = entity.domain,
+                isWhitelist = entity.ruleType == WebsiteRuleType.ALLOW,
+                isEnabled = entity.isEnabled,
+                createdAt = entity.createdAt,
+                expiresAtMillis = entity.expiresAtMillis
+            )
+        }
+        val lists = adFilterListDao.getAllFilterListsOnce().map { entity ->
+            AdFilterListItem(
+                id = entity.id,
+                title = entity.title,
+                description = entity.description,
+                sourceUrl = entity.sourceUrl,
+                category = entity.category,
+                isEnabled = entity.isEnabled,
+                domainCount = entity.domainCount,
+                lastSyncedAt = entity.lastSyncedAt
+            )
+        }
+        val profile = preferences.preferencesFlow.first().smartProtectionProfile
+        RulesBackupCodec.encodeBackupJson(
+            rules = rules,
+            filterLists = lists,
+            profile = profile
+        )
+    }
+
+    suspend fun restoreAdBlockBackupJson(rawJson: String): Result<Int> = withContext(Dispatchers.IO) {
+        val decoded = RulesBackupCodec.decodeBackupJson(rawJson)
+        val payload = decoded.getOrElse { return@withContext Result.failure(it) }
+        ensureDefaultAdFilterListsSeeded()
+        preferences.setSmartProtectionProfile(payload.profile)
+        if (payload.enabledFilterIds.isNotEmpty()) {
+            adFilterListDao.getAllFilterListsOnce().forEach { list ->
+                val targetEnabled = list.id in payload.enabledFilterIds
+                if (list.isEnabled != targetEnabled) {
+                    adFilterListDao.setListEnabled(list.id, targetEnabled)
+                }
+            }
+        } else {
+            val allIds = adFilterListDao.getAllFilterListsOnce().map { it.id }
+            val enabledIds = AdBlockFilterEngine.enabledListIdsForProfile(payload.profile, allIds)
+            allIds.forEach { id ->
+                adFilterListDao.setListEnabled(id, id in enabledIds)
+            }
+        }
+        if (payload.rules.isNotEmpty()) {
+            websiteRuleDao.upsertRules(payload.rules)
+        }
+        val refreshedLists = adFilterListDao.getAllFilterListsOnce()
+        AdBlockFilterEngine.buildMatcherSnapshotAsync(context, refreshedLists)
+        Result.success(payload.rules.size)
+    }
+
     suspend fun ensureDefaultAdFilterListsSeeded() = withContext(Dispatchers.IO) {
+        adFilterListDao.deleteFilterListsByIds(AdBlockFilterEngine.LEGACY_REMOVED_LIST_IDS.toList())
         adFilterListDao.insertMissingFilterLists(AdBlockFilterEngine.DEFAULT_AD_FILTER_LISTS)
+        if (preferences.markBalancedDefaultsV2AppliedIfUnset()) {
+            adFilterListDao.getAllFilterListsOnce()
+                .filter { !it.id.startsWith("custom_") }
+                .forEach { entity ->
+                    val shouldEnable = entity.id in AdBlockFilterEngine.BALANCED_DEFAULT_LIST_IDS
+                    if (entity.isEnabled != shouldEnable) {
+                        adFilterListDao.setListEnabled(entity.id, shouldEnable)
+                    }
+                }
+        }
+    }
+
+    suspend fun applySmartProtectionProfile(profile: SmartProtectionProfile) = withContext(Dispatchers.IO) {
+        ensureDefaultAdFilterListsSeeded()
+        preferences.setSmartProtectionProfile(profile)
+        val allLists = adFilterListDao.getAllFilterListsOnce()
+        val enabledIds = AdBlockFilterEngine.enabledListIdsForProfile(
+            profile = profile,
+            availableListIds = allLists.map { it.id }
+        )
+        for (list in allLists) {
+            val shouldEnable = list.id in enabledIds
+            if (list.isEnabled != shouldEnable) {
+                adFilterListDao.setListEnabled(list.id, shouldEnable)
+            }
+        }
+        val updatedLists = adFilterListDao.getAllFilterListsOnce()
+        AdBlockFilterEngine.buildMatcherSnapshotAsync(context, updatedLists)
+    }
+
+    suspend fun warmAdBlockMatcherAsync() = withContext(Dispatchers.IO) {
+        val lists = adFilterListDao.getAllFilterListsOnce()
+        AdBlockFilterEngine.buildMatcherSnapshotAsync(context, lists)
     }
 
     suspend fun toggleAdFilterList(id: String, enabled: Boolean) = withContext(Dispatchers.IO) {
@@ -474,7 +608,7 @@ class FirewallRepository(
     suspend fun deleteCustomAdFilterList(id: String) = withContext(Dispatchers.IO) {
         if (!id.startsWith("custom_")) return@withContext
         adFilterListDao.deleteFilterList(id)
-        runCatching { AdBlockFilterEngine.getCacheFile(context, id).delete() }
+        AdBlockFilterEngine.deleteCacheFiles(context, id)
     }
 
     suspend fun syncEnabledAdFilterLists(): Result<Int> = withContext(Dispatchers.IO) {

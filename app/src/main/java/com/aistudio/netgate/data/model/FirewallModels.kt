@@ -597,6 +597,7 @@ data class FirewallPreferencesState(
     val websiteFilterMode: WebsiteFilterMode = WebsiteFilterMode.OFF,
     val websiteBypassPackages: Set<String> = emptySet(),
     val isAdBlockerEnabled: Boolean = false,
+    val smartProtectionProfile: SmartProtectionProfile = SmartProtectionProfile.BALANCED,
     val isEssentialPassthroughEnabled: Boolean = true,
     val useDohUpstream: Boolean = true,
     val lifetimeAdsBlockedCount: Long = 0L,
@@ -763,16 +764,91 @@ enum class WebsiteMainTab(val label: String) {
     WEBSITES("Websites"),
     SAFE_SEARCH("Safe & Kids"),
     PROXY_DPI("SNI & DPI"),
-    DNS_LOGS("DNS Logs")
+    DNS_LOGS("Filter Log")
 }
 
 enum class WebsiteTabSection(val label: String) {
     AD_FILTERS("Ad Lists"),
-    DNS_LOGS("DNS Log"),
+    DNS_LOGS("Filter Log"),
     BLOCKLIST("Blocklist"),
     WHITELIST("Whitelist"),
     ALLOWED_APPS("Allowed Apps")
 }
+
+enum class AdBlockReason(val label: String) {
+    NONE("Allowed"),
+    ADS("Ads"),
+    TRACKER("Tracker"),
+    MALWARE("Malware"),
+    PHISHING("Phishing"),
+    TELEMETRY("Telemetry"),
+    CUSTOM_RULE("Custom Rule")
+}
+
+enum class SmartProtectionProfile(
+    val title: String,
+    val subtitle: String,
+    val badgeLabel: String
+) {
+    BALANCED(
+        title = "Balanced",
+        subtitle = "8 fast default lists tuned for speed & near-zero false positives",
+        badgeLabel = "Default"
+    ),
+    MAXIMUM_PROTECTION(
+        title = "Maximum Protection",
+        subtitle = "Enables all 21 filter subscriptions plus YouTube Ad Blocker",
+        badgeLabel = "21 Lists"
+    ),
+    PRIVACY_FOCUSED(
+        title = "Privacy Focused",
+        subtitle = "Prioritizes tracker, behavioral analytics, & OEM telemetry lists",
+        badgeLabel = "Privacy"
+    ),
+    FAMILY_SAFE(
+        title = "Family Safe",
+        subtitle = "Balanced lists + Phishing shields + SafeSearch & Kids Mode",
+        badgeLabel = "Family"
+    ),
+    GAMING_MODE(
+        title = "Gaming Mode",
+        subtitle = "Ultra-low-latency core ads & malware only — protects game traffic",
+        badgeLabel = "<5ms Fast"
+    )
+}
+
+enum class TempAllowDuration(val label: String, val durationMillis: Long) {
+    ONE_HOUR("1 hour", 3_600_000L),
+    TWENTY_FOUR_HOURS("24 hours", 86_400_000L),
+    SEVEN_DAYS("7 days", 7L * 86_400_000L)
+}
+
+data class TopDomainStat(
+    val domain: String,
+    val hits: Long,
+    val blockReason: AdBlockReason = AdBlockReason.ADS,
+    val filterListName: String = ""
+)
+
+data class TopAppStat(
+    val appPackage: String,
+    val appName: String,
+    val totalRequests: Long,
+    val blockedRequests: Long
+)
+
+data class AdAnalyticsSummary(
+    val totalRequests: Long = 0L,
+    val totalBlockedRequests: Long = 0L,
+    val adsBlocked: Long = 0L,
+    val trackersBlocked: Long = 0L,
+    val malwareBlocked: Long = 0L,
+    val phishingBlocked: Long = 0L,
+    val telemetryBlocked: Long = 0L,
+    val customRuleBlocked: Long = 0L,
+    val topBlockedDomains: List<TopDomainStat> = emptyList(),
+    val topApps: List<TopAppStat> = emptyList()
+)
 
 enum class DnsQueryStatus(val label: String) {
     ALLOWED("Allowed"),
@@ -789,7 +865,14 @@ data class DnsQueryLogEntry(
     val domain: String,
     val status: DnsQueryStatus,
     val reason: String,
-    val timestampMs: Long
+    val timestampMs: Long,
+    val fullUrl: String = "",
+    val appName: String = "",
+    val appPackage: String = "",
+    val filterListName: String = "",
+    val blockReason: AdBlockReason = AdBlockReason.NONE,
+    val hitCount: Int = 1,
+    val latencyMicros: Long = 0L
 )
 
 data class AdFilterListItem(
@@ -807,8 +890,14 @@ data class WebsiteRuleItem(
     val domain: String,
     val isWhitelist: Boolean,
     val isEnabled: Boolean,
-    val createdAt: Long
-)
+    val createdAt: Long,
+    val expiresAtMillis: Long = 0L
+) {
+    val isTemporary: Boolean get() = expiresAtMillis > 0L
+
+    fun isExpired(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        expiresAtMillis in 1..nowMillis
+}
 
 enum class UsageTimeRange(val label: String, val days: Int) {
     LAST_24H("24h", 1),

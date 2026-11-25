@@ -271,6 +271,8 @@ class UpdateChangelogAndLogsTest {
             }
         }
 
+        composeRule.onNodeWithTag("settings_diagnostics_logs_header").performScrollTo().performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_open_vpn_dpi_logs_button").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("settings_update_status_badge").performScrollTo().assertTextContains("v3.5", substring = true)
         composeRule.onNodeWithTag("settings_latest_release_summary").performScrollTo().assertIsDisplayed()
