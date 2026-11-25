@@ -1,3 +1,19 @@
+# What's New — NetGate 3.8
+
+### Ad & Website Blocker
+- **21 free filter subscriptions:** added trusted lists including OISD Big, AdGuard DNS Filter, HaGeZi Multi NORMAL and Threat Intelligence, StevenBlack Unified Hosts, EasyPrivacy, AdAway Mobile Ads, Peter Lowe's, URLHaus Malware, OEM & Device Telemetry, Phishing Army, OpenPhish, HaGeZi Badware Hoster and Dynamic DNS, NoTrack Tracker Blocklist, WindowsSpyBlocker, Samsung/Xiaomi/Huawei Telemetry, and Firebog lists.
+- **Balanced & Fast defaults:** new installations enable 8 high-performance lists by default: OISD Big, AdGuard DNS Filter, HaGeZi Multi NORMAL, HaGeZi Threat Intelligence, EasyPrivacy, AdAway Mobile Ads, URLHaus Malware, and OEM & Device Telemetry.
+- **Dedicated filter log:** live entries show timestamps, queried domain and full URL, originating app name/package, responsible filter list, action, block reason (Ads, Tracker, Malware, Phishing, Telemetry, or Custom Rule), and hit counts.
+- **Per-domain controls:** allow or block a domain, temporarily allow it for 1 hour, 24 hours, or 7 days, or set a permanent allow/block rule from query logs or manual entry.
+- **User-managed lists & backup:** manage whitelists and blacklists, import domain rules, export standard Adblock text, and back up or restore all supported settings with JSON.
+- **Analytics dashboard:** track total and blocked requests, category breakdowns, top blocked domains, and apps generating the most traffic.
+- **Quick log actions:** instantly allow with a duration selector, block, copy a domain, look it up with Whois, scan it with VirusTotal, or report a false positive.
+- **Smart protection profiles:** choose Balanced, Maximum Protection, Privacy Focused, Family Safe, or Gaming Mode; Balanced is the default.
+- **Faster filtering:** deduplicate rules, load default lists asynchronously, cache lookups with ConcurrentHashMap for sub-10 ms DNS filtering latency, and compress stored data with GZIP.
+
+### Updates
+- **Automatic update checks:** check for OTA and GitHub release updates in the background when the app launches.
+
 # What's New — NetGate 3.7
 
 ### Protection & Reliability
