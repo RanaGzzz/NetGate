@@ -18,8 +18,8 @@ android {
     applicationId = "com.aistudio.netgate.xkqmpt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 11
-    versionName = "3.8"
+    versionCode = 12
+    versionName = "3.9"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

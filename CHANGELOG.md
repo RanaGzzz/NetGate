@@ -1,3 +1,16 @@
+# What's New — NetGate 3.9
+
+### Stability & Performance
+- **Filter sync no longer slows the app down:** a sync no longer drops the working ruleset or rebuilds the matcher after every downloaded list. The ruleset is rebuilt once when the sync finishes, and only one matcher build can run at a time, so back-to-back syncs cannot stack into a memory spike.
+- **Smart protection profiles apply instantly:** picking Balanced, Maximum Protection, Privacy Focused, Family Safe or Gaming Mode now writes the whole list selection in a single database batch instead of 20+ separate row updates, each of which refreshed the whole dashboard.
+- **Memory-aware filter engine:** the number of blocked domains kept in RAM is now sized from the device heap (120k–450k) instead of loading everything. Domains stored a full metadata object each; they now share a compact owner index, cutting memory per domain by roughly half. If a build still runs out of memory, the previous working ruleset is kept instead of the tunnel going down.
+- **Smoother dashboard:** live analytics reach the UI at most once per second with a trailing update, and filter-latency stats publish at most every two seconds, so busy traffic no longer recomposes the screen hundreds of times per second.
+
+### VPN Guard
+- **WARP ↔ OpenVPN switching is reliable:** only one connection change runs at a time, switching waits at most 45 seconds for the previous tunnel to release the slot (20 seconds for a disconnect), and WireGuard state callbacks are ignored while OpenVPN owns the tunnel, so a healthy OpenVPN session is no longer marked as disconnected.
+- **Wi-Fi and mobile data indicators stay put:** while a VPN is active and the device briefly stops reporting the underlying network, the connection chips keep the last stable Wi-Fi/mobile details instead of flipping to OFF.
+- **Auto-reconnect no longer fights a manual switch:** network-change reconnects are skipped while an endpoint switch is already in flight.
+
 # What's New — NetGate 3.8
 
 ### Ad & Website Blocker

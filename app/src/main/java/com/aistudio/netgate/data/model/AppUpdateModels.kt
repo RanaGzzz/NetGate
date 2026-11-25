@@ -56,6 +56,30 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9",
+            subtitle = "Filter Sync, Smart Profile and VPN Switching Stability",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Stability & Performance",
+                    bullets = listOf(
+                        "Filter sync rebuilds the ruleset once when it finishes, and only one matcher build runs at a time, so downloading lists no longer slows the app down.",
+                        "Smart protection profiles write the whole list selection in a single batch instead of one row at a time.",
+                        "The filter engine sizes its in-memory domain set from the device heap, shares one compact owner index per domain, and keeps the previous working ruleset if a build runs out of memory.",
+                        "Dashboard analytics refresh at most once per second and filter latency at most every two seconds, so busy traffic stays smooth."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "VPN Guard",
+                    bullets = listOf(
+                        "Only one WARP or OpenVPN connection change runs at a time, with timeouts if the previous tunnel does not release the slot.",
+                        "WireGuard state callbacks are ignored while OpenVPN owns the tunnel, so OpenVPN sessions are no longer marked disconnected.",
+                        "Wi-Fi and mobile data indicators keep their last stable details while a VPN is active instead of disappearing.",
+                        "Network-change auto-reconnect is skipped while an endpoint switch is already running."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.8",
             subtitle = "Adblock & Website Blocker Overhaul and Automatic Updates",
             sections = listOf(
