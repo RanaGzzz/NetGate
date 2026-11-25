@@ -390,6 +390,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
     private var wifiReceiverRegistered = false
 
+    /** Collapses bursts of connectivity callbacks into one background detection at a time. */
+    private val connectionRefreshPending = java.util.concurrent.atomic.AtomicBoolean(false)
+
     init {
         viewModelScope.launch {
             repository.ensureDefaultAdFilterListsSeeded()
@@ -1017,9 +1020,6 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = FirewallUiState()
     )
-
-    /** Collapses bursts of connectivity callbacks into one background detection at a time. */
-    private val connectionRefreshPending = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun refreshConnectionDetails() {
         if (!connectionRefreshPending.compareAndSet(false, true)) return
