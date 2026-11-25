@@ -400,6 +400,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         observeTemporaryWebsiteRuleExpiry()
         observeLiveNetworkTelemetry()
         initHotspotAndWifiObservers()
+        checkForGitHubUpdates()
         vpnDpiLogMonitor.startObserving(
             scope = viewModelScope,
             vpnRuntimeFlow = NetGateVpnService.runtimeState,
