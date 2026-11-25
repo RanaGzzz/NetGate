@@ -56,21 +56,28 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.4",
+            subtitle = "Interface Alignment and Layout Fixes",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Interface",
+                    bullets = listOf(
+                        "Settings badges and chevrons line up in one fixed right-hand column no matter how long the title is.",
+                        "The SNI proxy statistics are three equal tiles, and domain rule Import, Export, Backup and Clear have their own row.",
+                        "The duplicated refresh button is gone from the app bar; the per-screen refresh controls remain."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9.3",
-            subtitle = "In-App Crash Logs, Filter Budget and Interface Polish",
+            subtitle = "In-App Crash Logs and Filter Memory Budget Visibility",
             sections = listOf(
                 ChangelogSection(
                     heading = "Troubleshooting",
                     bullets = listOf(
                         "Crashes are saved inside the app with their stack trace, cause, version and device details, ready to read or copy from Settings → Diagnostics & Crash Logs.",
                         "The ad-block dashboard reports how many enabled filter lists the memory budget skipped, so a missing block can be explained."
-                    )
-                ),
-                ChangelogSection(
-                    heading = "Interface",
-                    bullets = listOf(
-                        "Settings badges and chevrons line up in one fixed right-hand column, and the SNI proxy tiles are equal size.",
-                        "Domain rule Import, Export, Backup and Clear have their own row, and the app bar no longer shows a duplicate refresh button."
                     )
                 )
             )

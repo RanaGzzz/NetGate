@@ -1,14 +1,16 @@
+# What's New — NetGate 3.9.4
+
+### Interface
+- Settings rows keep their badge and chevron in one fixed column on the right, so the Appearance, Background & System, Verified, Suite and update badges line up no matter how long the title is.
+- The SNI Proxy & HTTPS Filter statistics are three equal tiles (blocked, relayed and endpoint) instead of one stretched, wrapping tile.
+- Import, Export, Backup and Clear for Domain Rules & App Exceptions sit on their own row and no longer squeeze the heading into vertical letters.
+- Removed the duplicated refresh button from the app bar; the per-screen refresh controls remain.
+
 # What's New — NetGate 3.9.3
 
 ### Troubleshooting
 - **In-app crash logs:** if NetGate crashes, the exception, stack trace, cause, app version and device details are now saved to the app. Open Settings → Diagnostics & Crash Logs and tap any "App crash" entry to read it or copy it, so a crash can be reported and fixed instead of only appearing in logcat. The five most recent crashes are kept, and clearing the logs deletes them.
 - **Filter memory budget is visible:** the ad-block dashboard now shows "Memory budget: N lists skipped" when the device heap limit was reached and some enabled filter lists could not be loaded, so a missing block can be explained instead of looking like a broken list.
-
-### Interface
-- Settings rows keep their badge and chevron in one fixed column on the right, so Appearance, Background & System, Verified, Suite and the update badges line up no matter how long the title is.
-- The SNI Proxy & HTTPS Filter statistics are three equal tiles (blocked, relayed and endpoint) instead of one stretched, wrapping tile.
-- Import, Export, Backup and Clear for Domain Rules & App Exceptions sit on their own row and no longer squeeze the heading into vertical letters.
-- Removed the duplicated refresh button from the app bar; the per-screen refresh controls remain.
 
 # What's New — NetGate 3.9.2
 

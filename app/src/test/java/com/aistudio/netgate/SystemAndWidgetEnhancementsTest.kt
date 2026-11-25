@@ -288,9 +288,9 @@ class SystemAndWidgetEnhancementsTest {
     }
 
     @Test
-    fun `BuildConfig and BundledChangelog reflect v3_9_3 release metadata`() {
-        assertEquals("3.9.3", BuildConfig.VERSION_NAME)
-        assertEquals(15, BuildConfig.VERSION_CODE)
-        assertEquals("NetGate 3.9.3", BundledChangelog.entries.first().versionLabel)
+    fun `BuildConfig and BundledChangelog reflect v3_9_4 release metadata`() {
+        assertEquals("3.9.4", BuildConfig.VERSION_NAME)
+        assertEquals(16, BuildConfig.VERSION_CODE)
+        assertEquals("NetGate 3.9.4", BundledChangelog.entries.first().versionLabel)
     }
 }
