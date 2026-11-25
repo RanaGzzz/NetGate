@@ -28,6 +28,9 @@ jobs:
       - name: Set up Android build environment
         uses: ./.github/actions/setup-android
 
+      - name: Run unit & Robolectric tests
+        run: gradle :app:testDebugUnitTest
+
       - name: Run Android lint
         run: gradle :app:lintDebug
 

@@ -360,11 +360,11 @@ class NetGateVpnService : VpnService() {
         timerJob?.cancel()
         wifiAutomationJob?.cancel()
         drainJob?.cancel()
+        serviceScope.cancel()
         stopProxyServerLocked()
         closeVpnInterface()
         _runtimeState.value = VpnRuntimeState()
         VpnSessionCoordinator.instance.releaseLocalFirewall()
-        serviceScope.cancel()
         super.onDestroy()
     }
 
