@@ -56,7 +56,16 @@ class AdBlockMatcherSnapshot(
     val exceptionDomains: Set<String>,
     val domainMeta: Map<String, AdRuleMatchMeta> = emptyMap(),
     val duplicatesRemovedCount: Int = 0,
-    val buildDurationMs: Long = 0L
+    val buildDurationMs: Long = 0L,
+    /**
+     * Compact owner index for the list a domain came from. One cached [Byte] per domain instead of
+     * a full [AdRuleMatchMeta] object, which used to cost ~80 extra bytes for every blocked domain
+     * and got large filter sets killed by the low-memory killer.
+     */
+    private val ownerListIndex: Map<String, Byte> = emptyMap(),
+    private val ownerListMeta: List<AdRuleMatchMeta> = emptyList(),
+    /** Lists that were skipped because the in-memory domain budget was reached. */
+    val truncatedListCount: Int = 0
 ) {
     private val lookupCache = ConcurrentHashMap<String, AdLookupResult>(512)
     private val lookupCount = AtomicLong(0L)
@@ -116,7 +125,7 @@ class AdBlockMatcherSnapshot(
         var candidate = normalized
         while (true) {
             if (candidate in blockedDomains) {
-                val meta = domainMeta[candidate]
+                val meta = resolveOwnerMeta(candidate)
                 return AdLookupResult(
                     isBlocked = true,
                     matchedRuleDomain = candidate,
@@ -129,6 +138,12 @@ class AdBlockMatcherSnapshot(
             candidate = candidate.substring(dotIdx + 1)
         }
         return AdLookupResult(isBlocked = false)
+    }
+
+    private fun resolveOwnerMeta(domain: String): AdRuleMatchMeta? {
+        if (domainMeta.isNotEmpty()) return domainMeta[domain]
+        val index = ownerListIndex[domain]?.toInt() ?: return null
+        return ownerListMeta.getOrNull(index)
     }
 
     private fun inferReasonFromDomain(domain: String): AdBlockReason {
@@ -215,6 +230,17 @@ object AdBlockFilterEngine {
 
     private const val AD_CACHE_DIR = "adblock"
     private const val MAX_DOMAINS_PER_LIST = 350_000
+
+    /** Hard ceiling on domains held in RAM, scaled down on small-heap devices. */
+    private const val MAX_TOTAL_DOMAINS = 450_000
+    private const val MAX_TRACKED_LISTS = 120
+    private const val MIN_DOMAIN_BUDGET = 120_000
+    private const val LATENCY_PUBLISH_INTERVAL_MS = 2_000L
+
+    @Volatile
+    private var lastLatencyPublishAtMs = 0L
+
+    private val buildLock = java.util.concurrent.locks.ReentrantLock()
     private val IPV4_LITERAL_REGEX = Regex("^\\d{1,3}(?:\\.\\d{1,3}){3}$")
     private val HOSTNAME_REGEX = Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 
@@ -503,7 +529,17 @@ object AdBlockFilterEngine {
         }
     }
 
+    /**
+     * Publishes the rolling lookup latency at most every [LATENCY_PUBLISH_INTERVAL_MS].
+     *
+     * This used to publish on every single DNS lookup. The UI collects [perfStatsFlow], so a busy
+     * tunnel produced hundreds of state emissions per second and recomposed the whole dashboard,
+     * which made the app crawl while the filter was working.
+     */
     internal fun reportLookupLatencyMicros(avgMicros: Long) {
+        val now = System.currentTimeMillis()
+        if (now - lastLatencyPublishAtMs < LATENCY_PUBLISH_INTERVAL_MS) return
+        lastLatencyPublishAtMs = now
         val current = _perfStatsFlow.value
         if (current.avgLookupLatencyMicros != avgMicros) {
             _perfStatsFlow.value = current.copy(avgLookupLatencyMicros = avgMicros)
@@ -878,7 +914,7 @@ object AdBlockFilterEngine {
             }
 
             writeCompressedCache(context, list.id, blocked, exceptions)
-            cachedMatcherRef.set(null)
+            // Keep the previous ruleset live during a sync; the caller rebuilds once at the end.
             Result.success(blocked.size)
         } catch (e: Exception) {
             Result.failure(e)
@@ -894,26 +930,77 @@ object AdBlockFilterEngine {
         buildMatcherSnapshot(context, enabledLists)
     }
 
+    /**
+     * Domains that fit in RAM for this device. Each blocked domain costs roughly 150 bytes across
+     * the domain set and the owner index, so the budget is derived from the Java heap size instead
+     * of assuming a modern flagship. "Maximum protection" used to load every list at once (~1.5M
+     * domains / >200 MB) and was killed by the OS on mid-range phones.
+     */
+    internal fun domainBudgetForHeap(maxHeapBytes: Long = Runtime.getRuntime().maxMemory()): Int {
+        val heapMb = (maxHeapBytes / (1024L * 1024L)).coerceAtLeast(64L)
+        return (heapMb * 700L).toInt().coerceIn(MIN_DOMAIN_BUDGET, MAX_TOTAL_DOMAINS)
+    }
+
     fun buildMatcherSnapshot(
         context: Context,
         enabledLists: List<AdFilterListEntity>
     ): AdBlockMatcherSnapshot {
+        val previous = cachedMatcherRef.get()
+        if (!buildLock.tryLock()) {
+            // Never allow two matcher builds at once: the second copy doubles peak memory, which is
+            // what turned rapid filter syncs / profile switches into crashes.
+            return previous ?: AdBlockMatcherSnapshot.EMPTY
+        }
+        try {
+            cachedMatcherRef.set(null)
+            return buildMatcherSnapshotLocked(context, enabledLists)
+        } catch (oom: OutOfMemoryError) {
+            // Keep whatever was working instead of taking the whole tunnel down.
+            cachedMatcherRef.set(previous)
+            android.util.Log.e(
+                "AdBlockFilterEngine",
+                "Matcher build ran out of memory; keeping the previous ruleset",
+                oom
+            )
+            return previous ?: AdBlockMatcherSnapshot.EMPTY
+        } finally {
+            buildLock.unlock()
+        }
+    }
+
+    private fun buildMatcherSnapshotLocked(
+        context: Context,
+        enabledLists: List<AdFilterListEntity>
+    ): AdBlockMatcherSnapshot {
         val startMs = System.currentTimeMillis()
-        val blocked = HashSet<String>(BUILTIN_AD_CORE_DOMAINS.size + 4096)
-        val domainMeta = HashMap<String, AdRuleMatchMeta>(BUILTIN_AD_CORE_DOMAINS.size + 4096)
+        val budget = domainBudgetForHeap()
+        val blocked = HashSet<String>(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
+        val ownerIndex = HashMap<String, Byte>(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
+        val ownerMeta = ArrayList<AdRuleMatchMeta>(8)
         var rawEntriesCount = 0
+
+        val coreAdsMeta = AdRuleMatchMeta("builtin_core", "NetGate Core Ad Shield", AdBlockReason.ADS)
+        val coreTelemetryMeta = AdRuleMatchMeta("builtin_core", "NetGate Core Ad Shield", AdBlockReason.TELEMETRY)
+        val coreTrackerMeta = AdRuleMatchMeta("builtin_core", "NetGate Core Ad Shield", AdBlockReason.TRACKER)
+        ownerMeta.add(coreAdsMeta)
+        ownerMeta.add(coreTelemetryMeta)
+        ownerMeta.add(coreTrackerMeta)
+        val coreAdsIndex = 0.toByte()
+        val coreTelemetryIndex = 1.toByte()
+        val coreTrackerIndex = 2.toByte()
 
         for (coreDomain in BUILTIN_AD_CORE_DOMAINS) {
             rawEntriesCount++
             if (blocked.add(coreDomain)) {
-                domainMeta[coreDomain] = AdRuleMatchMeta(
-                    listId = "builtin_core",
-                    listTitle = "NetGate Core Ad Shield",
-                    blockReason = inferCoreDomainReason(coreDomain)
-                )
+                ownerIndex[coreDomain] = when (inferCoreDomainReason(coreDomain)) {
+                    AdBlockReason.TELEMETRY -> coreTelemetryIndex
+                    AdBlockReason.TRACKER -> coreTrackerIndex
+                    else -> coreAdsIndex
+                }
             }
         }
         val exceptions = HashSet<String>(256)
+        var truncatedListCount = 0
 
         for (list in enabledLists) {
             if (!list.isEnabled) continue
@@ -926,12 +1013,19 @@ object AdBlockFilterEngine {
                 else -> null
             } ?: continue
 
-            val listReason = blockReasonForList(list.id, list.category)
+            if (blocked.size >= budget) {
+                truncatedListCount++
+                continue
+            }
+
             val meta = AdRuleMatchMeta(
                 listId = list.id,
                 listTitle = list.title,
-                blockReason = listReason
+                blockReason = blockReasonForList(list.id, list.category)
             )
+            val trackOwner = ownerMeta.size < MAX_TRACKED_LISTS
+            val metaIndex = if (trackOwner) ownerMeta.size.toByte() else null
+            if (trackOwner) ownerMeta.add(meta)
 
             runCatching {
                 val inputStream = if (useGzip) {
@@ -940,16 +1034,17 @@ object AdBlockFilterEngine {
                     FileInputStream(targetFile)
                 }
                 BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8), 16_384).useLines { lines ->
-                    lines.forEach { raw ->
+                    for (raw in lines) {
                         val line = raw.trim()
-                        if (line.isEmpty()) return@forEach
+                        if (line.isEmpty()) continue
                         if (line.startsWith("@@")) {
                             val ex = line.removePrefix("@@")
                             if (ex.isNotEmpty()) exceptions.add(ex)
                         } else {
                             rawEntriesCount++
-                            if (blocked.add(line)) {
-                                domainMeta[line] = meta
+                            if (blocked.size >= budget) break
+                            if (blocked.add(line) && metaIndex != null) {
+                                ownerIndex[line] = metaIndex
                             }
                         }
                     }
@@ -962,9 +1057,12 @@ object AdBlockFilterEngine {
         val snapshot = AdBlockMatcherSnapshot(
             blockedDomains = blocked,
             exceptionDomains = exceptions,
-            domainMeta = domainMeta,
+            domainMeta = emptyMap(),
             duplicatesRemovedCount = duplicatesRemoved,
-            buildDurationMs = buildDurationMs
+            buildDurationMs = buildDurationMs,
+            ownerListIndex = ownerIndex,
+            ownerListMeta = ownerMeta,
+            truncatedListCount = truncatedListCount
         )
         cachedMatcherRef.set(snapshot)
         val compressedBytes = getCompressedCacheBytes(context, enabledLists)

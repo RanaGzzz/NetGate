@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 object VpnGuardManager {
 
@@ -76,7 +77,11 @@ object VpnGuardManager {
         override fun getName(): String = "netgate_vpn_guard"
 
         override fun onStateChange(newState: Tunnel.State) {
-            if (activeProtocol == VpnGuardProtocol.OPENVPN && newState == Tunnel.State.DOWN) {
+            // While OpenVPN owns the VPN slot, WireGuard's backend still emits its own DOWN/TOGGLE
+            // events (we push it DOWN before every switch). Those used to be applied to the shared
+            // runtime state, marking a healthy OpenVPN session as DISCONNECTED and stopping its
+            // status service, so the Wi-Fi/VPN indicators kept vanishing after switching endpoints.
+            if (activeProtocol == VpnGuardProtocol.OPENVPN) {
                 return
             }
             val mapped = when (newState) {
@@ -142,7 +147,30 @@ object VpnGuardManager {
         }.toSet()
     }
 
+    /**
+     * Prevents overlapping connect requests (tapping WARP and then an OpenVPN profile). Requests used
+     * to queue on [stateMutex], so each one tore the fresh tunnel back down and rebuilt it, which
+     * looked like a crash/hang and made the system network icons flicker.
+     */
+    private val connectRequestGuard = java.util.concurrent.atomic.AtomicBoolean(false)
+
     suspend fun connect(
+        context: Context,
+        profile: VpnGuardProfile
+    ): Result<Unit> {
+        if (!connectRequestGuard.compareAndSet(false, true)) {
+            return Result.failure(
+                IllegalStateException("A VPN connection change is already running — please wait a moment")
+            )
+        }
+        return try {
+            connectInternal(context, profile)
+        } finally {
+            connectRequestGuard.set(false)
+        }
+    }
+
+    private suspend fun connectInternal(
         context: Context,
         profile: VpnGuardProfile
     ): Result<Unit> = withContext(Dispatchers.IO) {
@@ -261,7 +289,8 @@ object VpnGuardManager {
         )
         val wgConfig = WireGuardConfigHelper.buildWireGuardConfig(runtimeProfile).getOrThrow()
 
-        val transition = coordinator.connectTunnel(
+        val transition = withTimeoutOrNull(TRANSITION_TIMEOUT_MS) {
+            coordinator.connectTunnel(
             ports = sessionPorts(
                 appContext = appContext,
                 activateTunnel = {
@@ -295,6 +324,9 @@ object VpnGuardManager {
                 }
             ),
             permissionGranted = VpnService.prepare(appContext) == null
+            )
+        } ?: throw IllegalStateException(
+            "Switching to WireGuard timed out after ${TRANSITION_TIMEOUT_MS} ms — the previous VPN endpoint did not release the slot"
         )
 
         when (transition) {
@@ -340,7 +372,8 @@ object VpnGuardManager {
             }
         }
 
-        val transition = coordinator.connectTunnel(
+        val transition = withTimeoutOrNull(TRANSITION_TIMEOUT_MS) {
+            coordinator.connectTunnel(
             ports = sessionPorts(
                 appContext = appContext,
                 activateTunnel = {
@@ -376,6 +409,9 @@ object VpnGuardManager {
                 }
             ),
             permissionGranted = VpnService.prepare(appContext) == null
+            )
+        } ?: throw IllegalStateException(
+            "Switching to OpenVPN timed out after ${TRANSITION_TIMEOUT_MS} ms — the previous VPN endpoint did not release the slot"
         )
 
         when (transition) {
@@ -403,9 +439,15 @@ object VpnGuardManager {
 
             intentionalDisconnect = true
             val transition = try {
-                coordinator.disconnectTunnel(
-                    ports = sessionPorts(appContext),
-                    restoreFirewallRequested = restoreFirewallIfPaused
+                withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
+                    coordinator.disconnectTunnel(
+                        ports = sessionPorts(appContext),
+                        restoreFirewallRequested = restoreFirewallIfPaused
+                    )
+                } ?: VpnTransitionResult.Failed(
+                    stage = VpnTransitionResult.Stage.TUNNEL_STOP,
+                    message = "The VPN tunnel did not stop within $DISCONNECT_TIMEOUT_MS ms",
+                    timedOut = true
                 )
             } finally {
                 intentionalDisconnect = false
@@ -553,4 +595,7 @@ object VpnGuardManager {
         statsJob?.cancel()
         statsJob = null
     }
+
+    private const val TRANSITION_TIMEOUT_MS = 45_000L
+    private const val DISCONNECT_TIMEOUT_MS = 20_000L
 }

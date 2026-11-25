@@ -211,6 +211,13 @@ object TunnelWatchdog {
 
     private suspend fun reconnectAfterNetworkSwitch(context: Context) {
         val profile = VpnGuardManager.lastProfile ?: return
+        // A user-initiated switch (WARP <-> OpenVPN) already owns the VPN slot; tearing it down from
+        // here as well used to race with that switch and could leave no tunnel (or two).
+        if (com.aistudio.netgate.service.session.VpnSessionCoordinator.instance
+                .state.value.transitionInFlight
+        ) {
+            return
+        }
         VpnGuardManager.disconnect(context, restoreFirewallIfPaused = false)
         delay(1_000L)
         VpnGuardManager.connect(context, profile)

@@ -541,11 +541,14 @@ class FirewallRepository(
             profile = profile,
             availableListIds = allLists.map { it.id }
         )
-        for (list in allLists) {
-            val shouldEnable = list.id in enabledIds
-            if (list.isEnabled != shouldEnable) {
-                adFilterListDao.setListEnabled(list.id, shouldEnable)
-            }
+        // Write the whole selection in one batch. Toggling 20+ rows one by one emitted a Room
+        // invalidation per row and recomposed the dashboard once per list, which is what made
+        // picking a Smart Protection profile feel like the app was hanging.
+        val changed = allLists
+            .filter { it.isEnabled != (it.id in enabledIds) }
+            .map { it.copy(isEnabled = it.id in enabledIds) }
+        if (changed.isNotEmpty()) {
+            adFilterListDao.upsertFilterLists(changed)
         }
         val updatedLists = adFilterListDao.getAllFilterListsOnce()
         AdBlockFilterEngine.buildMatcherSnapshotAsync(context, updatedLists)
@@ -650,6 +653,40 @@ class FirewallRepository(
 
     fun detectCurrentNetworkType(): ActiveNetworkType {
         return detectConnectionDetails().activeNetworkType
+    }
+
+    /**
+     * Last capture where a physical network was actually connected. Used while a VPN owns the
+     * active network, because some devices stop reporting the underlying Wi-Fi/cellular network
+     * for a moment; without this the Wi-Fi and Data chips in the UI flipped to "OFF" and the
+     * Wi-Fi icons kept disappearing while switching WARP/OpenVPN profiles.
+     */
+    @Volatile
+    private var lastStableConnectionDetails: ConnectionDetails? = null
+
+    private fun stabilizeConnectionDetails(
+        details: ConnectionDetails,
+        isWifiRadioOn: Boolean,
+        isMobileDataSettingOn: Boolean
+    ): ConnectionDetails {
+        if (details.activeNetworkType != ActiveNetworkType.NONE) {
+            lastStableConnectionDetails = details
+            return details
+        }
+        val vpnActive = runCatching {
+            com.aistudio.netgate.data.network.NetworkSnapshotProvider.shared
+                .snapshot(context)
+                .isVpnActive
+        }.getOrDefault(false)
+        if (!vpnActive) {
+            lastStableConnectionDetails = null
+            return details
+        }
+        val previous = lastStableConnectionDetails ?: return details
+        return previous.copy(
+            isWifiRadioEnabled = isWifiRadioOn || previous.isWifiRadioEnabled,
+            isMobileDataEnabled = isMobileDataSettingOn || previous.isMobileDataEnabled
+        )
     }
 
     fun detectConnectionDetails(): ConnectionDetails {
@@ -823,35 +860,39 @@ class FirewallRepository(
         val resolvedPrivateDnsHost = privateDnsServer
             ?: privateDnsSpecifier?.takeIf { privateDnsMode == "hostname" && it.isNotBlank() }
 
-        return ConnectionDetails(
-            activeNetworkType = activeType,
-            isWifiRadioEnabled = isWifiRadioOn || wifiNetwork != null,
-            isWifiConnected = wifiNetwork != null,
-            isMobileDataEnabled = isMobileDataSettingOn || cellNetwork != null,
-            isMobileDataConnected = cellNetwork != null,
-            interfaceName = linkProps?.interfaceName,
-            ipv4Address = ipv4,
-            ipv6Address = ipv6,
-            gatewayAddress = gateway,
-            dnsServers = dnsServers,
-            isMetered = primaryCaps?.let { !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } ?: false,
-            isValidated = primaryCaps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ?: false,
-            downstreamKbps = primaryCaps?.linkDownstreamBandwidthKbps ?: 0,
-            upstreamKbps = primaryCaps?.linkUpstreamBandwidthKbps ?: 0,
-            isPrivateDnsActive = privateDnsActive || (privateDnsMode == "hostname" && !resolvedPrivateDnsHost.isNullOrBlank()),
-            privateDnsHostname = resolvedPrivateDnsHost,
-            privateDnsMode = privateDnsMode,
-            wifiSsid = cleanSsid,
-            wifiBssid = cleanBssid,
-            wifiRssiDbm = rssi,
-            wifiSignalLabel = signalLabel,
-            wifiLinkSpeedMbps = linkSpeed,
-            wifiRxLinkSpeedMbps = rxLinkSpeed,
-            wifiFrequencyMhz = freq,
-            wifiChannel = channel,
-            wifiBandLabel = bandLabel,
-            wifiStandardLabel = wifiStandardLabel,
-            wifiSecurityLabel = securityLabel
+        return stabilizeConnectionDetails(
+            ConnectionDetails(
+                activeNetworkType = activeType,
+                isWifiRadioEnabled = isWifiRadioOn || wifiNetwork != null,
+                isWifiConnected = wifiNetwork != null,
+                isMobileDataEnabled = isMobileDataSettingOn || cellNetwork != null,
+                isMobileDataConnected = cellNetwork != null,
+                interfaceName = linkProps?.interfaceName,
+                ipv4Address = ipv4,
+                ipv6Address = ipv6,
+                gatewayAddress = gateway,
+                dnsServers = dnsServers,
+                isMetered = primaryCaps?.let { !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } ?: false,
+                isValidated = primaryCaps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ?: false,
+                downstreamKbps = primaryCaps?.linkDownstreamBandwidthKbps ?: 0,
+                upstreamKbps = primaryCaps?.linkUpstreamBandwidthKbps ?: 0,
+                isPrivateDnsActive = privateDnsActive || (privateDnsMode == "hostname" && !resolvedPrivateDnsHost.isNullOrBlank()),
+                privateDnsHostname = resolvedPrivateDnsHost,
+                privateDnsMode = privateDnsMode,
+                wifiSsid = cleanSsid,
+                wifiBssid = cleanBssid,
+                wifiRssiDbm = rssi,
+                wifiSignalLabel = signalLabel,
+                wifiLinkSpeedMbps = linkSpeed,
+                wifiRxLinkSpeedMbps = rxLinkSpeed,
+                wifiFrequencyMhz = freq,
+                wifiChannel = channel,
+                wifiBandLabel = bandLabel,
+                wifiStandardLabel = wifiStandardLabel,
+                wifiSecurityLabel = securityLabel
+            ),
+            isWifiRadioOn = isWifiRadioOn,
+            isMobileDataSettingOn = isMobileDataSettingOn
         )
     }
 

@@ -801,7 +801,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         repository.websiteRulesFlow,
         repository.adFilterListsFlow,
         isSyncingAdListsFlow,
-        AdBlockAnalyticsHub.summaryFlow,
+        AdBlockAnalyticsHub.uiSummaryFlow,
         AdBlockFilterEngine.perfStatsFlow
     ) { websiteRules, adLists, isSyncingAds, analytics, perfStats ->
         WebAndAdSnapshot(websiteRules, adLists, isSyncingAds, analytics, perfStats)
@@ -1006,8 +1006,18 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         initialValue = FirewallUiState()
     )
 
+    /** Collapses bursts of connectivity callbacks into one background detection at a time. */
+    private val connectionRefreshPending = java.util.concurrent.atomic.AtomicBoolean(false)
+
     fun refreshConnectionDetails() {
-        connectionDetailsFlow.value = repository.detectConnectionDetails()
+        if (!connectionRefreshPending.compareAndSet(false, true)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                connectionDetailsFlow.value = repository.detectConnectionDetails()
+            } finally {
+                connectionRefreshPending.set(false)
+            }
+        }
     }
 
     fun refreshInstalledApps() {
@@ -1786,7 +1796,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun startSpeedTest() {
         refreshConnectionDetails()
-        val netType = connectionDetailsFlow.value.activeNetworkType
+        val netType = repository.detectCurrentNetworkType()
         val netLabel = when (netType) {
             ActiveNetworkType.WIFI -> "Wi-Fi"
             ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
@@ -1813,7 +1823,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun startVideoPlaybackTest() {
         refreshConnectionDetails()
-        val netType = connectionDetailsFlow.value.activeNetworkType
+        val netType = repository.detectCurrentNetworkType()
         val netLabel = when (netType) {
             ActiveNetworkType.WIFI -> "Wi-Fi"
             ActiveNetworkType.MOBILE_DATA -> "Mobile Data"
