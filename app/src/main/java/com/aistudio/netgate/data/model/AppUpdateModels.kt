@@ -56,6 +56,19 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.3",
+            subtitle = "In-App Crash Logs and Filter Memory Budget Visibility",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Troubleshooting",
+                    bullets = listOf(
+                        "Crashes are saved inside the app with their stack trace, cause, version and device details, ready to read or copy from Settings → Diagnostics & Crash Logs.",
+                        "The ad-block dashboard reports how many enabled filter lists the memory budget skipped, so a missing block can be explained."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9.2",
             subtitle = "Startup Stability and Update Preferences",
             sections = listOf(

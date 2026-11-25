@@ -1,3 +1,9 @@
+# What's New — NetGate 3.9.3
+
+### Troubleshooting
+- **In-app crash logs:** if NetGate crashes, the exception, stack trace, cause, app version and device details are now saved to the app. Open Settings → Diagnostics & Crash Logs and tap any "App crash" entry to read it or copy it, so a crash can be reported and fixed instead of only appearing in logcat. The five most recent crashes are kept, and clearing the logs deletes them.
+- **Filter memory budget is visible:** the ad-block dashboard now shows "Memory budget: N lists skipped" when the device heap limit was reached and some enabled filter lists could not be loaded, so a missing block can be explained instead of looking like a broken list.
+
 # What's New — NetGate 3.9.2
 
 ### Stability
