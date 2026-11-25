@@ -39,6 +39,13 @@ class LocalFilteringProxyServer(
     private val isClientBlocked: (Socket) -> Boolean = { false },
     private val clientBlockReason: (clientIp: String) -> String? = { null },
     private val evaluateRequest: (host: String, pathAndQuery: String?) -> ProxyFilterDecision,
+    /** Optional per-client policy hook (hotspot per-device profiles). */
+    private val evaluateRequestForClient:
+        ((clientIp: String, host: String, pathAndQuery: String?) -> ProxyFilterDecision)? = null,
+    /** Per-client bandwidth cap in bytes/second; 0 means unlimited. */
+    private val clientThrottleBytesPerSec: (clientIp: String) -> Long = { 0L },
+    /** Serves the hotspot proxy auto-config file when the client asks for /proxy.pac. */
+    private val pacFileProvider: ((localAddress: String) -> String)? = null,
     private val resolveTargetHost: (host: String) -> String = { it },
     private val resolveTargetAddresses: (host: String) -> List<InetAddress> = { host ->
         defaultResolveAddressesIpv4First(host)
@@ -234,7 +241,7 @@ class LocalFilteringProxyServer(
             return
         }
 
-        val initialDecision = evaluateRequest(host, null)
+        val initialDecision = decisionFor(clientIp, host, null)
         if (!initialDecision.allow) {
             onRequestLogged(host, initialDecision)
             onTrafficRelayed(host, targetPort, "HTTPS", null, authority.length.toLong(), 0L, initialDecision)
@@ -281,7 +288,7 @@ class LocalFilteringProxyServer(
                 val isClientHello = isTlsClientHello(initialPayload, peekLen)
                 val sniHost = if (isClientHello) extractTlsSniHostname(initialPayload, peekLen) else null
                 if (!sniHost.isNullOrEmpty() && !sniHost.equals(host, ignoreCase = true)) {
-                    val sniDecision = evaluateRequest(sniHost, null)
+                    val sniDecision = decisionFor(clientIp, sniHost, null)
                     if (!sniDecision.allow) {
                         onRequestLogged(sniHost, sniDecision)
                         onTrafficRelayed(sniHost, targetPort, "HTTPS", remoteIp, peekLen.toLong(), 0L, sniDecision)
@@ -609,6 +616,28 @@ class LocalFilteringProxyServer(
         }
     }
 
+    private fun decisionFor(
+        clientIp: String,
+        host: String,
+        pathAndQuery: String?
+    ): ProxyFilterDecision =
+        evaluateRequestForClient?.invoke(clientIp, host, pathAndQuery)
+            ?: evaluateRequest(host, pathAndQuery)
+
+    private fun writePacResponse(out: OutputStream, body: String) {
+        val bodyBytes = body.toByteArray(Charsets.UTF_8)
+        val header = "HTTP/1.1 200 OK\r\n" +
+            "Content-Type: application/x-ns-proxy-autoconfig\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "Content-Length: ${bodyBytes.size}\r\n" +
+            "Connection: close\r\n\r\n"
+        runCatching {
+            out.write(header.toByteArray(Charsets.ISO_8859_1))
+            out.write(bodyBytes)
+            out.flush()
+        }
+    }
+
     private fun resolveCandidateAddresses(host: String): List<InetAddress> {
         val fromProvider = runCatching { resolveTargetAddresses(host) }.getOrNull().orEmpty()
         if (fromProvider.isNotEmpty()) {
@@ -663,7 +692,17 @@ class LocalFilteringProxyServer(
             return
         }
 
-        val decision = evaluateRequest(host, pathAndQuery)
+        val pacProvider = pacFileProvider
+        if (pacProvider != null && method.equals("GET", ignoreCase = true) &&
+            target.substringBefore('?').trimEnd('/').endsWith("/proxy.pac")
+        ) {
+            val localIp = client.localAddress?.hostAddress.orEmpty()
+            writePacResponse(clientOut, pacProvider.invoke(localIp))
+            runCatching { client.close() }
+            return
+        }
+
+        val decision = decisionFor(clientIp, host, pathAndQuery)
         onRequestLogged(host, decision)
         if (!decision.allow) {
             onTrafficRelayed(host, targetPort, "HTTP", null, cleanedTarget.length.toLong(), 0L, decision)
@@ -761,6 +800,9 @@ class LocalFilteringProxyServer(
         val sentCounter = AtomicLong(initialBytesSent)
         val recvCounter = AtomicLong(initialBytesReceived)
         val abortedByPolicy = AtomicBoolean(false)
+        val throttleBytesPerSec = runCatching { clientThrottleBytesPerSec(clientIp) }
+            .getOrDefault(0L)
+            .coerceAtLeast(0L)
         val relayDoneLatch = CountDownLatch(2)
 
         fun enforceClientQuotaOrBan(): Boolean {
@@ -788,7 +830,7 @@ class LocalFilteringProxyServer(
 
         workerExecutor?.execute {
             try {
-                copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy) { chunkBytes ->
+                copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy, throttleBytesPerSec) { chunkBytes ->
                     val pending = sentCounter.addAndGet(chunkBytes)
                     if (pending >= 32_768L) {
                         val flushed = sentCounter.getAndSet(0L)
@@ -809,7 +851,7 @@ class LocalFilteringProxyServer(
 
         workerExecutor?.execute {
             try {
-                copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy) { chunkBytes ->
+                copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy, throttleBytesPerSec) { chunkBytes ->
                     val pending = recvCounter.addAndGet(chunkBytes)
                     if (pending >= 32_768L) {
                         val flushed = recvCounter.getAndSet(0L)
@@ -852,9 +894,12 @@ class LocalFilteringProxyServer(
         input: InputStream,
         output: OutputStream,
         aborted: AtomicBoolean,
+        bytesPerSec: Long = 0L,
         onBytes: (Long) -> Unit
     ) {
         val buf = ByteArray(16_384)
+        val startedAt = System.currentTimeMillis()
+        var totalBytes = 0L
         try {
             while (running.get() && !aborted.get()) {
                 val read = input.read(buf)
@@ -862,7 +907,17 @@ class LocalFilteringProxyServer(
                 output.write(buf, 0, read)
                 output.flush()
                 if (read > 0) {
+                    totalBytes += read
                     onBytes(read.toLong())
+                    // Token-bucket style pacing for the per-device speed limiter.
+                    if (bytesPerSec > 0L) {
+                        val expectedMs = (totalBytes * 1000L) / bytesPerSec
+                        val elapsedMs = System.currentTimeMillis() - startedAt
+                        val sleepMs = (expectedMs - elapsedMs).coerceIn(0L, 250L)
+                        if (sleepMs > 0L) {
+                            runCatching { Thread.sleep(sleepMs) }
+                        }
+                    }
                 }
             }
         } catch (_: Exception) {

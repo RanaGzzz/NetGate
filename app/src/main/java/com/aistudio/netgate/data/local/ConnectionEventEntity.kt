@@ -27,6 +27,8 @@ data class ConnectionEventEntity(
     val bytesSent: Long,
     val bytesReceived: Long,
     val actionStatus: String,
+    val isAdBlocked: Boolean = false,
+    val dpiBypassed: Boolean = false,
     val riskLevel: String,
     val riskReason: String,
     val hitCount: Int,

@@ -37,6 +37,7 @@ import com.aistudio.netgate.service.BackgroundPowerHelper
 import com.aistudio.netgate.service.NetGateVpnService
 import com.aistudio.netgate.service.NetworkMonitorService
 import com.aistudio.netgate.service.SystemNetworkMonitor
+import com.aistudio.netgate.service.vpn.TunnelWatchdog
 import com.aistudio.netgate.ui.FirewallScreen
 import com.aistudio.netgate.ui.FirewallViewModel
 import com.aistudio.netgate.ui.components.GlassToastHost
@@ -52,6 +53,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Keep the kill switch, auto-reconnect and trusted Wi-Fi automation alive for the whole app.
+        TunnelWatchdog.ensureStarted(applicationContext)
         pendingDestination = parseDestinationExtra(intent)
         pendingVpnConsentRequest = intent?.getBooleanExtra(EXTRA_REQUEST_VPN_CONSENT, false) == true
 

@@ -14,6 +14,9 @@ interface VpnGuardProfileDao {
     @Query("SELECT * FROM vpn_guard_profiles WHERE id = :id LIMIT 1")
     suspend fun getProfileById(id: String): VpnGuardProfileEntity?
 
+    @Query("SELECT * FROM vpn_guard_profiles ORDER BY lastConnectedAt DESC, createdAt DESC")
+    suspend fun getAllProfilesOnce(): List<VpnGuardProfileEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProfile(profile: VpnGuardProfileEntity)
 

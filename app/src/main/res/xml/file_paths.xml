@@ -3,4 +3,7 @@
     <cache-path
         name="exported_configs"
         path="vpn_configs/" />
+    <cache-path
+        name="update_apks"
+        path="updates/" />
 </paths>

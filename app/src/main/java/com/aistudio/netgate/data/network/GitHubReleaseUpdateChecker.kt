@@ -13,7 +13,8 @@ import java.net.URL
 data class GitHubUpdateCheckResult(
     val latestRelease: GitHubReleaseInfo,
     val recentReleases: List<GitHubReleaseInfo>,
-    val isUpdateAvailable: Boolean
+    val isUpdateAvailable: Boolean,
+    val latestVersionCode: Int = 0
 )
 
 object GitHubReleaseUpdateChecker {
@@ -61,7 +62,8 @@ object GitHubReleaseUpdateChecker {
             GitHubUpdateCheckResult(
                 latestRelease = latestRelease,
                 recentReleases = mergedRecent,
-                isUpdateAvailable = updateAvailable
+                isUpdateAvailable = updateAvailable,
+                latestVersionCode = 0
             )
         }
     }
@@ -123,6 +125,7 @@ object GitHubReleaseUpdateChecker {
             title = title,
             body = body,
             publishedAt = formatPublishedDate(publishedAt),
+            publishedAtIso = publishedAt,
             htmlUrl = htmlUrl,
             apkDownloadUrl = apkDownloadUrl,
             apkName = apkName,

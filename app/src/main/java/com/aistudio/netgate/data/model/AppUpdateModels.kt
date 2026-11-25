@@ -14,6 +14,7 @@ data class GitHubReleaseInfo(
     val title: String,
     val body: String,
     val publishedAt: String,
+    val publishedAtIso: String = "",
     val htmlUrl: String,
     val apkDownloadUrl: String? = null,
     val apkName: String? = null,
@@ -31,7 +32,12 @@ data class AppUpdateUiState(
     val latestRelease: GitHubReleaseInfo? = null,
     val recentReleases: List<GitHubReleaseInfo> = emptyList(),
     val lastCheckedAtMs: Long = 0L,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val otaBuild: OtaBuildInfo? = null,
+    val otaReason: String = "",
+    val isDownloadingUpdate: Boolean = false,
+    val downloadProgress: Int = 0,
+    val canInstallDirectly: Boolean = false
 )
 
 data class ChangelogSection(
@@ -49,6 +55,33 @@ data class ChangelogEntry(
 
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            versionLabel = "NetGate 3.7",
+            subtitle = "Kill Switch, Encrypted Backup, Hotspot Controls & OTA Updates",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Protection & Reliability",
+                    bullets = listOf(
+                        "VPN kill switch blocks traffic while a tunnel recovers, and auto-reconnect retries the last profile after drops and Wi-Fi ↔ mobile handovers.",
+                        "Trusted Wi-Fi auto-VPN connects the last VPN Guard profile on unknown SSIDs, with Android 16/17 battery-saver and background guidance."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Monitoring & Hotspot",
+                    bullets = listOf(
+                        "Live app-to-domain inspector tags each connection with its app and adds 1-tap Block App / Allow App rules.",
+                        "Hotspot PAC file + QR setup, active-tunnel sharing, per-device filtering profiles, speed limits, data caps and new-device approval."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Backup & Updates",
+                    bullets = listOf(
+                        "Encrypted AES-256 backup and restore for rules, site lists, DNS settings and VPN profiles.",
+                        "In-app OTA updates with manifest and GitHub Releases fallback, direct APK install, and rebuilt-APK detection for the same version."
+                    )
+                )
+            )
+        ),
         ChangelogEntry(
             versionLabel = "NetGate 3.6",
             subtitle = "Android Compatibility, Build Identity & Smaller Downloads",

@@ -6,17 +6,27 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import com.aistudio.netgate.data.local.AdvancedPreferences
 import com.aistudio.netgate.data.local.WebsiteRuleEntity
+import com.aistudio.netgate.data.local.WebsiteRuleType
+import com.aistudio.netgate.data.model.AdvancedPreferencesState
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.HotspotClientInfo
+import com.aistudio.netgate.data.model.HotspotFilterProfile
+import com.aistudio.netgate.data.model.HotspotKidsGuard
 import com.aistudio.netgate.data.model.HotspotProxyRuntimeState
 import com.aistudio.netgate.service.proxy.ProxyConfiguration
 import com.aistudio.netgate.service.proxy.ProxyCoordinator
 import com.aistudio.netgate.service.proxy.ProxyRole
 import com.aistudio.netgate.service.proxy.ProxyStartResult
+import com.aistudio.netgate.service.hotspot.HotspotPacFile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.ConcurrentHashMap
@@ -85,6 +95,17 @@ object HotspotProxyManager {
 
     private val policyBundle = java.util.concurrent.atomic.AtomicReference(HotspotPolicyBundle())
 
+    private val alertScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val alertedPendingIps = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    @Volatile
+    private var advancedState: AdvancedPreferencesState = AdvancedPreferencesState()
+
+    fun updateAdvancedPreferences(state: AdvancedPreferencesState) {
+        advancedState = state
+        publishSnapshot()
+    }
+
     private val _runtimeState = MutableStateFlow(HotspotProxyRuntimeState())
     val runtimeState: StateFlow<HotspotProxyRuntimeState> = _runtimeState.asStateFlow()
 
@@ -142,8 +163,19 @@ object HotspotProxyManager {
                     bindHost = config.bindHost,
                     stripTrackingParams = config.stripTrackingParams,
                     protectSocket = { true },
-                    clientBlockReason = ::evaluateClientBlock,
-                    evaluateRequest = ::evaluateRequestForHotspot,
+                    clientBlockReason = { clientIp -> evaluateClientBlock(clientIp, context) },
+                    evaluateRequest = { host, path -> evaluateRequestForHotspot("", host, path) },
+                    evaluateRequestForClient = { clientIp, host, path ->
+                        evaluateRequestForHotspot(clientIp, host, path)
+                    },
+                    clientThrottleBytesPerSec = { clientIp ->
+                        advancedState.hotspotClientSpeedLimits[clientIp.trim()] ?: 0L
+                    },
+                    pacFileProvider = { localIp ->
+                        val port = ProxyCoordinator.instance.boundPort(ProxyRole.HOTSPOT)
+                            ?: prefs.hotspotProxyPort
+                        HotspotPacFile.build(localIp, port)
+                    },
                     resolveTargetHost = ::resolveTargetHostForHotspot,
                     upstreamProxyProvider = ::provideUpstreamProxy,
                     onRequestLogged = { _, _ -> },
@@ -224,14 +256,30 @@ object HotspotProxyManager {
             totalRelayedSentBytes = totalSentCounter.get(),
             totalRelayedRecvBytes = totalRecvCounter.get(),
             osTetheringBytes = osTetheringBytes,
+            shareTunnelThroughNetGate = advancedState.hotspotShareActiveTunnel,
+            requireClientApproval = advancedState.hotspotRequireApproval,
             clients = clients,
             errorMessage = if (isRunning) null else _runtimeState.value.errorMessage
         )
     }
 
-    private fun evaluateClientBlock(clientIp: String): String? {
+    private fun evaluateClientBlock(clientIp: String, context: Context? = null): String? {
         val cleanIp = clientIp.trim()
         if (cleanIp.isEmpty()) return null
+
+        if (advancedState.hotspotRequireApproval &&
+            cleanIp !in advancedState.hotspotApprovedClientIps
+        ) {
+            if (context != null && alertedPendingIps.add(cleanIp)) {
+                val lastHost = clientStatsMap[cleanIp]?.lastHost.orEmpty()
+                HotspotApprovalNotifier.notifyNewClient(context, cleanIp, lastHost)
+                alertScope.launch {
+                    runCatching { AdvancedPreferences(context).markHotspotClientPending(cleanIp) }
+                }
+            }
+            return "Waiting for approval on NetGate"
+        }
+
         val stats = clientStatsMap[cleanIp]
         val sent = stats?.bytesSent?.get() ?: 0L
         val recv = stats?.bytesReceived?.get() ?: 0L
@@ -243,16 +291,56 @@ object HotspotProxyManager {
         )
     }
 
-    private fun evaluateRequestForHotspot(host: String, pathAndQuery: String?): ProxyFilterDecision {
+    private fun evaluateRequestForHotspot(
+        clientIp: String,
+        host: String,
+        pathAndQuery: String?
+    ): ProxyFilterDecision {
+        val bundle = policyBundle.get()
         val context = com.aistudio.netgate.service.policy.PolicyContext.forHotspot(
-            clientIp = "",
+            clientIp = clientIp,
             pathAndQuery = pathAndQuery
         )
-        return com.aistudio.netgate.service.policy.NetworkPolicyEngine.evaluate(
+        val base = com.aistudio.netgate.service.policy.NetworkPolicyEngine.evaluate(
             rawDomain = host,
             context = context,
-            policy = policyBundle.get().policy
+            policy = bundle.policy
         ).toProxyFilterDecision()
+
+        val profile = advancedState.hotspotClientProfiles[clientIp.trim()]
+            ?: HotspotFilterProfile.STANDARD
+        return when (profile) {
+            HotspotFilterProfile.STANDARD -> base
+            HotspotFilterProfile.KIDS ->
+                if (base.allow && HotspotKidsGuard.isBlocked(host)) {
+                    ProxyFilterDecision(
+                        allow = false,
+                        reason = "Kids profile: adult, gambling or tracker domain blocked",
+                        isAdBlock = true
+                    )
+                } else {
+                    base
+                }
+            HotspotFilterProfile.STRICT ->
+                if (base.allow && !isAllowlisted(host, bundle.websiteRules)) {
+                    ProxyFilterDecision(
+                        allow = false,
+                        reason = "Strict profile: domain is not on the allowlist"
+                    )
+                } else {
+                    base
+                }
+        }
+    }
+
+    private fun isAllowlisted(host: String, rules: List<WebsiteRuleEntity>): Boolean {
+        val clean = host.trim().trimEnd('.').lowercase()
+        if (clean.isEmpty()) return false
+        return rules.any { rule ->
+            rule.isEnabled &&
+                rule.ruleType == WebsiteRuleType.ALLOW &&
+                (clean == rule.domain || clean.endsWith(".${rule.domain}"))
+        }
     }
 
     private fun resolveTargetHostForHotspot(host: String): String {
@@ -338,7 +426,12 @@ object HotspotProxyManager {
                 blockedCount = blkCount,
                 lastHost = host,
                 firstSeenAt = firstSeen,
-                lastSeenAt = lastSeen
+                lastSeenAt = lastSeen,
+                profile = advancedState.hotspotClientProfiles[ip]
+                    ?: HotspotFilterProfile.STANDARD,
+                speedLimitBytesPerSec = advancedState.hotspotClientSpeedLimits[ip] ?: 0L,
+                isPendingApproval = advancedState.hotspotRequireApproval &&
+                    ip !in advancedState.hotspotApprovedClientIps
             )
         }.sortedWith(
             compareByDescending<HotspotClientInfo> { it.totalBytes }

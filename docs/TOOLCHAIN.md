@@ -56,6 +56,41 @@ yes | sdkmanager --licenses
 # → app/build/outputs/apk/debug/app-<abi>-debug.apk
 ```
 
+## Baseline profile
+
+Release builds ship an ART **Baseline Profile** (and Startup Profile) so the first frames after launch do not wait for JIT warm-up. The setup has three parts:
+
+- `:app` applies the `androidx.baselineprofile` plugin and depends on the producer module via `"baselineProfile"(project(":baselineprofile"))`.
+- `:baselineprofile` is a `com.android.test` module that only drives `:app`; it contains no app code.
+- `androidx.profileinstaller` is a runtime dependency of `:app`, so the profile is installed on first launch, including API 24–30 and devices without Cloud profiles.
+
+Generate the profile on a connected emulator or device running **API 33+** (or a rooted device):
+
+```shell
+# Requires an attached device/emulator; boots the app and records a cold start
+./gradlew :app:generateBaselineProfile
+```
+
+The task writes the result to
+`app/src/release/generated/baselineProfiles/baseline-prof.txt` and
+`app/src/release/generated/baselineProfiles/startup-prof.txt`. **Commit those files** — they are
+source, not build output. Regenerate them when the startup journey changes materially (new
+screens on the launch path, a new startup service, a Compose upgrade).
+
+When you change the generator, edit
+`baselineprofile/src/main/java/com/aistudio/netgate/baselineprofile/NetGateBaselineProfileGenerator.kt`.
+Only paths that actually run during startup belong in the block marked with
+`includeInStartupProfile = true`; anything else makes the startup profile larger without helping launch.
+
+CI can regenerate the profile on demand: run the **Generate Baseline Profile** workflow
+(`.github/workflows/baseline-profile.yml`) from the Actions tab, download the `baseline-profile`
+artifact and commit the files it contains. The workflow boots an API 34 AOSP emulator and signs the
+non-minified release variant with the throwaway debug keystore, so it needs no release secrets.
+
+Because this is a performance change, measure before/after on a physical device (Android Studio's
+Startup Profiler, or macrobenchmark with `StartupTimingMetric`) rather than assuming the profile
+helped.
+
 ## Notes and known environment issues
 
 - **`google-services.json` is absent by design.** The Google Services plugin is configured with `MissingGoogleServicesStrategy.WARN`, so the build prints a warning and continues. Do not add Firebase config unless a feature needs it.

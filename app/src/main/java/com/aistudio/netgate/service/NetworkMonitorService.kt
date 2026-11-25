@@ -55,6 +55,7 @@ class NetworkMonitorService : Service() {
         preferences = FirewallPreferences(applicationContext)
         createNotificationChannel()
         observePreferences()
+        BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "speed-monitor")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -78,6 +79,7 @@ class NetworkMonitorService : Service() {
     override fun onDestroy() {
         monitorJob?.cancel()
         prefsJob?.cancel()
+        BackgroundPowerHelper.releaseServiceWakeLock("speed-monitor")
         SystemNetworkMonitor.flushToDisk(applicationContext)
         SystemNetworkMonitor.markServiceRunning(false)
         serviceScope.cancel()
@@ -110,6 +112,7 @@ class NetworkMonitorService : Service() {
         monitorJob = serviceScope.launch {
             while (isActive) {
                 delay(1000L)
+                BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "speed-monitor")
                 val telemetry = SystemNetworkMonitor.sampleNow(applicationContext)
                 if (latestPrefs.autoBlockWifiOnIdleEnabled) {
                     WifiAutomationManager.evaluateIdleSample(

@@ -20,8 +20,17 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aistudio.netgate.data.local.AdvancedPreferences
 import com.aistudio.netgate.data.local.FirewallPreferences
 import com.aistudio.netgate.data.local.NetGateDatabase
+import com.aistudio.netgate.data.model.AdvancedPreferencesState
+import com.aistudio.netgate.data.model.BackupUiState
+import com.aistudio.netgate.data.model.HotspotFilterProfile
+import com.aistudio.netgate.data.model.SplitTunnelPreset
+import com.aistudio.netgate.data.model.SplitTunnelPresets
+import com.aistudio.netgate.data.network.ApkDownloadInstaller
+import com.aistudio.netgate.data.network.OtaUpdateClient
+import com.aistudio.netgate.service.backup.EncryptedBackupManager
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.AdFilterListItem
 import com.aistudio.netgate.data.model.AppDestination
@@ -45,6 +54,7 @@ import com.aistudio.netgate.data.model.DnsQueryLogEntry
 import com.aistudio.netgate.data.model.DnsTransportMode
 import com.aistudio.netgate.data.model.DpiBypassMode
 import com.aistudio.netgate.data.model.FirewallPreferencesState
+import com.aistudio.netgate.data.model.GitHubReleaseInfo
 import com.aistudio.netgate.data.model.HistoricalUsageTotals
 import com.aistudio.netgate.data.model.HotspotProxyRuntimeState
 import com.aistudio.netgate.data.model.InstalledAppInfo
@@ -261,6 +271,8 @@ data class FirewallUiState(
 
 class FirewallViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val appContext: Application get() = getApplication()
+
     private val database = NetGateDatabase.getInstance(application)
     private val preferences = FirewallPreferences(application)
     private val repository = FirewallRepository(
@@ -327,6 +339,16 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             currentVersionCode = BuildConfig.VERSION_CODE
         )
     )
+    private val advancedPreferencesStore = AdvancedPreferences(application)
+    val advancedPreferences: StateFlow<AdvancedPreferencesState> =
+        advancedPreferencesStore.flow.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            AdvancedPreferencesState()
+        )
+    private val backupStateFlow = MutableStateFlow(BackupUiState())
+    val backupState: StateFlow<BackupUiState> = backupStateFlow
+
     private val isChangelogOpenFlow = MutableStateFlow(false)
     private val isVpnDpiLogsOpenFlow = MutableStateFlow(false)
     private val vpnDpiLogsInitialCategoryFlow = MutableStateFlow(VpnDpiLogCategory.ALL)
@@ -1203,6 +1225,28 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun quickBlockAppFromMonitor(packageName: String) {
+        viewModelScope.launch {
+            repository.setAppRule(
+                packageName = packageName,
+                blockWifi = true,
+                blockMobileData = true
+            )
+            _snackbarMessages.tryEmit("Blocked app on Wi-Fi and mobile data")
+        }
+    }
+
+    fun quickAllowAppFromMonitor(packageName: String) {
+        viewModelScope.launch {
+            repository.setAppRule(
+                packageName = packageName,
+                blockWifi = false,
+                blockMobileData = false
+            )
+            _snackbarMessages.tryEmit("App unblocked — rule removed")
+        }
+    }
+
     fun setAppRules(packageName: String, blockWifi: Boolean, blockMobileData: Boolean) {
         viewModelScope.launch {
             repository.setAppRule(
@@ -1340,28 +1384,47 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 status = AppUpdateStatus.CHECKING,
                 errorMessage = null
             )
-            val result = GitHubReleaseUpdateChecker.checkForUpdates(BuildConfig.VERSION_NAME)
             val now = System.currentTimeMillis()
-            result.onSuccess { checkResult ->
+            val manifestUrl = runCatching { advancedPreferencesStore.snapshot().otaManifestUrl }
+                .getOrDefault(OtaUpdateClient.DEFAULT_MANIFEST_URL)
+            val otaResult = OtaUpdateClient.check(
+                context = appContext,
+                manifestUrl = manifestUrl,
+                currentVersionName = BuildConfig.VERSION_NAME,
+                currentVersionCode = BuildConfig.VERSION_CODE
+            )
+            val github = runCatching {
+                GitHubReleaseUpdateChecker.checkForUpdates(BuildConfig.VERSION_NAME)
+            }.getOrNull()?.getOrNull()
+
+            otaResult.onSuccess { ota ->
+                val release = github?.latestRelease ?: GitHubReleaseInfo(
+                    tagName = "v${ota.build.versionName}",
+                    versionName = ota.build.versionName,
+                    title = "NetGate ${ota.build.versionName}",
+                    body = ota.build.notes,
+                    publishedAt = ota.build.publishedLabel,
+                    htmlUrl = ota.build.htmlUrl,
+                    apkDownloadUrl = ota.build.apkUrl.takeIf { it.isNotBlank() },
+                    apkName = ota.build.apkUrl.substringAfterLast('/').takeIf { it.isNotBlank() }
+                )
                 appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
-                    status = if (checkResult.isUpdateAvailable) {
+                    status = if (ota.isUpdateAvailable) {
                         AppUpdateStatus.UPDATE_AVAILABLE
                     } else {
                         AppUpdateStatus.UP_TO_DATE
                     },
-                    latestRelease = checkResult.latestRelease,
-                    recentReleases = checkResult.recentReleases,
+                    latestRelease = release,
+                    recentReleases = github?.recentReleases ?: emptyList(),
                     lastCheckedAtMs = now,
-                    errorMessage = null
+                    errorMessage = null,
+                    otaBuild = ota.build,
+                    otaReason = ota.reason,
+                    canInstallDirectly = ota.isUpdateAvailable && ota.build.apkUrl.isNotBlank()
                 )
-                val msg = if (checkResult.isUpdateAvailable) {
-                    "Update available: ${checkResult.latestRelease.tagName}"
-                } else {
-                    "NetGate v${BuildConfig.VERSION_NAME} is up to date (${checkResult.latestRelease.tagName})"
-                }
-                _snackbarMessages.tryEmit(msg)
+                _snackbarMessages.tryEmit(ota.reason)
             }.onFailure { err ->
-                val msg = err.message ?: "Unable to check GitHub Releases"
+                val msg = err.message ?: "Unable to check for updates"
                 appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
                     status = AppUpdateStatus.ERROR,
                     lastCheckedAtMs = now,
@@ -1370,6 +1433,179 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 _snackbarMessages.tryEmit(msg)
             }
         }
+    }
+
+    fun downloadAndInstallUpdate() {
+        val current = appUpdateStateFlow.value
+        val build = current.otaBuild
+        if (build == null) {
+            _snackbarMessages.tryEmit("Check for updates first")
+            return
+        }
+        if (build.apkUrl.isBlank()) {
+            _snackbarMessages.tryEmit("This update has no APK download link")
+            return
+        }
+        if (current.isDownloadingUpdate) return
+        viewModelScope.launch {
+            appUpdateStateFlow.value = current.copy(
+                isDownloadingUpdate = true,
+                downloadProgress = 0,
+                errorMessage = null
+            )
+            ApkDownloadInstaller.download(appContext, build.apkUrl, build.sha256) { progress ->
+                appUpdateStateFlow.value = appUpdateStateFlow.value.copy(downloadProgress = progress)
+            }.onSuccess { file ->
+                val install = ApkDownloadInstaller.install(appContext, file)
+                appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
+                    isDownloadingUpdate = false,
+                    downloadProgress = 100,
+                    errorMessage = install.exceptionOrNull()?.message
+                )
+                _snackbarMessages.tryEmit(
+                    if (install.isSuccess) {
+                        "Update downloaded — confirm the install prompt"
+                    } else {
+                        install.exceptionOrNull()?.message ?: "Could not start the install"
+                    }
+                )
+            }.onFailure { err ->
+                appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
+                    isDownloadingUpdate = false,
+                    errorMessage = err.message
+                )
+                _snackbarMessages.tryEmit(err.message ?: "Update download failed")
+            }
+        }
+    }
+
+    fun setKillSwitchEnabled(enabled: Boolean) {
+        viewModelScope.launch { advancedPreferencesStore.setKillSwitchEnabled(enabled) }
+    }
+
+    fun setAutoReconnectEnabled(enabled: Boolean) {
+        viewModelScope.launch { advancedPreferencesStore.setAutoReconnectEnabled(enabled) }
+    }
+
+    fun setAutoVpnOnUnknownWifi(enabled: Boolean) {
+        viewModelScope.launch { advancedPreferencesStore.setAutoVpnOnUnknownWifi(enabled) }
+    }
+
+    fun setWifiTrusted(ssid: String, trusted: Boolean) {
+        viewModelScope.launch { advancedPreferencesStore.setTrustedWifi(ssid, trusted) }
+    }
+
+    fun setHotspotShareActiveTunnel(enabled: Boolean) {
+        viewModelScope.launch {
+            advancedPreferencesStore.setHotspotShareActiveTunnel(enabled)
+            HotspotProxyManager.refreshEnvironment(appContext)
+        }
+    }
+
+    fun setHotspotRequireApproval(enabled: Boolean) {
+        viewModelScope.launch {
+            advancedPreferencesStore.setHotspotRequireApproval(enabled)
+            HotspotProxyManager.refreshEnvironment(appContext)
+        }
+    }
+
+    fun approveHotspotClient(clientIp: String) {
+        viewModelScope.launch {
+            advancedPreferencesStore.approveHotspotClient(clientIp)
+            preferences.setHotspotClientBlocked(clientIp, false)
+            HotspotProxyManager.refreshEnvironment(appContext)
+            _snackbarMessages.tryEmit("Device $clientIp approved")
+        }
+    }
+
+    fun blockHotspotClient(clientIp: String) {
+        viewModelScope.launch {
+            advancedPreferencesStore.revokeHotspotClient(clientIp)
+            preferences.setHotspotClientBlocked(clientIp, true)
+            HotspotProxyManager.refreshEnvironment(appContext)
+            _snackbarMessages.tryEmit("Device $clientIp blocked")
+        }
+    }
+
+    fun setHotspotClientProfile(clientIp: String, profile: HotspotFilterProfile) {
+        viewModelScope.launch {
+            advancedPreferencesStore.setHotspotClientProfile(clientIp, profile)
+            HotspotProxyManager.refreshEnvironment(appContext)
+        }
+    }
+
+    fun setHotspotClientSpeedLimit(clientIp: String, bytesPerSec: Long) {
+        viewModelScope.launch {
+            advancedPreferencesStore.setHotspotClientSpeedLimit(clientIp, bytesPerSec)
+            HotspotProxyManager.refreshEnvironment(appContext)
+        }
+    }
+
+    fun applySplitTunnelPreset(profileId: String, preset: SplitTunnelPreset) {
+        viewModelScope.launch {
+            val installed = runCatching {
+                repository.getInstalledApps().map { it.packageName }.toSet()
+            }.getOrDefault(emptySet())
+            val (mode, packages) = SplitTunnelPresets.resolve(preset, installed)
+            repository.updateVpnGuardRouting(profileId, mode, packages)
+            _snackbarMessages.tryEmit("${preset.title}: ${packages.size} app(s) in scope")
+        }
+    }
+
+    fun currentWifiSsid(): String? {
+        val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            ?: return null
+        val raw = runCatching { wifiManager.connectionInfo?.ssid }.getOrNull() ?: return null
+        val clean = raw.trim().removePrefix("\"").removeSuffix("\"")
+        if (clean.isEmpty() || clean.equals("<unknown ssid>", ignoreCase = true)) return null
+        return clean
+    }
+
+    fun exportEncryptedBackup(password: String) {
+        viewModelScope.launch {
+            backupStateFlow.value = BackupUiState(isWorking = true)
+            EncryptedBackupManager.export(appContext, password.toCharArray())
+                .onSuccess { payload ->
+                    backupStateFlow.value = BackupUiState(exportPayload = payload)
+                }
+                .onFailure { err ->
+                    backupStateFlow.value = BackupUiState(
+                        error = err.message ?: "Backup failed"
+                    )
+                }
+        }
+    }
+
+    fun importEncryptedBackup(payload: String, password: String) {
+        viewModelScope.launch {
+            backupStateFlow.value = BackupUiState(isWorking = true)
+            EncryptedBackupManager.import(appContext, payload, password.toCharArray())
+                .onSuccess { summary ->
+                    backupStateFlow.value = BackupUiState(
+                        message = "Restored ${summary.appRules} app rules, ${summary.websiteRules} site rules, " +
+                            "${summary.timers} timers, ${summary.vpnProfiles} VPN profiles and settings"
+                    )
+                    refreshInstalledApps()
+                }
+                .onFailure { err ->
+                    backupStateFlow.value = BackupUiState(
+                        error = err.message ?: "Restore failed"
+                    )
+                }
+        }
+    }
+
+    fun clearBackupState() {
+        backupStateFlow.value = BackupUiState()
+    }
+
+    fun setOtaManifestUrl(url: String) {
+        viewModelScope.launch { advancedPreferencesStore.setOtaManifestUrl(url) }
+    }
+
+    fun requestBatteryOptimizationExemption() {
+        BackgroundPowerHelper.requestIgnoreBatteryOptimizations(appContext)
+        _snackbarMessages.tryEmit("Allow NetGate to run without battery restrictions")
     }
 
     fun openChangelog() {

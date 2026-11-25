@@ -80,9 +80,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.ActiveNetworkType
+import com.aistudio.netgate.data.model.AdvancedPreferencesState
 import com.aistudio.netgate.data.model.ConnectionDetails
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.HotspotClientInfo
+import com.aistudio.netgate.data.model.HotspotFilterProfile
 import com.aistudio.netgate.data.model.HotspotProxyRuntimeState
 import com.aistudio.netgate.data.model.WifiIdleStatus
 import com.aistudio.netgate.data.model.formatCountdownTimer
@@ -104,6 +106,13 @@ fun HotspotAndWifiContent(
     onToggleHotspotProxy: (Boolean) -> Unit,
     onSelectHotspotPort: (Int) -> Unit,
     onToggleApplyNetGateFilters: (Boolean) -> Unit,
+    advancedPreferences: AdvancedPreferencesState = AdvancedPreferencesState(),
+    onToggleShareActiveTunnel: (Boolean) -> Unit = {},
+    onToggleRequireApproval: (Boolean) -> Unit = {},
+    onApproveClient: (String) -> Unit = {},
+    onBlockClient: (String) -> Unit = {},
+    onSetClientProfile: (String, HotspotFilterProfile) -> Unit = { _, _ -> },
+    onSetClientSpeedLimit: (String, Long) -> Unit = { _, _ -> },
     onToggleClientBlocked: (clientIp: String, blocked: Boolean) -> Unit,
     onSetClientDataCap: (clientIp: String, capBytes: Long) -> Unit,
     onSetClientLabel: (clientIp: String, label: String) -> Unit,
@@ -170,6 +179,17 @@ fun HotspotAndWifiContent(
                         onEditClient = { editingClient = it },
                         onClearAllStats = onClearAllHotspotStats
                     )
+
+                    HotspotSecurityCard(
+                        hotspotState = hotspotState,
+                        advanced = advancedPreferences,
+                        onToggleShareActiveTunnel = onToggleShareActiveTunnel,
+                        onToggleRequireApproval = onToggleRequireApproval,
+                        onApproveClient = onApproveClient,
+                        onBlockClient = onBlockClient,
+                        onSetClientProfile = onSetClientProfile,
+                        onSetClientSpeedLimit = onSetClientSpeedLimit
+                    )
                 }
 
                 Column(
@@ -231,6 +251,17 @@ fun HotspotAndWifiContent(
                         onToggleClientBlocked = onToggleClientBlocked,
                         onEditClient = { editingClient = it },
                         onClearAllStats = onClearAllHotspotStats
+                    )
+
+                    HotspotSecurityCard(
+                        hotspotState = hotspotState,
+                        advanced = advancedPreferences,
+                        onToggleShareActiveTunnel = onToggleShareActiveTunnel,
+                        onToggleRequireApproval = onToggleRequireApproval,
+                        onApproveClient = onApproveClient,
+                        onBlockClient = onBlockClient,
+                        onSetClientProfile = onSetClientProfile,
+                        onSetClientSpeedLimit = onSetClientSpeedLimit
                     )
 
                     WifiAutomationCard(

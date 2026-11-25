@@ -27,6 +27,7 @@ import com.aistudio.netgate.data.model.YouTubeRestrictedMode
 import com.aistudio.netgate.data.model.SavedWifiNetworkInfo
 import com.aistudio.netgate.data.model.classifyWifiSignalQuality
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
@@ -515,6 +516,14 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setExcludeFromRecents(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.EXCLUDE_FROM_RECENTS] = enabled }
+    }
+
+    /** Whole-store snapshot used by encrypted backups. */
+    suspend fun exportRawSnapshot(): Map<String, String> =
+        DataStoreBackupCodec.encode(context.firewallDataStore.data.first())
+
+    suspend fun importRawSnapshot(values: Map<String, String>) {
+        context.firewallDataStore.edit { prefs -> DataStoreBackupCodec.apply(prefs, values) }
     }
 
     private fun serializeObservedWifi(item: SavedWifiNetworkInfo): String? = runCatching {

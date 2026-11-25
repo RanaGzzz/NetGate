@@ -60,7 +60,8 @@ object ConnectionMonitorHub {
         bytesSent: Long = 0L,
         bytesReceived: Long = 0L,
         actionStatus: String = "ALLOWED",
-        isAdBlocked: Boolean = false
+        isAdBlocked: Boolean = false,
+        dpiBypassed: Boolean = false
     ) {
         val cleanDomain = domain.trim().trimEnd('.').lowercase()
         if (cleanDomain.isEmpty() && remoteIp.isBlank()) return
@@ -98,6 +99,8 @@ object ConnectionMonitorHub {
             bytesSent = bytesSent.coerceAtLeast(0L),
             bytesReceived = bytesReceived.coerceAtLeast(0L),
             actionStatus = actionStatus,
+            isAdBlocked = isAdBlocked,
+            dpiBypassed = dpiBypassed,
             riskLevel = riskLevel,
             riskReason = riskReason,
             hitCount = 1,
@@ -124,6 +127,8 @@ object ConnectionMonitorHub {
                         bytesSent = record.bytesSent,
                         bytesReceived = record.bytesReceived,
                         actionStatus = record.actionStatus,
+                        isAdBlocked = record.isAdBlocked,
+                        dpiBypassed = record.dpiBypassed,
                         riskLevel = record.riskLevel.name,
                         riskReason = record.riskReason,
                         hitCount = 1,
@@ -265,6 +270,8 @@ object ConnectionMonitorHub {
             bytesSent = entity.bytesSent,
             bytesReceived = entity.bytesReceived,
             actionStatus = entity.actionStatus,
+            isAdBlocked = entity.isAdBlocked,
+            dpiBypassed = entity.dpiBypassed,
             riskLevel = risk,
             riskReason = entity.riskReason,
             hitCount = entity.hitCount,

@@ -1,3 +1,23 @@
+# What's New — NetGate 3.7
+
+### Protection & Reliability
+- **VPN kill switch & auto-reconnect:** if a WireGuard or OpenVPN tunnel drops, NetGate blocks traffic until it recovers, then retries the last profile automatically after a drop or a Wi-Fi ↔ mobile handover.
+- **Trusted Wi-Fi auto-VPN:** mark home/work networks as trusted and optionally connect the last VPN Guard profile automatically on unknown SSIDs.
+- **Android 16/17 background reliability:** added battery-optimization guidance and foreground-service hardening so filtering survives Doze, battery saver and background restrictions.
+
+### Monitoring & Rules
+- **Live app-to-domain inspector:** the network monitor now tags each connection with the app that made it, with 1-tap Block App and Allow App rules from the live feed.
+- **Split-tunnel presets:** one-tap Browsers Only, Messaging Only and Bypass Banking & LAN templates for VPN Guard profiles, resolved against the apps actually installed.
+
+### Hotspot
+- **PAC file + QR setup:** serve a proxy auto-config file over the hotspot and show a scannable QR code so phones, laptops and TVs configure the proxy in one step.
+- **Share the active tunnel:** route tethered traffic through the active VPN Guard tunnel or an external VPN, with clipboard and QR helpers.
+- **Per-device controls:** filter profiles (Standard, Kids, Strict), per-client speed limits and data caps, plus new-device approval that holds unknown clients until you allow them.
+
+### Backup & Updates
+- **Encrypted backup & restore:** export and import rules, site lists, DNS settings and VPN profiles in a single AES-256-GCM encrypted file.
+- **In-app OTA updates:** check the update manifest with a GitHub Releases fallback, download the APK in-app, verify and install it through the system installer, and detect a rebuilt APK for the same version.
+
 # What's New — NetGate 3.6
 
 ### Android Compatibility

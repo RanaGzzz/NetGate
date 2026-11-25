@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
+import com.aistudio.netgate.data.local.NetGateDatabase
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
 import com.aistudio.netgate.data.model.VpnGuardProfile
 import com.aistudio.netgate.data.model.VpnGuardProtocol
@@ -13,6 +14,7 @@ import com.aistudio.netgate.service.session.VpnSessionCoordinator
 import com.aistudio.netgate.service.session.VpnSessionPorts
 import com.aistudio.netgate.service.session.VpnSlotOwner
 import com.aistudio.netgate.service.session.VpnTransitionResult
+import com.aistudio.netgate.service.vpn.TunnelWatchdog
 import com.wireguard.android.backend.BackendException
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.android.backend.Tunnel
@@ -65,6 +67,11 @@ object VpnGuardManager {
     @Volatile
     private var lastAppContext: Context? = null
 
+    /** Last profile the user (or the automation) connected, used by auto-reconnect. */
+    @Volatile
+    var lastProfile: VpnGuardProfile? = null
+        private set
+
     private val activeTunnel = object : Tunnel {
         override fun getName(): String = "netgate_vpn_guard"
 
@@ -100,6 +107,7 @@ object VpnGuardManager {
                     coordinator.handleUnexpectedTunnelDisconnect(
                         "The WireGuard tunnel disconnected unexpectedly"
                     )
+                    lastAppContext?.let { TunnelWatchdog.onUnexpectedDrop(it) }
                     _runtimeState.value = _runtimeState.value.copy(
                         pausedLocalFirewallForVpn = coordinator.state.value.firewallRestorePending
                     )
@@ -141,6 +149,8 @@ object VpnGuardManager {
         stateMutex.withLock {
             val appContext = context.applicationContext
             lastAppContext = appContext
+            lastProfile = profile
+            TunnelWatchdog.ensureStarted(appContext)
 
             val wasFirewallActive = NetGateVpnService.runtimeState.value.isServiceRunning ||
                 coordinator.state.value.firewallRestorePending
@@ -320,6 +330,7 @@ object VpnGuardManager {
                     val msg = reason?.takeIf { it.isNotBlank() }
                         ?: "The OpenVPN tunnel disconnected unexpectedly"
                     coordinator.handleUnexpectedTunnelDisconnect(msg)
+                    TunnelWatchdog.onUnexpectedDrop(appContext)
                     _runtimeState.value = _runtimeState.value.copy(
                         connectionState = VpnGuardConnectionState.DISCONNECTED,
                         errorMessage = reason,
@@ -388,6 +399,7 @@ object VpnGuardManager {
                 connectionState = VpnGuardConnectionState.DISCONNECTING
             )
             stopStatsPolling()
+            TunnelWatchdog.onIntentionalDisconnect(appContext)
 
             intentionalDisconnect = true
             val transition = try {
@@ -463,6 +475,17 @@ object VpnGuardManager {
             VpnGuardService.stop(appContext)
         }
     )
+
+    /** Loads a saved profile for network automation / auto-reconnect. */
+    suspend fun profileById(context: Context, profileId: String): VpnGuardProfile? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                NetGateDatabase.getInstance(context.applicationContext)
+                    .vpnGuardProfileDao()
+                    .getProfileById(profileId)
+                    ?.toModel()
+            }.getOrNull()
+        }
 
     private fun extractHostFromEndpoint(endpoint: String): String {
         val clean = endpoint.trim().substringBefore(' ')

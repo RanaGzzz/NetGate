@@ -20,6 +20,7 @@ import androidx.core.app.NotificationCompat
 import com.aistudio.netgate.MainActivity
 import com.aistudio.netgate.R
 import com.aistudio.netgate.data.local.AdFilterListEntity
+import com.aistudio.netgate.data.local.AdvancedPreferences
 import com.aistudio.netgate.data.local.AppNetworkRuleEntity
 import com.aistudio.netgate.data.local.FirewallPreferences
 import com.aistudio.netgate.data.local.NetGateDatabase
@@ -46,6 +47,7 @@ import com.aistudio.netgate.service.proxy.ProxyConfiguration
 import com.aistudio.netgate.service.proxy.ProxyCoordinator
 import com.aistudio.netgate.service.proxy.ProxyRole
 import com.aistudio.netgate.service.session.VpnSessionCoordinator
+import com.aistudio.netgate.service.vpn.TunnelWatchdog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,6 +57,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
@@ -223,6 +226,12 @@ class NetGateVpnService : VpnService() {
     @Volatile
     private var latestDnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK
 
+    /** Fail-closed kill switch: while true, every packet on the TUN is dropped. */
+    @Volatile
+    private var killSwitchLockdown: Boolean = false
+
+    private var advancedPrefsJob: Job? = null
+
     @Volatile
     private var currentNetworkType: ActiveNetworkType = ActiveNetworkType.NONE
 
@@ -285,6 +294,17 @@ class NetGateVpnService : VpnService() {
         observeRules()
         observeTimers()
         observeWifiAutomation()
+        observeAdvancedSettings()
+        BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "firewall-vpn")
+    }
+
+    private fun observeAdvancedSettings() {
+        advancedPrefsJob?.cancel()
+        advancedPrefsJob = serviceScope.launch {
+            AdvancedPreferences(applicationContext).flow.collect { advanced ->
+                killSwitchLockdown = advanced.killSwitchEngaged
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -359,7 +379,9 @@ class NetGateVpnService : VpnService() {
         rulesJob?.cancel()
         timerJob?.cancel()
         wifiAutomationJob?.cancel()
+        advancedPrefsJob?.cancel()
         drainJob?.cancel()
+        BackgroundPowerHelper.releaseServiceWakeLock("firewall-vpn")
         serviceScope.cancel()
         stopProxyServerLocked()
         closeVpnInterface()
@@ -386,6 +408,8 @@ class NetGateVpnService : VpnService() {
         wifiAutomationJob = serviceScope.launch {
             while (isActive) {
                 delay(2000L)
+                // Refresh the Doze-proof wake lock on every tick (no-op while it is still held).
+                BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "firewall-vpn")
                 val prefs = latestFullPreferences
                 if (prefs.globalWifiTimerExpiresAtMillis > 0L &&
                     System.currentTimeMillis() >= prefs.globalWifiTimerExpiresAtMillis
@@ -951,7 +975,8 @@ class NetGateVpnService : VpnService() {
                             bytesSent = bytesSent,
                             bytesReceived = bytesReceived,
                             actionStatus = if (decision.allow) "ALLOWED" else "BLOCKED",
-                            isAdBlocked = decision.isAdBlock
+                            isAdBlocked = decision.isAdBlock,
+                            dpiBypassed = decision.allow && latestDpiBypassMode != DpiBypassMode.OFF
                         )
                     }
                 }
@@ -1117,6 +1142,9 @@ class NetGateVpnService : VpnService() {
 
                     blockedPacketsCount.incrementAndGet()
                     val parsed = TunPacketInspector.parseIpPacket(buffer, bytesRead) ?: continue
+
+                    // Kill switch: the tunnel died, stay fail-closed until it comes back.
+                    if (killSwitchLockdown) continue
 
                     when (PerAppFirewallEngine.classifySinkholePacket(parsed)) {
                         BlockedPacketAction.REJECT_DNS_NXDOMAIN -> {
@@ -1654,6 +1682,8 @@ class NetGateVpnService : VpnService() {
             activeTunnelSignature = null
         }
         _runtimeState.value = VpnRuntimeState()
+        killSwitchLockdown = false
+        TunnelWatchdog.releaseKillSwitch(applicationContext)
         VpnSessionCoordinator.instance.releaseLocalFirewall()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

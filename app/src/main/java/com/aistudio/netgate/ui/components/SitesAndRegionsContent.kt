@@ -91,6 +91,8 @@ fun SitesAndRegionsContent(
     onClearHistory: () -> Unit,
     onQuickBlockSite: (String) -> Unit,
     onQuickAllowSite: (String) -> Unit,
+    onQuickBlockApp: (String) -> Unit = {},
+    onQuickAllowApp: (String) -> Unit = {},
     bottomPadding: Dp,
     modifier: Modifier = Modifier
 ) {
@@ -303,7 +305,9 @@ fun SitesAndRegionsContent(
                         record = record,
                         loadIcon = loadIcon,
                         onQuickBlock = onQuickBlockSite,
-                        onQuickAllow = onQuickAllowSite
+                        onQuickAllow = onQuickAllowSite,
+                        onQuickBlockApp = onQuickBlockApp,
+                        onQuickAllowApp = onQuickAllowApp
                     )
                 }
             }
@@ -635,7 +639,9 @@ private fun SiteConnectionCard(
     record: SiteConnectionRecord,
     loadIcon: suspend (String) -> ImageBitmap?,
     onQuickBlock: (String) -> Unit,
-    onQuickAllow: (String) -> Unit
+    onQuickAllow: (String) -> Unit,
+    onQuickBlockApp: (String) -> Unit = {},
+    onQuickAllowApp: (String) -> Unit = {}
 ) {
     val iconBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = record.appPackage) {
         if (record.appPackage.isNotBlank()) {
@@ -648,7 +654,11 @@ private fun SiteConnectionCard(
         ConnectionRiskLevel.NOTICE -> WarningAmber
         ConnectionRiskLevel.SUSPICIOUS, ConnectionRiskLevel.CRITICAL -> BlockedRed
     }
-    val actionAccent = if (record.actionStatus == "BLOCKED") BlockedRed else EmeraldPrimary
+    val actionAccent = when (record.actionTag) {
+        "BLOCKED", "AD BLOCKED" -> BlockedRed
+        "DPI BYPASSED" -> WarningAmber
+        else -> EmeraldPrimary
+    }
     val canFilterDomain = DnsPacketFilter.normalizeDomainInput(record.domain) != null
 
     FrostedSurface(
@@ -706,7 +716,7 @@ private fun SiteConnectionCard(
                         border = BorderStroke(1.dp, actionAccent.copy(alpha = 0.4f))
                     ) {
                         Text(
-                            text = record.actionStatus,
+                            text = record.actionTag,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                             color = actionAccent,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -899,6 +909,37 @@ private fun SiteConnectionCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Allow Site", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+
+            if (record.appPackage.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onQuickBlockApp(record.appPackage) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BlockedRed),
+                        border = BorderStroke(1.dp, BlockedRed.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                    ) {
+                        Text("Block ${record.appName.ifBlank { "App" }}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = { onQuickAllowApp(record.appPackage) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldPrimary),
+                        border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                    ) {
+                        Text("Allow App", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }

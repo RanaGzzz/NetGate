@@ -135,6 +135,8 @@ fun FirewallSettingsSheet(
     ),
     vpnDpiLogsCount: Int = 0,
     onCheckForUpdates: () -> Unit = {},
+    onDownloadUpdate: () -> Unit = {},
+    onOpenAdvancedProtection: () -> Unit = {},
     onOpenChangelog: () -> Unit = {},
     onOpenVpnDpiLogs: () -> Unit = {},
     onClearAllRules: () -> Unit,
@@ -1202,6 +1204,43 @@ fun FirewallSettingsSheet(
                             maxLines = 1,
                             softWrap = false
                         )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (appUpdateState.canInstallDirectly) {
+                        Button(
+                            onClick = onDownloadUpdate,
+                            enabled = !appUpdateState.isDownloadingUpdate,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("settings_download_update")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SystemUpdate,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                if (appUpdateState.isDownloadingUpdate) {
+                                    "Downloading ${appUpdateState.downloadProgress}%"
+                                } else {
+                                    "Download & install update"
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenAdvancedProtection,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("settings_advanced_protection")
+                    ) {
+                        Text("Kill Switch, Backup & Automation")
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(

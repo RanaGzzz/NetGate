@@ -1,0 +1,10 @@
+{
+  "versionName": "3.6",
+  "versionCode": 9,
+  "buildId": "",
+  "publishedAt": "2026-11-01T00:00:00Z",
+  "apkUrl": "https://github.com/RanaGzzz/NetGate/releases/latest/download/netgate-release-3.6.apk",
+  "sha256": "",
+  "htmlUrl": "https://github.com/RanaGzzz/NetGate/releases",
+  "notes": "Update this file for each published build. Bump versionCode for a new version, and update publishedAt (UTC ISO-8601) plus buildId (commit SHA) for a rebuilt APK of the same version so installed copies detect it."
+}

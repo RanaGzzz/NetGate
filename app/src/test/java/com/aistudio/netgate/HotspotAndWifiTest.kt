@@ -2,6 +2,9 @@ package com.aistudio.netgate
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -339,7 +342,9 @@ class HotspotAndWifiTest {
 
         composeRule.onNodeWithTag("hotspot_clients_card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("hotspot_client_row_192.168.43.105").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("MacBook Pro").assertIsDisplayed()
+        composeRule.onNode(
+            hasText("MacBook Pro") and hasAnyAncestor(hasTestTag("hotspot_client_row_192.168.43.105"))
+        ).assertIsDisplayed()
 
         composeRule.onNodeWithTag("hotspot_client_toggle_192.168.43.105").performScrollTo().performClick()
         assertEquals("192.168.43.105", toggledClientIp)

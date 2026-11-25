@@ -693,12 +693,17 @@ data class HotspotClientInfo(
     val blockedCount: Int = 0,
     val lastHost: String = "",
     val firstSeenAt: Long = 0L,
-    val lastSeenAt: Long = 0L
+    val lastSeenAt: Long = 0L,
+    val profile: HotspotFilterProfile = HotspotFilterProfile.STANDARD,
+    val speedLimitBytesPerSec: Long = 0L,
+    val isPendingApproval: Boolean = false
 ) {
     val totalBytes: Long get() = bytesSent + bytesReceived
     val isCapExceeded: Boolean get() = dataCapBytes > 0L && totalBytes >= dataCapBytes
-    val isEffectivelyBlocked: Boolean get() = isManuallyBlocked || isCapExceeded
+    val isEffectivelyBlocked: Boolean get() = isManuallyBlocked || isCapExceeded || isPendingApproval
     val displayName: String get() = label.takeIf { it.isNotBlank() } ?: "Device $clientIp"
+    val speedLimitLabel: String
+        get() = if (speedLimitBytesPerSec <= 0L) "Unlimited" else formatDataBytes(speedLimitBytesPerSec) + "/s"
 }
 
 data class HotspotProxyRuntimeState(
@@ -708,6 +713,8 @@ data class HotspotProxyRuntimeState(
     val detectedHotspotInterface: String? = null,
     val isExternalVpnActive: Boolean = false,
     val isNetGateVpnActive: Boolean = false,
+    val shareTunnelThroughNetGate: Boolean = false,
+    val requireClientApproval: Boolean = false,
     val activePort: Int = 8890,
     val totalRelayedSentBytes: Long = 0L,
     val totalRelayedRecvBytes: Long = 0L,
@@ -720,6 +727,7 @@ data class HotspotProxyRuntimeState(
     val shareModeLabel: String
         get() = when {
             !isProxyRunning -> "Stopped"
+            shareTunnelThroughNetGate && isNetGateVpnActive -> "Sharing NetGate VPN Tunnel"
             isExternalVpnActive && !isNetGateVpnActive -> "Sharing External VPN"
             isNetGateVpnActive -> "Sharing NetGate Filter"
             else -> "Direct Hotspot Proxy"
@@ -1014,6 +1022,8 @@ data class SiteConnectionRecord(
     val bytesSent: Long,
     val bytesReceived: Long,
     val actionStatus: String,
+    val isAdBlocked: Boolean = false,
+    val dpiBypassed: Boolean = false,
     val riskLevel: ConnectionRiskLevel,
     val riskReason: String,
     val hitCount: Int,
@@ -1021,6 +1031,15 @@ data class SiteConnectionRecord(
     val lastSeenAt: Long
 ) {
     val totalBytes: Long get() = bytesSent + bytesReceived
+
+    /** Human tag for the live App-to-Domain inspector. */
+    val actionTag: String
+        get() = when {
+            actionStatus == "BLOCKED" && isAdBlocked -> "AD BLOCKED"
+            actionStatus == "BLOCKED" -> "BLOCKED"
+            dpiBypassed -> "DPI BYPASSED"
+            else -> "VPN TUNNELED"
+        }
     val countryFlag: String get() = countryCodeToFlagEmoji(countryCode)
     val locationLabel: String
         get() = when {

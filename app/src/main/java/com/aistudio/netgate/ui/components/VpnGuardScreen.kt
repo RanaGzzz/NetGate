@@ -103,6 +103,7 @@ import com.aistudio.netgate.data.model.VpnGateSortMode
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
 import com.aistudio.netgate.data.model.VpnGuardProfile
 import com.aistudio.netgate.data.model.VpnGuardProtocol
+import com.aistudio.netgate.data.model.SplitTunnelPreset
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
 import com.aistudio.netgate.data.model.VpnGuardSubTab
 import com.aistudio.netgate.data.model.VpnGuardUiState
@@ -141,6 +142,7 @@ fun VpnGuardContent(
     onOpenVpnLogs: (() -> Unit)? = null,
     onConnectVpnGateServer: ((VpnGateServer) -> Unit)? = null,
     onSaveVpnGateServer: ((VpnGateServer) -> Unit)? = null,
+    onApplySplitTunnelPreset: ((String, SplitTunnelPreset) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -495,6 +497,7 @@ fun VpnGuardContent(
                                     WireGuardConfigHelper.WHATSAPP_PACKAGES
                                 )
                             },
+                            onApplySplitTunnelPreset = onApplySplitTunnelPreset,
                             onDownloadConf = {
                                 val effective = if (profile.protocol == VpnGuardProtocol.OPENVPN) {
                                     OpenVpnConfigHelper.prepareRuntimeConfig(profile.rawConfig)
@@ -1012,6 +1015,7 @@ private fun VpnGuardProfileCard(
     onChangeRoutingMode: (VpnGuardRoutingMode) -> Unit,
     onOpenAppPicker: () -> Unit,
     onQuickWhatsAppPreset: () -> Unit,
+    onApplySplitTunnelPreset: ((String, SplitTunnelPreset) -> Unit)? = null,
     onDownloadConf: () -> Unit,
     onViewConf: () -> Unit,
     onDelete: () -> Unit
@@ -1100,6 +1104,29 @@ private fun VpnGuardProfileCard(
                         },
                         shape = RoundedCornerShape(12.dp)
                     )
+                }
+            }
+
+            onApplySplitTunnelPreset?.let { applyPreset ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Quick split-tunnel presets",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    SplitTunnelPreset.entries.forEach { preset ->
+                        FilterChip(
+                            selected = false,
+                            onClick = { applyPreset(profile.id, preset) },
+                            label = { Text(preset.title) },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
                 }
             }
 

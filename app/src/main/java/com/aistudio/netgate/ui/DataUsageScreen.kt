@@ -124,6 +124,8 @@ fun DataUsageContent(
     onClearConnectionHistory: () -> Unit,
     onQuickBlockSite: (String) -> Unit,
     onQuickAllowSite: (String) -> Unit,
+    onQuickBlockApp: (String) -> Unit = {},
+    onQuickAllowApp: (String) -> Unit = {},
     onRunSecurityAudit: () -> Unit,
     onOpenFlaggedSitesFromAudit: () -> Unit,
     speedTestState: SpeedTestState,
@@ -207,6 +209,8 @@ fun DataUsageContent(
                         onClearHistory = onClearConnectionHistory,
                         onQuickBlockSite = onQuickBlockSite,
                         onQuickAllowSite = onQuickAllowSite,
+                        onQuickBlockApp = onQuickBlockApp,
+                        onQuickAllowApp = onQuickAllowApp,
                         bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
                         modifier = Modifier.weight(1f)
                     )

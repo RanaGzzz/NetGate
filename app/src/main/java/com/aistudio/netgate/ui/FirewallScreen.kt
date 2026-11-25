@@ -121,6 +121,7 @@ import com.aistudio.netgate.ui.components.FrostedSurface
 import com.aistudio.netgate.ui.components.GlassToast
 import com.aistudio.netgate.ui.components.HotspotAndWifiContent
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
+import com.aistudio.netgate.ui.components.AdvancedProtectionSheet
 import com.aistudio.netgate.ui.components.VpnGuardContent
 import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineModalDepth
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
@@ -138,8 +139,14 @@ fun FirewallScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val advancedPreferences by viewModel.advancedPreferences.collectAsStateWithLifecycle()
+    val backupState by viewModel.backupState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
+    var showAdvancedProtection by rememberSaveable { mutableStateOf(false) }
+    val currentWifiSsid = remember(uiState.connectionDetails, uiState.currentDestination) {
+        viewModel.currentWifiSsid()
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.snackbarMessages.collect { message ->
@@ -542,6 +549,8 @@ fun FirewallScreen(
                                         onClearConnectionHistory = viewModel::clearConnectionHistory,
                                         onQuickBlockSite = viewModel::quickBlockSiteFromMonitor,
                                         onQuickAllowSite = viewModel::quickAllowSiteFromMonitor,
+                                        onQuickBlockApp = viewModel::quickBlockAppFromMonitor,
+                                        onQuickAllowApp = viewModel::quickAllowAppFromMonitor,
                                         onRunSecurityAudit = viewModel::runDeviceSecurityAudit,
                                         onOpenFlaggedSitesFromAudit = viewModel::openFlaggedSitesFromAudit,
                                         speedTestState = uiState.speedTestState,
@@ -637,6 +646,13 @@ fun FirewallScreen(
                                         onToggleHotspotProxy = viewModel::setHotspotProxyEnabled,
                                         onSelectHotspotPort = viewModel::setHotspotProxyPort,
                                         onToggleApplyNetGateFilters = viewModel::setHotspotApplyNetGateFilters,
+                                        advancedPreferences = advancedPreferences,
+                                        onToggleShareActiveTunnel = viewModel::setHotspotShareActiveTunnel,
+                                        onToggleRequireApproval = viewModel::setHotspotRequireApproval,
+                                        onApproveClient = viewModel::approveHotspotClient,
+                                        onBlockClient = viewModel::blockHotspotClient,
+                                        onSetClientProfile = viewModel::setHotspotClientProfile,
+                                        onSetClientSpeedLimit = viewModel::setHotspotClientSpeedLimit,
                                         onToggleClientBlocked = viewModel::toggleHotspotClientBlocked,
                                         onSetClientDataCap = viewModel::setHotspotClientDataCap,
                                         onSetClientLabel = viewModel::setHotspotClientLabel,
@@ -690,7 +706,8 @@ fun FirewallScreen(
                                         onNotifyMessage = viewModel::notifyVpnGuardMessage,
                                         onOpenVpnLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.VPN_GUARD) },
                                         onConnectVpnGateServer = viewModel::connectVpnGateServerDirect,
-                                        onSaveVpnGateServer = viewModel::saveVpnGateServerProfile
+                                        onSaveVpnGateServer = viewModel::saveVpnGateServerProfile,
+                                        onApplySplitTunnelPreset = viewModel::applySplitTunnelPreset
                                     )
                                 }
 
@@ -908,10 +925,47 @@ fun FirewallScreen(
             appUpdateState = uiState.appUpdateState,
             vpnDpiLogsCount = uiState.vpnDpiLogs.size,
             onCheckForUpdates = viewModel::checkForGitHubUpdates,
+            onDownloadUpdate = viewModel::downloadAndInstallUpdate,
+            onOpenAdvancedProtection = {
+                viewModel.closeSettings()
+                showAdvancedProtection = true
+            },
             onOpenChangelog = viewModel::openChangelog,
             onOpenVpnDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.ALL) },
             onClearAllRules = viewModel::clearAllRules,
             onDismiss = viewModel::closeSettings
+        )
+    }
+
+    if (showAdvancedProtection) {
+        AdvancedProtectionSheet(
+            advanced = advancedPreferences,
+            backupState = backupState,
+            appUpdateState = uiState.appUpdateState,
+            currentSsid = currentWifiSsid,
+            onToggleKillSwitch = viewModel::setKillSwitchEnabled,
+            onToggleAutoReconnect = viewModel::setAutoReconnectEnabled,
+            onToggleAutoVpnUnknownWifi = viewModel::setAutoVpnOnUnknownWifi,
+            onSetWifiTrusted = viewModel::setWifiTrusted,
+            onRequestBatteryExemption = viewModel::requestBatteryOptimizationExemption,
+            onCheckUpdates = viewModel::checkForGitHubUpdates,
+            onDownloadUpdate = viewModel::downloadAndInstallUpdate,
+            onExportBackup = viewModel::exportEncryptedBackup,
+            onImportBackup = viewModel::importEncryptedBackup,
+            onClearBackupState = viewModel::clearBackupState,
+            onOpenNotificationSettings = {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                        ).apply {
+                            putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                }
+            },
+            onDismiss = { showAdvancedProtection = false }
         )
     }
 

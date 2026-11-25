@@ -13,6 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.aistudio.netgate.MainActivity
 import com.aistudio.netgate.R
+import com.aistudio.netgate.data.local.AdvancedPreferences
 import com.aistudio.netgate.data.local.FirewallPreferences
 import com.aistudio.netgate.data.local.NetGateDatabase
 import com.aistudio.netgate.data.model.AppDestination
@@ -24,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
@@ -35,7 +37,9 @@ class HotspotProxyService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var configJob: Job? = null
     private var refreshJob: Job? = null
+    private var advancedJob: Job? = null
     private lateinit var preferences: FirewallPreferences
+    private lateinit var advancedPreferences: AdvancedPreferences
     private var lastAdSignature: String? = null
     private var cachedMatcher: AdBlockMatcherSnapshot = AdBlockMatcherSnapshot.EMPTY
 
@@ -44,9 +48,12 @@ class HotspotProxyService : Service() {
     override fun onCreate() {
         super.onCreate()
         preferences = FirewallPreferences(applicationContext)
+        advancedPreferences = AdvancedPreferences(applicationContext)
         createNotificationChannel()
         observePolicies()
+        observeAdvancedPreferences()
         startRefreshLoop()
+        BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "hotspot-proxy")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -66,7 +73,9 @@ class HotspotProxyService : Service() {
     override fun onDestroy() {
         configJob?.cancel()
         refreshJob?.cancel()
+        advancedJob?.cancel()
         HotspotProxyManager.stop(applicationContext)
+        BackgroundPowerHelper.releaseServiceWakeLock("hotspot-proxy")
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -123,10 +132,20 @@ class HotspotProxyService : Service() {
         }
     }
 
+    private fun observeAdvancedPreferences() {
+        advancedJob?.cancel()
+        advancedJob = serviceScope.launch {
+            advancedPreferences.flow.collect { advanced ->
+                HotspotProxyManager.updateAdvancedPreferences(advanced)
+            }
+        }
+    }
+
     private fun startRefreshLoop() {
         refreshJob = serviceScope.launch {
             while (isActive) {
                 delay(3000L)
+                BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "hotspot-proxy")
                 HotspotProxyManager.refreshEnvironment(applicationContext)
                 postNotification(HotspotProxyManager.runtimeState.value)
             }

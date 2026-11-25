@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "NetGate"
 
 include(":app")
+include(":baselineprofile")

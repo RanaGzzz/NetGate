@@ -1,0 +1,63 @@
+name: Generate Baseline Profile
+
+# Manual only: generation needs an emulator, and the resulting profile is reviewed
+# and committed like any other source change.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: baseline-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    # Bounds emulator boot, Gradle download and the generator run.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The build must not be able to push with the workflow token.
+          persist-credentials: false
+
+      - name: Set up Android build environment
+        uses: ./.github/actions/setup-android
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Generate profile on an emulator
+        uses: ReactiveCircus/android-emulator-runner@b530d96654c385303d652368551fb075bc2f0b6b # v2.35.0
+        env:
+          # The generator targets the non-minified release variant, which inherits
+          # the release signing config. Point it at the throwaway debug keystore:
+          # this build is profiled, never published.
+          KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          STORE_PASSWORD: android
+          ALIAS: androiddebugkey
+          KEY_PASSWORD: android
+        with:
+          api-level: 34
+          target: aosp
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: gradle :app:generateBaselineProfile
+
+      - name: Upload generated profile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: baseline-profile
+          path: |
+            app/src/*/generated/baselineProfiles/*.txt
+            app/build/outputs/**/BaselineProfileGenerator_*.txt
+          if-no-files-found: error
