@@ -485,18 +485,23 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `room ad filter lists seed 10 defaults and support custom list crud`() = runTest {
+    fun `room ad filter lists seed 21 defaults and support custom list crud`() = runTest {
         repository.ensureDefaultAdFilterListsSeeded()
         val seeded = repository.adFilterListsFlow.first()
-        assertEquals(10, seeded.size)
-        assertTrue(seeded.first { it.id == "stevenblack" }.isEnabled)
-        assertTrue(seeded.first { it.id == "adguard_dns" }.isEnabled)
+        assertEquals(21, seeded.size)
         assertTrue(seeded.first { it.id == "oisd_big" }.isEnabled)
+        assertTrue(seeded.first { it.id == "adguard_dns" }.isEnabled)
+        assertTrue(seeded.first { it.id == "hagezi_normal" }.isEnabled)
         assertTrue(seeded.first { it.id == "hagezi_tif" }.isEnabled)
+        assertTrue(seeded.first { it.id == "easylist_privacy" }.isEnabled)
+        assertTrue(seeded.first { it.id == "adaway_hosts" }.isEnabled)
+        assertTrue(seeded.first { it.id == "urlhaus_malware" }.isEnabled)
+        assertTrue(seeded.first { it.id == "oem_telemetry" }.isEnabled)
+        assertFalse(seeded.first { it.id == "stevenblack" }.isEnabled)
         assertFalse(seeded.first { it.id == "peter_lowe" }.isEnabled)
 
         repository.toggleAdFilterList("peter_lowe", enabled = true)
-        repository.toggleAdFilterList("stevenblack", enabled = false)
+        repository.toggleAdFilterList("oisd_big", enabled = false)
 
         val customRes = repository.addCustomAdFilterList(
             rawTitle = "My Blocklist",
@@ -508,12 +513,12 @@ class ExampleRobolectricTest {
         assertTrue(customId.startsWith("custom_"))
 
         val updated = repository.adFilterListsFlow.first().associateBy { it.id }
-        assertEquals(11, updated.size)
+        assertEquals(22, updated.size)
         assertTrue(updated["peter_lowe"]!!.isEnabled)
-        assertFalse(updated["stevenblack"]!!.isEnabled)
+        assertFalse(updated["oisd_big"]!!.isEnabled)
 
         repository.deleteCustomAdFilterList(customId)
-        assertEquals(10, repository.adFilterListsFlow.first().size)
+        assertEquals(21, repository.adFilterListsFlow.first().size)
     }
 
     @Test

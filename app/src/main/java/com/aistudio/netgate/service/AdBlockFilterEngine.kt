@@ -44,7 +44,7 @@ data class AdLookupResult(
 )
 
 data class AdEnginePerfStats(
-    val totalDomains: Int = AdBlockFilterEngine.BUILTIN_AD_CORE_DOMAINS.size,
+    val totalDomains: Int = 0,
     val duplicatesRemovedCount: Int = 0,
     val compressedCacheBytes: Long = 0L,
     val avgLookupLatencyMicros: Long = 0L,

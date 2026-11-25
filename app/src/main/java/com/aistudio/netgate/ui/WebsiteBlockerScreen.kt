@@ -107,27 +107,36 @@ import com.aistudio.netgate.data.model.DnsQueryStatus
 import com.aistudio.netgate.data.model.DnsTransportMode
 import com.aistudio.netgate.data.model.DpiBypassMode
 import com.aistudio.netgate.data.model.ManagedApp
+import com.aistudio.netgate.data.model.SmartProtectionProfile
 import com.aistudio.netgate.data.model.SniProxyPreset
+import com.aistudio.netgate.data.model.TempAllowDuration
 import com.aistudio.netgate.data.model.WebsiteFilterMode
 import com.aistudio.netgate.data.model.WebsiteMainTab
 import com.aistudio.netgate.data.model.WebsiteRuleItem
 import com.aistudio.netgate.data.model.WebsiteTabSection
 import com.aistudio.netgate.data.model.YouTubeRestrictedMode
+import com.aistudio.netgate.ui.components.AdAnalyticsDashboardCard
 import com.aistudio.netgate.ui.components.AdBlockerHeroCard
 import com.aistudio.netgate.ui.components.AdFilterListRow
+import com.aistudio.netgate.ui.components.BackupAndRestoreRulesDialog
 import com.aistudio.netgate.ui.components.DnsLogFilter
 import com.aistudio.netgate.ui.components.DnsLogsFilterCard
-import com.aistudio.netgate.ui.components.DnsQueryLogRow
 import com.aistudio.netgate.ui.components.DpiBypassShieldCard
+import com.aistudio.netgate.ui.components.ExportRulesDialog
+import com.aistudio.netgate.ui.components.FilterLogEntryCard
 import com.aistudio.netgate.ui.components.FrostedSurface
 import com.aistudio.netgate.ui.components.HttpsFilteringProxyCard
+import com.aistudio.netgate.ui.components.ImportRulesDialog
 import com.aistudio.netgate.ui.components.SafeSearchAndYoutubeCard
+import com.aistudio.netgate.ui.components.SmartProtectionProfileCard
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.DataAccent
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.WarningAmber
 import com.aistudio.netgate.ui.theme.WifiAccent
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 private val QUICK_SUGGESTED_DOMAINS = listOf(
     "tiktok.com",
@@ -179,6 +188,16 @@ fun WebsiteBlockerContent(
     onRequestEnableFirewall: () -> Unit,
     onOpenDnsProtection: () -> Unit,
     onOpenDpiLogs: () -> Unit = {},
+    onSelectSmartProtectionProfile: (SmartProtectionProfile) -> Unit = {},
+    onAllowDomainTemporarily: (domain: String, duration: TempAllowDuration) -> Unit = { _, _ -> },
+    onAllowDomainPermanently: (domain: String) -> Unit = {},
+    onBlockDomainPermanently: (domain: String) -> Unit = {},
+    onReportFalsePositive: (domain: String) -> Unit = {},
+    onImportWebsiteRules: (rawText: String, defaultIsWhitelist: Boolean) -> Unit = { _, _ -> },
+    onExportWebsiteRules: suspend () -> String = { "" },
+    onExportBackupJson: suspend () -> String = { "" },
+    onRestoreBackupJson: (rawJson: String) -> Unit = {},
+    onNotifyCopied: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedMainTab by rememberSaveable { mutableStateOf(WebsiteMainTab.AD_BLOCKER) }
@@ -188,6 +207,12 @@ fun WebsiteBlockerContent(
     var dnsLogSearchQuery by rememberSaveable { mutableStateOf("") }
     var dnsLogFilter by rememberSaveable { mutableStateOf(DnsLogFilter.ALL) }
     var isAddFilterDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var isImportDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var isExportDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var isBackupRestoreDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var exportRulesPayload by remember { mutableStateOf("") }
+    var exportBackupPayload by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
 
     BackHandler(enabled = selectedMainTab != WebsiteMainTab.AD_BLOCKER) {
         selectedMainTab = WebsiteMainTab.AD_BLOCKER
@@ -290,6 +315,20 @@ fun WebsiteBlockerContent(
                                             onRequestEnableFirewall = onRequestEnableFirewall
                                         )
                                     }
+                                    item(key = "smart_protection_profile_card") {
+                                        SmartProtectionProfileCard(
+                                            currentProfile = state.smartProtectionProfile,
+                                            onSelectProfile = onSelectSmartProtectionProfile
+                                        )
+                                    }
+                                    item(key = "ad_analytics_dashboard_card") {
+                                        AdAnalyticsDashboardCard(
+                                            analytics = state.analytics,
+                                            duplicatesRemovedCount = state.duplicatesRemovedCount,
+                                            compressedCacheBytes = state.compressedCacheBytes,
+                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros
+                                        )
+                                    }
                                 }
                                 LazyColumn(
                                     modifier = Modifier
@@ -336,6 +375,20 @@ fun WebsiteBlockerContent(
                                             onToggleEssentialPassthrough = onToggleEssentialPassthrough,
                                             onToggleUseDohUpstream = onToggleUseDohUpstream,
                                             onRequestEnableFirewall = onRequestEnableFirewall
+                                        )
+                                    }
+                                    item(key = "smart_protection_profile_card") {
+                                        SmartProtectionProfileCard(
+                                            currentProfile = state.smartProtectionProfile,
+                                            onSelectProfile = onSelectSmartProtectionProfile
+                                        )
+                                    }
+                                    item(key = "ad_analytics_dashboard_card") {
+                                        AdAnalyticsDashboardCard(
+                                            analytics = state.analytics,
+                                            duplicatesRemovedCount = state.duplicatesRemovedCount,
+                                            compressedCacheBytes = state.compressedCacheBytes,
+                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros
                                         )
                                     }
                                     item(key = "ad_lists_header") {
@@ -392,11 +445,23 @@ fun WebsiteBlockerContent(
                                             selectedSection = effectiveRuleSection,
                                             onDomainInputChange = { domainInput = it },
                                             onAddRule = { isWhitelist ->
-                                                onAddWebsiteRule(domainInput, isWhitelist)
+                                                if (isWhitelist) {
+                                                    onAllowDomainPermanently(domainInput)
+                                                } else {
+                                                    onBlockDomainPermanently(domainInput)
+                                                }
                                                 domainInput = ""
                                             },
                                             onQuickAddDomain = { domain, isWhitelist ->
-                                                onAddWebsiteRule(domain, isWhitelist)
+                                                if (isWhitelist) {
+                                                    onAllowDomainPermanently(domain)
+                                                } else {
+                                                    onBlockDomainPermanently(domain)
+                                                }
+                                            },
+                                            onAddTemporaryRule = { domain, duration ->
+                                                onAllowDomainTemporarily(domain, duration)
+                                                domainInput = ""
                                             }
                                         )
                                     }
@@ -405,7 +470,7 @@ fun WebsiteBlockerContent(
                                             RecentBlockedDomainsCard(
                                                 domains = state.recentBlockedDomains,
                                                 onAllowDomain = { domain ->
-                                                    onAddWebsiteRule(domain, true)
+                                                    onAllowDomainPermanently(domain)
                                                 }
                                             )
                                         }
@@ -432,6 +497,19 @@ fun WebsiteBlockerContent(
                                                     WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
                                                     WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
                                                     else -> Unit
+                                                }
+                                            },
+                                            onOpenImport = { isImportDialogOpen = true },
+                                            onOpenExport = {
+                                                coroutineScope.launch {
+                                                    exportRulesPayload = onExportWebsiteRules()
+                                                    isExportDialogOpen = true
+                                                }
+                                            },
+                                            onOpenBackupRestore = {
+                                                coroutineScope.launch {
+                                                    exportBackupPayload = onExportBackupJson()
+                                                    isBackupRestoreDialogOpen = true
                                                 }
                                             }
                                         )
@@ -482,11 +560,23 @@ fun WebsiteBlockerContent(
                                             selectedSection = effectiveRuleSection,
                                             onDomainInputChange = { domainInput = it },
                                             onAddRule = { isWhitelist ->
-                                                onAddWebsiteRule(domainInput, isWhitelist)
+                                                if (isWhitelist) {
+                                                    onAllowDomainPermanently(domainInput)
+                                                } else {
+                                                    onBlockDomainPermanently(domainInput)
+                                                }
                                                 domainInput = ""
                                             },
                                             onQuickAddDomain = { domain, isWhitelist ->
-                                                onAddWebsiteRule(domain, isWhitelist)
+                                                if (isWhitelist) {
+                                                    onAllowDomainPermanently(domain)
+                                                } else {
+                                                    onBlockDomainPermanently(domain)
+                                                }
+                                            },
+                                            onAddTemporaryRule = { domain, duration ->
+                                                onAllowDomainTemporarily(domain, duration)
+                                                domainInput = ""
                                             }
                                         )
                                     }
@@ -495,7 +585,7 @@ fun WebsiteBlockerContent(
                                             RecentBlockedDomainsCard(
                                                 domains = state.recentBlockedDomains,
                                                 onAllowDomain = { domain ->
-                                                    onAddWebsiteRule(domain, true)
+                                                    onAllowDomainPermanently(domain)
                                                 }
                                             )
                                         }
@@ -513,6 +603,19 @@ fun WebsiteBlockerContent(
                                                     WebsiteTabSection.WHITELIST -> onClearWebsiteRules(true)
                                                     WebsiteTabSection.ALLOWED_APPS -> onClearBypassApps()
                                                     else -> Unit
+                                                }
+                                            },
+                                            onOpenImport = { isImportDialogOpen = true },
+                                            onOpenExport = {
+                                                coroutineScope.launch {
+                                                    exportRulesPayload = onExportWebsiteRules()
+                                                    isExportDialogOpen = true
+                                                }
+                                            },
+                                            onOpenBackupRestore = {
+                                                coroutineScope.launch {
+                                                    exportBackupPayload = onExportBackupJson()
+                                                    isBackupRestoreDialogOpen = true
                                                 }
                                             }
                                         )
@@ -706,7 +809,7 @@ fun WebsiteBlockerContent(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "Live DNS Query Feed",
+                                            text = "Filter Log (Live Feed)",
                                             style = MaterialTheme.typography.titleMedium,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
@@ -758,10 +861,13 @@ fun WebsiteBlockerContent(
                                     }
                                 } else {
                                     items(items = filteredDnsLogs, key = { "dnslog_${it.id}" }) { entry ->
-                                        DnsQueryLogRow(
+                                        FilterLogEntryCard(
                                             entry = entry,
-                                            onBlockDomain = { domain -> onAddWebsiteRule(domain, false) },
-                                            onAllowDomain = { domain -> onAddWebsiteRule(domain, true) }
+                                            onAllowTemporarily = onAllowDomainTemporarily,
+                                            onAllowPermanently = onAllowDomainPermanently,
+                                            onBlockPermanently = onBlockDomainPermanently,
+                                            onReportFalsePositive = onReportFalsePositive,
+                                            onNotifyCopied = onNotifyCopied
                                         )
                                     }
                                 }
@@ -780,6 +886,36 @@ fun WebsiteBlockerContent(
                 onAddCustomAdFilterList(title, url, category)
                 isAddFilterDialogOpen = false
             }
+        )
+    }
+
+    if (isImportDialogOpen) {
+        ImportRulesDialog(
+            onDismiss = { isImportDialogOpen = false },
+            onImport = { rawText, isWhitelist ->
+                onImportWebsiteRules(rawText, isWhitelist)
+                isImportDialogOpen = false
+            }
+        )
+    }
+
+    if (isExportDialogOpen) {
+        ExportRulesDialog(
+            exportedText = exportRulesPayload,
+            onDismiss = { isExportDialogOpen = false },
+            onNotifyCopied = onNotifyCopied
+        )
+    }
+
+    if (isBackupRestoreDialogOpen) {
+        BackupAndRestoreRulesDialog(
+            backupJson = exportBackupPayload,
+            onDismiss = { isBackupRestoreDialogOpen = false },
+            onRestore = { rawJson ->
+                onRestoreBackupJson(rawJson)
+                isBackupRestoreDialogOpen = false
+            },
+            onNotifyCopied = onNotifyCopied
         )
     }
 }
@@ -948,7 +1084,10 @@ private fun WebsiteRulesSubTabsBar(
     whitelistCount: Int,
     allowedAppsCount: Int,
     onSelectSection: (WebsiteTabSection) -> Unit,
-    onClearCurrent: () -> Unit
+    onClearCurrent: () -> Unit,
+    onOpenImport: () -> Unit = {},
+    onOpenExport: () -> Unit = {},
+    onOpenBackupRestore: () -> Unit = {}
 ) {
     val isDark = LocalIsDarkTheme.current
     val ruleSections = listOf(
@@ -974,12 +1113,35 @@ private fun WebsiteRulesSubTabsBar(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            if (currentCount > 0) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 TextButton(
-                    onClick = onClearCurrent,
-                    modifier = Modifier.testTag("clear_current_website_section_button")
+                    onClick = onOpenImport,
+                    modifier = Modifier.testTag("rules_import_button")
                 ) {
-                    Text("Clear ($currentCount)")
+                    Text("Import")
+                }
+                TextButton(
+                    onClick = onOpenExport,
+                    modifier = Modifier.testTag("rules_export_button")
+                ) {
+                    Text("Export")
+                }
+                TextButton(
+                    onClick = onOpenBackupRestore,
+                    modifier = Modifier.testTag("rules_backup_restore_button")
+                ) {
+                    Text("Backup")
+                }
+                if (currentCount > 0) {
+                    TextButton(
+                        onClick = onClearCurrent,
+                        modifier = Modifier.testTag("clear_current_website_section_button")
+                    ) {
+                        Text("Clear ($currentCount)")
+                    }
                 }
             }
         }
@@ -1409,7 +1571,8 @@ private fun ManualDomainEntryCard(
     selectedSection: WebsiteTabSection,
     onDomainInputChange: (String) -> Unit,
     onAddRule: (isWhitelist: Boolean) -> Unit,
-    onQuickAddDomain: (String, Boolean) -> Unit
+    onQuickAddDomain: (String, Boolean) -> Unit,
+    onAddTemporaryRule: ((domain: String, duration: TempAllowDuration) -> Unit)? = null
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val defaultTargetIsWhitelist = selectedSection == WebsiteTabSection.WHITELIST
@@ -1560,6 +1723,42 @@ private fun ManualDomainEntryCard(
                 }
             }
 
+            if (onAddTemporaryRule != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Temp Allow:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TempAllowDuration.entries.forEach { duration ->
+                        OutlinedButton(
+                            onClick = {
+                                if (domainInput.isNotBlank()) {
+                                    onAddTemporaryRule(domainInput, duration)
+                                    keyboard?.hide()
+                                }
+                            },
+                            enabled = domainInput.isNotBlank(),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("temp_allow_${duration.name.lowercase()}_button")
+                        ) {
+                            Text(
+                                text = duration.label,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = if (defaultTargetIsWhitelist) {
@@ -1681,18 +1880,41 @@ private fun WebsiteRuleRow(
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = rule.domain,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (rule.isTemporary) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = WarningAmber.copy(alpha = 0.16f),
+                            border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.45f))
+                        ) {
+                            Text(
+                                text = if (rule.isExpired()) "Expired" else "Temporary",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = WarningAmber,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 Text(
-                    text = rule.domain,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = if (rule.isWhitelist) {
-                        "Always allowed (${rule.domain} & *.${rule.domain})"
-                    } else {
-                        "Blocked (${rule.domain} & *.${rule.domain})"
+                    text = when {
+                        rule.isExpired() -> "Expired temporary allow (inactive)"
+                        rule.isTemporary -> {
+                            val remainingMinutes = ((rule.expiresAtMillis - System.currentTimeMillis()) / 60000L).coerceAtLeast(1)
+                            val remainingHours = remainingMinutes / 60
+                            val timeStr = if (remainingHours >= 24) "${remainingHours / 24}d left" else if (remainingHours > 0) "${remainingHours}h left" else "${remainingMinutes}m left"
+                            "Temporary allow • $timeStr (${rule.domain} & *.${rule.domain})"
+                        }
+                        rule.isWhitelist -> "Permanent allow (${rule.domain} & *.${rule.domain})"
+                        else -> "Permanent block (${rule.domain} & *.${rule.domain})"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

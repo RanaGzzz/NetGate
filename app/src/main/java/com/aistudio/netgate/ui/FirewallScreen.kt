@@ -566,7 +566,17 @@ fun FirewallScreen(
                                         onClearDnsLogs = viewModel::clearDnsLogs,
                                         onRequestEnableFirewall = onRequestEnableFirewall,
                                         onOpenDnsProtection = viewModel::openDnsProtection,
-                                        onOpenDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.DPI_BYPASS) }
+                                        onOpenDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.DPI_BYPASS) },
+                                        onSelectSmartProtectionProfile = viewModel::applySmartProtectionProfile,
+                                        onAllowDomainTemporarily = viewModel::allowDomainTemporarily,
+                                        onAllowDomainPermanently = viewModel::allowDomainPermanently,
+                                        onBlockDomainPermanently = viewModel::blockDomainPermanently,
+                                        onReportFalsePositive = viewModel::reportFalsePositive,
+                                        onImportWebsiteRules = viewModel::importWebsiteRules,
+                                        onExportWebsiteRules = viewModel::exportWebsiteRulesText,
+                                        onExportBackupJson = viewModel::exportAdBlockBackupJson,
+                                        onRestoreBackupJson = viewModel::restoreAdBlockBackupJson,
+                                        onNotifyCopied = viewModel::notifyFilterLogAction
                                     )
                                 }
 
