@@ -1105,45 +1105,47 @@ private fun WebsiteRulesSubTabsBar(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Domain Rules & App Exceptions",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth()
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Domain Rules & App Exceptions",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
+            TextButton(
+                onClick = onOpenImport,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.testTag("rules_import_button")
             ) {
+                Text("Import", maxLines = 1, softWrap = false)
+            }
+            TextButton(
+                onClick = onOpenExport,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.testTag("rules_export_button")
+            ) {
+                Text("Export", maxLines = 1, softWrap = false)
+            }
+            TextButton(
+                onClick = onOpenBackupRestore,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.testTag("rules_backup_restore_button")
+            ) {
+                Text("Backup", maxLines = 1, softWrap = false)
+            }
+            if (currentCount > 0) {
                 TextButton(
-                    onClick = onOpenImport,
-                    modifier = Modifier.testTag("rules_import_button")
+                    onClick = onClearCurrent,
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.testTag("clear_current_website_section_button")
                 ) {
-                    Text("Import")
-                }
-                TextButton(
-                    onClick = onOpenExport,
-                    modifier = Modifier.testTag("rules_export_button")
-                ) {
-                    Text("Export")
-                }
-                TextButton(
-                    onClick = onOpenBackupRestore,
-                    modifier = Modifier.testTag("rules_backup_restore_button")
-                ) {
-                    Text("Backup")
-                }
-                if (currentCount > 0) {
-                    TextButton(
-                        onClick = onClearCurrent,
-                        modifier = Modifier.testTag("clear_current_website_section_button")
-                    ) {
-                        Text("Clear ($currentCount)")
-                    }
+                    Text("Clear ($currentCount)", maxLines = 1, softWrap = false)
                 }
             }
         }

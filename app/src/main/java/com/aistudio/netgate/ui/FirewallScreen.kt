@@ -53,7 +53,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import android.net.VpnService
 import androidx.compose.material.icons.rounded.Shield
@@ -248,50 +247,6 @@ fun FirewallScreen(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(end = 4.dp)
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        when (uiState.currentDestination) {
-                                            AppDestination.DATA_USAGE -> {
-                                                viewModel.refreshDataUsage()
-                                                if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.SECURITY_AUDIT) {
-                                                    viewModel.runDeviceSecurityAudit()
-                                                } else if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.SPEED_TEST) {
-                                                    viewModel.refreshConnectionDetails()
-                                                } else if (uiState.dataUsageState.selectedSubTab == com.aistudio.netgate.data.model.DataUsageSubTab.WIFI) {
-                                                    viewModel.refreshWifiDiagnostics()
-                                                }
-                                            }
-                                            AppDestination.DNS -> {
-                                                viewModel.refreshConnectionDetails()
-                                                viewModel.runDnsCheck()
-                                            }
-                                            AppDestination.HOTSPOT -> {
-                                                viewModel.refreshConnectionDetails()
-                                                viewModel.refreshHotspotEnvironment()
-                                            }
-                                            AppDestination.VPN_GUARD -> {
-                                                viewModel.refreshVpnGateServers(force = true)
-                                            }
-                                            AppDestination.FIREWALL, AppDestination.WEBSITES ->
-                                                viewModel.refreshInstalledApps()
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .testTag("refresh_apps_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Refresh,
-                                        contentDescription = when (uiState.currentDestination) {
-                                            AppDestination.DATA_USAGE -> "Sync data usage"
-                                            AppDestination.DNS -> "Refresh connection status"
-                                            AppDestination.HOTSPOT -> "Refresh hotspot status"
-                                            AppDestination.VPN_GUARD -> "Refresh VPNGate servers"
-                                            AppDestination.FIREWALL, AppDestination.WEBSITES -> "Refresh installed apps"
-                                        }
-                                    )
-                                }
-
                                 IconButton(
                                     onClick = { viewModel.openSettings() },
                                     modifier = Modifier

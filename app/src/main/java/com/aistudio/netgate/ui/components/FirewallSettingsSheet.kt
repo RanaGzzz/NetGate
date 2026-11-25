@@ -517,7 +517,7 @@ fun FirewallSettingsSheet(
                                 AppUpdateStatus.IDLE -> "v${BuildConfig.VERSION_NAME}"
                                 AppUpdateStatus.CHECKING -> "Checking…"
                                 AppUpdateStatus.UP_TO_DATE -> "Up to date"
-                                AppUpdateStatus.UPDATE_AVAILABLE -> "Update ${appUpdateState.latestRelease?.tagName.orEmpty()}"
+                                AppUpdateStatus.UPDATE_AVAILABLE -> appUpdateState.latestRelease?.tagName.orEmpty().ifBlank { "Update" }
                                 AppUpdateStatus.ERROR -> "Check failed"
                             }
 

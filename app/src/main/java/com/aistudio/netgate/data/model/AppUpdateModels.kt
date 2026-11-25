@@ -57,13 +57,20 @@ object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
             versionLabel = "NetGate 3.9.3",
-            subtitle = "In-App Crash Logs and Filter Memory Budget Visibility",
+            subtitle = "In-App Crash Logs, Filter Budget and Interface Polish",
             sections = listOf(
                 ChangelogSection(
                     heading = "Troubleshooting",
                     bullets = listOf(
                         "Crashes are saved inside the app with their stack trace, cause, version and device details, ready to read or copy from Settings → Diagnostics & Crash Logs.",
                         "The ad-block dashboard reports how many enabled filter lists the memory budget skipped, so a missing block can be explained."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Interface",
+                    bullets = listOf(
+                        "Settings badges and chevrons line up in one fixed right-hand column, and the SNI proxy tiles are equal size.",
+                        "Domain rule Import, Export, Backup and Clear have their own row, and the app bar no longer shows a duplicate refresh button."
                     )
                 )
             )

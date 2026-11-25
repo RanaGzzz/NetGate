@@ -56,6 +56,9 @@ import java.util.Locale
 
 private val SettingsCardCorner = 18.dp
 
+/** Fixed slot for the badge + chevron so they line up on every card regardless of title length. */
+private val SettingsTrailingSlotWidth = 116.dp
+
 @Composable
 internal fun SettingsSectionHeader(
     title: String,
@@ -187,7 +190,11 @@ internal fun SettingsNavigationCard(
                 }
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.width(SettingsTrailingSlotWidth),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
                 if (!statusLabel.isNullOrBlank()) {
                     SettingsStatusPill(label = statusLabel, accent = statusAccent)
                     Spacer(modifier = Modifier.width(6.dp))
@@ -270,7 +277,11 @@ internal fun SettingsAccordionCard(
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.width(SettingsTrailingSlotWidth),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
+                ) {
                     if (!statusLabel.isNullOrBlank()) {
                         SettingsStatusPill(
                             label = statusLabel,
