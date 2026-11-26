@@ -3,6 +3,7 @@ package com.aistudio.netgate.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -80,106 +82,68 @@ fun SmartProtectionProfileCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = EmeraldPrimary.copy(alpha = 0.16f),
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.Tune,
-                                contentDescription = null,
-                                tint = EmeraldPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Smart Protection Profiles",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "One-tap rule profiles tailored for your daily workflow",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    text = "Smart Protection Profiles",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 SmartProtectionProfile.entries.forEach { profile ->
                     val isSelected = profile == currentProfile
-                    val icon = when (profile) {
-                        SmartProtectionProfile.BALANCED -> Icons.Rounded.Shield
-                        SmartProtectionProfile.MAXIMUM_PROTECTION -> Icons.Rounded.Security
-                        SmartProtectionProfile.PRIVACY_FOCUSED -> Icons.Rounded.Lock
-                        SmartProtectionProfile.FAMILY_SAFE -> Icons.Rounded.FamilyRestroom
-                        SmartProtectionProfile.GAMING_MODE -> Icons.Rounded.Gamepad
-                    }
-                    val accent = when (profile) {
-                        SmartProtectionProfile.BALANCED -> EmeraldPrimary
-                        SmartProtectionProfile.MAXIMUM_PROTECTION -> BlockedRed
-                        SmartProtectionProfile.PRIVACY_FOCUSED -> WifiAccent
-                        SmartProtectionProfile.FAMILY_SAFE -> WarningAmber
-                        SmartProtectionProfile.GAMING_MODE -> DataAccent
-                    }
+                    val selectedBg = Color(0xFFC4DF28)
+                    val selectedOnBg = Color(0xFF1B2B00)
 
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (isSelected) accent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        border = BorderStroke(
-                            width = if (isSelected) 1.5.dp else 1.dp,
-                            color = if (isSelected) accent else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isSelected) selectedBg else Color.White.copy(alpha = 0.08f),
+                        border = if (isSelected) null else BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .clickable { onSelectProfile(profile) }
                             .testTag("profile_chip_${profile.name.lowercase()}")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = if (isSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = profile.title,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (profile == SmartProtectionProfile.BALANCED) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = CircleShape,
-                                    color = EmeraldPrimary.copy(alpha = 0.2f),
-                                    modifier = Modifier.size(6.dp)
-                                ) {}
-                            }
                             if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .background(selectedOnBg.copy(alpha = 0.16f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = "Selected",
+                                        tint = selectedOnBg,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Rounded.Check,
-                                    contentDescription = "Selected",
-                                    tint = accent,
-                                    modifier = Modifier.size(14.dp)
+                                Text(
+                                    text = profile.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = selectedOnBg
+                                )
+                            } else {
+                                Text(
+                                    text = profile.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.88f)
                                 )
                             }
                         }

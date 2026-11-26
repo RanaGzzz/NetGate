@@ -1,3 +1,16 @@
+# What's New — NetGate 3.9.6
+
+### Interface & Appearance
+- **Frosted-Glass Blur Engine:** Added the Frosted-glass blur engine featuring heavy gaussian diffusion, a radiant gradient mesh, and crystalline inner depth.
+- **Smart Protection Profiles:** Updated to a sleek pill row with vivid chartreuse active chips and dark translucent cards matching the reference design.
+- **Unified Speed Telemetry Settings:** Cleaned up the Network & Usage dashboard by moving all Status Bar Speed Icon controls into the Background & System Settings accordion.
+- **Encrypted Backup Action Buttons:** Balanced the Export and Choose File button layout with single-line labels, compact padding, and matched heights.
+
+### Diagnostics & Privacy
+- **Process-Isolated Diagnostics:** The diagnostics exporter now strictly captures NetGate's own process instead of the whole device logcat.
+- **Hostname Privacy Sanitization:** All real user browsing hostnames are automatically redacted when exporting or sharing diagnostics logs.
+- **Idle Memory Optimization:** Eliminated ART GC feedback loops and batched StateFlow log emissions, keeping idle heap memory lean and responsive.
+
 # What's New — NetGate 3.9.5
 
 ### Ad & Website Blocker

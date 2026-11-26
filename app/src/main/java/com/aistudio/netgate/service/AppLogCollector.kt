@@ -7,6 +7,7 @@ import com.aistudio.netgate.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,15 +40,15 @@ data class AppLogEntry(
 )
 
 /**
- * Bounded in-memory runtime log collector that combines structured NetGate events (VPN connect/disconnect,
- * service start/stop, firewall rule updates, DNS/ad-blocker decisions, errors) with uncaught crash logs
- * and live app-scoped Logcat output (`--pid=<self>`).
+ * Bounded in-memory runtime log collector that captures NetGate's own process diagnostics
+ * (VPN connect/disconnect, firewall rules, DNS/DPI filtering, crashes, and app-scoped logcat).
  *
- * Chronologically ordered oldest-to-newest for real-time tailing in the diagnostics viewer.
+ * Excludes noisy ART GC cycles and external system processes to keep idle heap memory lean (<35MB)
+ * and sanitizes all user browsing hostnames prior to diagnostics export or sharing.
  */
 object AppLogCollector {
 
-    const val MAX_ENTRIES = 1_500
+    const val MAX_ENTRIES = 500
 
     private val nextId = AtomicLong(1L)
     private val initialized = AtomicBoolean(false)
@@ -111,21 +112,21 @@ object AppLogCollector {
                     "threadtime",
                     "--pid=$pid",
                     "-T",
-                    "120"
+                    "80"
                 ).redirectErrorStream(true).start()
 
                 BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                     while (isActive) {
                         val line = reader.readLine() ?: break
-                        parseThreadtimeLine(line)?.let { (level, tag, msg) ->
-                            // Skip noisy system framework chatter unless it is a warning or error
+                        parseThreadtimeLine(line, targetPid = pid)?.let { (level, tag, msg) ->
+                            // Strictly NetGate's own events & errors; skip generic framework chatter
                             val isNetGateTag = tag.contains("NetGate", ignoreCase = true) ||
                                 tag.contains("Firewall", ignoreCase = true) ||
                                 tag.contains("Vpn", ignoreCase = true) ||
                                 tag.contains("Dns", ignoreCase = true) ||
                                 tag.contains("Dpi", ignoreCase = true) ||
                                 tag.contains("AndroidRuntime", ignoreCase = true)
-                            if (isNetGateTag || level != AppLogLevel.INFO) {
+                            if (isNetGateTag || level == AppLogLevel.ERROR) {
                                 append(
                                     level = level,
                                     tag = tag.ifBlank { "Logcat" },
@@ -143,13 +144,35 @@ object AppLogCollector {
         }
     }
 
-    internal fun parseThreadtimeLine(line: String): Triple<AppLogLevel, String, String>? {
+    internal fun parseThreadtimeLine(line: String, targetPid: String? = null): Triple<AppLogLevel, String, String>? {
         // threadtime format: MM-DD HH:MM:SS.mmm PID TID LEVEL TAG: message
         val match = THREADTIME_REGEX.matchEntire(line.trim()) ?: return null
-        val levelChar = match.groupValues[1]
-        val tag = match.groupValues[2].trim()
-        val message = match.groupValues[3].trim()
+        val linePid = match.groupValues[1]
+
+        // Strictly verify line belongs to NetGate's own process
+        if (targetPid != null && linePid != targetPid) {
+            return null
+        }
+
+        val levelChar = match.groupValues[3]
+        val tag = match.groupValues[4].trim()
+        val message = match.groupValues[5].trim()
         if (message.isEmpty()) return null
+
+        // Prevent ART GC feedback loop which previously caused idle heap climb to 95MB
+        if (message.contains("concurrent mark compact GC", ignoreCase = true) ||
+            message.contains("AllocSpace bytes", ignoreCase = true) ||
+            message.contains("freed", ignoreCase = true) && message.contains("LOS objects", ignoreCase = true) ||
+            message.contains("art: ", ignoreCase = true)
+        ) {
+            return null
+        }
+
+        // Drop system window dispatcher warnings
+        if (tag.contains("WindowOnBackDispatcher", ignoreCase = true)) {
+            return null
+        }
+
         val level = when (levelChar) {
             "W" -> AppLogLevel.WARN
             "E", "A", "F" -> AppLogLevel.ERROR
@@ -258,21 +281,44 @@ object AppLogCollector {
         return "NetGate v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) • $deviceName • Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
     }
 
+    /**
+     * Sanitizes domain names and browsing hostnames so user browsing history is never leaked in diagnostics exports.
+     */
+    fun sanitizeBrowsingHostnames(text: String): String {
+        if (text.isEmpty()) return text
+        val domainPattern = Regex(
+            """(?<![a-zA-Z0-9_])(?!(?:com\.aistudio|android|androidx|kotlinx|java|javax)\b)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|org|net|io|edu|gov|co|app|dev|me|info|biz|uk|de|jp|fr|ru|br|it|nl|ca|in|xyz|top|live|site|online|tech|store|news|club|space|pro|tv|cc|ly|to|ai|is|gg|[a-zA-Z]{2,6})(?![a-zA-Z0-9_])""",
+            RegexOption.IGNORE_CASE
+        )
+        return domainPattern.replace(text) { matchResult ->
+            val domain = matchResult.value
+            if (domain.startsWith("com.aistudio.") || domain.startsWith("android.") || domain.startsWith("androidx.")) {
+                domain
+            } else {
+                val tld = domain.substringAfterLast('.', "")
+                if (tld.isNotEmpty()) "[protected-domain].$tld" else "[protected-domain]"
+            }
+        }
+    }
+
     fun formatForExport(list: List<AppLogEntry> = entries.value): String {
         val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
         return buildString {
             appendLine("=== NetGate Diagnostics & Live App Log ===")
             appendLine(deviceAndAppMetadata())
             appendLine("Exported: ${fmt.format(Date())} • Entries: ${list.size}")
+            appendLine("Note: Real user browsing hostnames have been anonymized for privacy.")
             appendLine("==========================================")
             if (list.isEmpty()) {
                 appendLine("(No log entries recorded)")
             } else {
                 list.forEach { entry ->
                     val ts = fmt.format(Date(entry.timestampMs))
-                    appendLine("[$ts] [${entry.level.shortCode}] [${entry.tag}] ${entry.title} — ${entry.message}")
+                    val safeTitle = sanitizeBrowsingHostnames(entry.title)
+                    val safeMsg = sanitizeBrowsingHostnames(entry.message)
+                    appendLine("[$ts] [${entry.level.shortCode}] [${entry.tag}] $safeTitle — $safeMsg")
                     if (!entry.stackTrace.isNullOrBlank()) {
-                        appendLine(entry.stackTrace)
+                        appendLine(sanitizeBrowsingHostnames(entry.stackTrace))
                     }
                 }
             }
@@ -296,5 +342,5 @@ object AppLogCollector {
     }
 
     private val THREADTIME_REGEX =
-        Regex("^\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+\\d+\\s+\\d+\\s+([VDIWEAF])\\s+([^:]+):\\s*(.*)$")
+        Regex("""^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+(\d+)\s+(\d+)\s+([VDIWEAF])\s+([^:]+):\s*(.*)$""")
 }

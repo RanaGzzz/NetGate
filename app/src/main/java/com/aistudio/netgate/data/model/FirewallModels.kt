@@ -150,7 +150,7 @@ enum class BlurEngineStyle(
         saturationBoost = 1.28f
     ),
     MORPH(
-        title = "Morph",
+        title = "Frosted-glass",
         subtitle = "Heavy gaussian blur, soft glowing gradient & subtle dither grain",
         backdropRadiusDp = 96f,
         modalBlurDp = 22f,

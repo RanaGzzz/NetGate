@@ -809,11 +809,11 @@ fun FrostedSheetContainer(
     val ditherBrush = remember { buildDitherNoiseShaderBrush() }
 
     val baseSheetAlpha = when (blurConfig.style) {
-        BlurEngineStyle.OFF -> if (isDark) 0.95f else 0.97f
-        BlurEngineStyle.SOFT_GLASS -> if (isDark) 0.84f else 0.90f
-        BlurEngineStyle.ACRYLIC_PRO -> if (isDark) 0.78f else 0.86f
-        BlurEngineStyle.ULTRA_FROST -> if (isDark) 0.74f else 0.82f
-        BlurEngineStyle.MORPH -> if (isDark) 0.70f else 0.78f
+        BlurEngineStyle.OFF -> if (isDark) 0.98f else 0.99f
+        BlurEngineStyle.SOFT_GLASS -> if (isDark) 0.95f else 0.97f
+        BlurEngineStyle.ACRYLIC_PRO -> if (isDark) 0.94f else 0.96f
+        BlurEngineStyle.ULTRA_FROST -> if (isDark) 0.93f else 0.95f
+        BlurEngineStyle.MORPH -> if (isDark) 0.92f else 0.95f
     }
 
     val sheetTopShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)

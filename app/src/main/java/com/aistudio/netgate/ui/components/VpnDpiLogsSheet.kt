@@ -1064,6 +1064,8 @@ private fun formatLogEntriesForClipboard(entries: List<VpnDpiLogEntry>): String 
     if (entries.isEmpty()) return "No logs"
     val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     return entries.joinToString("\n") {
-        "[${fmt.format(Date(it.timestampMs))}] [${it.category.label}] [${it.severity.label}] ${it.title} — ${it.detail}"
+        val safeTitle = AppLogCollector.sanitizeBrowsingHostnames(it.title)
+        val safeDetail = AppLogCollector.sanitizeBrowsingHostnames(it.detail)
+        "[${fmt.format(Date(it.timestampMs))}] [${it.category.label}] [${it.severity.label}] $safeTitle — $safeDetail"
     }
 }

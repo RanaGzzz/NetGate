@@ -1,8 +1,11 @@
 package com.aistudio.netgate.ui.components
 
 import android.content.Context
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +21,8 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -29,11 +34,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.FirewallPreferencesState
+import com.aistudio.netgate.data.model.StatusBarSpeedStyle
 import com.aistudio.netgate.service.BackgroundPowerHelper
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.WarningAmber
@@ -42,6 +49,7 @@ import com.aistudio.netgate.ui.theme.WarningAmber
  * Inline Background & System controls rendered inside the Background & System [SettingsAccordionCard]
  * on the main Settings list (no separate full-page drill-down).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BackgroundSystemSettingsAccordionBody(
     context: Context,
@@ -49,6 +57,8 @@ fun BackgroundSystemSettingsAccordionBody(
     isIgnoringBatteryOptimizations: Boolean,
     onToggleStatusBarSpeed: (Boolean) -> Unit,
     onToggleExcludeFromRecents: (Boolean) -> Unit,
+    onSelectStatusBarStyle: (StatusBarSpeedStyle) -> Unit = {},
+    onToggleShowDailyUsage: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var statusBarSpeedExpanded by rememberSaveable { mutableStateOf(false) }
@@ -91,6 +101,74 @@ fun BackgroundSystemSettingsAccordionBody(
                 onCheckedChange = onToggleStatusBarSpeed,
                 switchTestTag = "settings_status_bar_speed_switch"
             )
+
+            if (preferences.isStatusBarSpeedEnabled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Status Bar Icon Style",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    StatusBarSpeedStyle.entries.forEach { style ->
+                        val selected = preferences.statusBarSpeedStyle == style
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onSelectStatusBarStyle(style) },
+                            label = {
+                                Text(
+                                    text = style.title,
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            modifier = Modifier.testTag("settings_status_bar_style_${style.name.lowercase()}")
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onToggleShowDailyUsage(!preferences.showStatusBarDailyUsage) }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Show Today's Total in Notification",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (preferences.showStatusBarDailyUsage) {
+                                "Displays today's Wi-Fi + Mobile Rx/Tx totals"
+                            } else {
+                                "Displays current session Rx/Tx totals"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = preferences.showStatusBarDailyUsage,
+                        onCheckedChange = onToggleShowDailyUsage,
+                        modifier = Modifier.testTag("settings_status_bar_daily_usage_switch")
+                    )
+                }
+            }
         }
 
         SettingsAccordionCard(

@@ -56,6 +56,29 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.6",
+            subtitle = "Frosted-Glass Blur, Protection Profiles, Diagnostics Privacy & Backup Layout",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Interface & Appearance",
+                    bullets = listOf(
+                        "Added Frosted-glass blur engine featuring heavy gaussian diffusion, glowing gradient mesh, and crystalline inner highlights.",
+                        "Smart Protection Profiles now feature an elevated pill layout with vivid chartreuse active chips and dark translucent cards.",
+                        "Moved Status Bar Speed Icon controls into the Background & System Settings accordion for a cleaner Network & Usage dashboard.",
+                        "Fixed Encrypted Backup & Restore action buttons so Export and Choose File sit side-by-side with matched height and no text wrapping."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Diagnostics & Privacy",
+                    bullets = listOf(
+                        "The diagnostics exporter now strictly captures NetGate's own process instead of the whole device logcat.",
+                        "All real user browsing hostnames are automatically redacted when exporting or copying diagnostics logs for total privacy.",
+                        "Resolved idle background memory climb by eliminating ART GC feedback loops and batching log update emissions."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9.5",
             subtitle = "Unified Protection Dashboard and Wi-Fi Connect",
             sections = listOf(

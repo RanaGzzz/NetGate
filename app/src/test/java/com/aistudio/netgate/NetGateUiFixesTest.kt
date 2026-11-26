@@ -47,6 +47,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -439,5 +440,29 @@ class NetGateUiFixesTest {
         assertEquals(24f * 1.4f, BlurEngineStyle.MORPH.liquidFrostDp(1.4f).value, 0.1f)
         assertEquals(0f, BlurEngineStyle.OFF.liquidFrostDp(1.5f).value, 0.01f)
         assertEquals(BlurEngineStyle.MORPH, BlurEngineStyle.entries.last())
+        assertEquals("Frosted-glass", BlurEngineStyle.MORPH.title)
+    }
+
+    @Test
+    fun `Diagnostics exporter anonymizes browsing hostnames and ignores external PID and GC chatter`() {
+        val raw = "DPI/DNS: web.facebook.com and i.instagram.com"
+        val safe = AppLogCollector.sanitizeBrowsingHostnames(raw)
+        assertTrue(safe.contains("[protected-domain]"))
+        assertFalse(safe.contains("facebook.com"))
+        assertFalse(safe.contains("instagram.com"))
+
+        // External PID is dropped
+        val foreignPid = AppLogCollector.parseThreadtimeLine(
+            "11-26 01:02:03.456  9999  5678 W OtherApp: sensitive external chatter",
+            targetPid = "1234"
+        )
+        assertNull(foreignPid)
+
+        // Internal ART GC loop chatter is dropped
+        val gcLog = AppLogCollector.parseThreadtimeLine(
+            "11-26 01:02:03.456  1234  5678 I .netgate: Background concurrent mark compact GC freed 10MB AllocSpace bytes",
+            targetPid = "1234"
+        )
+        assertNull(gcLog)
     }
 }

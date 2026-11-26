@@ -853,6 +853,8 @@ fun FirewallScreen(
             onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
             onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
             onToggleExcludeFromRecents = viewModel::setExcludeFromRecents,
+            onSelectStatusBarStyle = viewModel::setStatusBarSpeedStyle,
+            onToggleShowDailyUsage = viewModel::setShowStatusBarDailyUsage,
             appUpdateState = uiState.appUpdateState,
             vpnDpiLogsCount = maxOf(uiState.vpnDpiLogs.size, appLogs.size),
             onCheckForUpdates = viewModel::checkForGitHubUpdates,

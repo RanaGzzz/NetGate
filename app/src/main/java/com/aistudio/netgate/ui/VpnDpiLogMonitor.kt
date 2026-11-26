@@ -381,7 +381,9 @@ class VpnDpiLogMonitor {
         val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
         return entries.joinToString("\n") { entry ->
             val time = formatter.format(Date(entry.timestampMs))
-            "[$time] [${entry.category.label}] [${entry.severity.label}] ${entry.title} — ${entry.detail}"
+            val safeTitle = AppLogCollector.sanitizeBrowsingHostnames(entry.title)
+            val safeDetail = AppLogCollector.sanitizeBrowsingHostnames(entry.detail)
+            "[$time] [${entry.category.label}] [${entry.severity.label}] $safeTitle — $safeDetail"
         }
     }
 
