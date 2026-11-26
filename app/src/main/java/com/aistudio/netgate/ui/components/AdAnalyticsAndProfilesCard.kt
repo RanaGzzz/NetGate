@@ -218,13 +218,158 @@ fun SmartProtectionProfileCard(
     }
 }
 
+/**
+ * Live interception metrics. Rendered inside the Ad & Tracker Blocker card so the blocker and its
+ * analytics are one surface, matching the combined dashboard layout.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AdAnalyticsDashboardCard(
+fun AdAnalyticsMetricsSection(
     analytics: AdAnalyticsSummary,
     duplicatesRemovedCount: Int,
     compressedCacheBytes: Long,
     avgLookupLatencyMicros: Long,
     skippedFilterListCount: Int = 0,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AnalyticsTotal(
+                label = "Total Requests",
+                value = formatStatNumber(analytics.totalRequests),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+                testTag = "analytics_stat_total_requests"
+            )
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(20.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            AnalyticsTotal(
+                label = "Total Blocked",
+                value = formatStatNumber(analytics.totalBlockedRequests),
+                color = BlockedRed,
+                modifier = Modifier.weight(1f),
+                testTag = "analytics_stat_total_blocked"
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // 5 Category Breakdown Tiles (Ads, Trackers, Malware, Phishing, Telemetry)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CategoryPill(
+                label = "Ads",
+                count = analytics.adsBlocked,
+                color = BlockedRed,
+                icon = Icons.Rounded.Shield,
+                modifier = Modifier.weight(1f)
+            )
+            CategoryPill(
+                label = "Trackers",
+                count = analytics.trackersBlocked,
+                color = WifiAccent,
+                icon = Icons.Rounded.TrackChanges,
+                modifier = Modifier.weight(1f)
+            )
+            CategoryPill(
+                label = "Malware",
+                count = analytics.malwareBlocked,
+                color = WarningAmber,
+                icon = Icons.Rounded.BugReport,
+                modifier = Modifier.weight(1f)
+            )
+            CategoryPill(
+                label = "Phishing",
+                count = analytics.phishingBlocked,
+                color = Color(0xFFE91E63),
+                icon = Icons.Rounded.Phishing,
+                modifier = Modifier.weight(1f)
+            )
+            CategoryPill(
+                label = "Telemetry",
+                count = analytics.telemetryBlocked,
+                color = DataAccent,
+                icon = Icons.Rounded.Public,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Engine performance: latency, compressed cache, deduplication and the memory budget note.
+        // A FlowRow keeps the memory-budget sentence on its own line instead of squeezing every
+        // metric into a single unbreakable row.
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("ad_engine_performance_bar")
+        ) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val latencyLabel = if (avgLookupLatencyMicros in 1..9999) {
+                    String.format(Locale.US, "%.1f ms", avgLookupLatencyMicros / 1000.0)
+                } else if (avgLookupLatencyMicros >= 10000) {
+                    "${avgLookupLatencyMicros / 1000L} ms"
+                } else {
+                    "< 1 ms"
+                }
+                EngineMetric(
+                    icon = Icons.Rounded.Speed,
+                    tint = EmeraldPrimary,
+                    text = "DNS Latency: $latencyLabel",
+                    textColor = EmeraldPrimary,
+                    bold = true
+                )
+                EngineMetric(
+                    icon = Icons.Rounded.FolderZip,
+                    tint = DataAccent,
+                    text = "GZIP: ${formatBytesCompact(compressedCacheBytes)}",
+                    textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (duplicatesRemovedCount > 0) {
+                    EngineMetric(
+                        icon = Icons.Rounded.Analytics,
+                        tint = EmeraldPrimary,
+                        text = "Dedup: -${formatStatNumber(duplicatesRemovedCount.toLong())}",
+                        textColor = EmeraldPrimary
+                    )
+                }
+                // Tells the user why not every enabled list is filtering: the engine stopped
+                // adding domains once the device memory budget was reached.
+                if (skippedFilterListCount > 0) {
+                    Text(
+                        text = "Memory budget: $skippedFilterListCount list" +
+                            (if (skippedFilterListCount == 1) "" else "s") + " skipped",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WarningAmber,
+                        modifier = Modifier.testTag("ad_memory_budget_warning")
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdAnalyticsDashboardCard(
+    analytics: AdAnalyticsSummary,
     modifier: Modifier = Modifier
 ) {
     FrostedSurface(
@@ -241,183 +386,45 @@ fun AdAnalyticsDashboardCard(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = DataAccent.copy(alpha = 0.16f),
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.Analytics,
-                                contentDescription = null,
-                                tint = DataAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Analytics Dashboard",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Real-time threat & ad interception metrics",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Primary Total & Blocked Stats
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                MetricTile(
-                    title = "Total Requests",
-                    value = formatStatNumber(analytics.totalRequests),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                    testTag = "analytics_stat_total_requests"
-                )
-                MetricTile(
-                    title = "Total Blocked",
-                    value = formatStatNumber(analytics.totalBlockedRequests),
-                    color = BlockedRed,
-                    modifier = Modifier.weight(1f),
-                    testTag = "analytics_stat_total_blocked"
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 5 Category Breakdown Tiles (Ads, Trackers, Malware, Phishing, Telemetry)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                CategoryPill(
-                    label = "Ads",
-                    count = analytics.adsBlocked,
-                    color = BlockedRed,
-                    icon = Icons.Rounded.Shield,
-                    modifier = Modifier.weight(1f)
-                )
-                CategoryPill(
-                    label = "Trackers",
-                    count = analytics.trackersBlocked,
-                    color = WifiAccent,
-                    icon = Icons.Rounded.TrackChanges,
-                    modifier = Modifier.weight(1f)
-                )
-                CategoryPill(
-                    label = "Malware",
-                    count = analytics.malwareBlocked,
-                    color = WarningAmber,
-                    icon = Icons.Rounded.BugReport,
-                    modifier = Modifier.weight(1f)
-                )
-                CategoryPill(
-                    label = "Phishing",
-                    count = analytics.phishingBlocked,
-                    color = Color(0xFFE91E63),
-                    icon = Icons.Rounded.Phishing,
-                    modifier = Modifier.weight(1f)
-                )
-                CategoryPill(
-                    label = "Telemetry",
-                    count = analytics.telemetryBlocked,
-                    color = DataAccent,
-                    icon = Icons.Rounded.Public,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Engine Performance Bar (<10ms target, GZIP compression, Deduplication)
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("ad_engine_performance_bar")
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DataAccent.copy(alpha = 0.16f),
+                    modifier = Modifier.size(38.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Rounded.Speed,
-                            contentDescription = null,
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        val latencyLabel = if (avgLookupLatencyMicros in 1..9999) {
-                            String.format(Locale.US, "%.1f ms", avgLookupLatencyMicros / 1000.0)
-                        } else if (avgLookupLatencyMicros >= 10000) {
-                            "${avgLookupLatencyMicros / 1000L} ms"
-                        } else {
-                            "< 1 ms"
-                        }
-                        Text(
-                            text = "DNS Latency: $latencyLabel",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = EmeraldPrimary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.FolderZip,
+                            imageVector = Icons.Rounded.Analytics,
                             contentDescription = null,
                             tint = DataAccent,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "GZIP: ${formatBytesCompact(compressedCacheBytes)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    if (duplicatesRemovedCount > 0) {
-                        Text(
-                            text = "Dedup: -${formatStatNumber(duplicatesRemovedCount.toLong())}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = EmeraldPrimary
-                        )
-                    }
-
-                    // Tells the user why not every enabled list is filtering: the engine stopped
-                    // adding domains once the device memory budget was reached.
-                    if (skippedFilterListCount > 0) {
-                        Text(
-                            text = "Memory budget: $skippedFilterListCount list" +
-                                (if (skippedFilterListCount == 1) "" else "s") + " skipped",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = WarningAmber,
-                            modifier = Modifier.testTag("ad_memory_budget_warning")
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Blocked Activity",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Top blocked domains & apps generating requests",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (analytics.topBlockedDomains.isEmpty() && analytics.topApps.isEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "No blocked requests recorded yet. Browse with the firewall active to fill this in.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // Top Blocked Domains (if any)
@@ -506,37 +513,56 @@ fun AdAnalyticsDashboardCard(
 }
 
 @Composable
-private fun MetricTile(
-    title: String,
+private fun AnalyticsTotal(
+    label: String,
     value: String,
     color: Color,
     modifier: Modifier = Modifier,
     testTag: String = ""
 ) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.testTag(testTag)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
-        }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = color
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun EngineMetric(
+    icon: ImageVector,
+    tint: Color,
+    text: String,
+    textColor: Color,
+    bold: Boolean = false
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal
+        )
     }
 }
 

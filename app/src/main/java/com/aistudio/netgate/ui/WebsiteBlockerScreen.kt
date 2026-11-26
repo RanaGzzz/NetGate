@@ -322,13 +322,7 @@ fun WebsiteBlockerContent(
                                         )
                                     }
                                     item(key = "ad_analytics_dashboard_card") {
-                                        AdAnalyticsDashboardCard(
-                                            analytics = state.analytics,
-                                            duplicatesRemovedCount = state.duplicatesRemovedCount,
-                                            compressedCacheBytes = state.compressedCacheBytes,
-                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros,
-                                            skippedFilterListCount = state.skippedFilterListCount
-                                        )
+                                        AdAnalyticsDashboardCard(analytics = state.analytics)
                                     }
                                 }
                                 LazyColumn(
@@ -385,13 +379,7 @@ fun WebsiteBlockerContent(
                                         )
                                     }
                                     item(key = "ad_analytics_dashboard_card") {
-                                        AdAnalyticsDashboardCard(
-                                            analytics = state.analytics,
-                                            duplicatesRemovedCount = state.duplicatesRemovedCount,
-                                            compressedCacheBytes = state.compressedCacheBytes,
-                                            avgLookupLatencyMicros = state.avgLookupLatencyMicros,
-                                            skippedFilterListCount = state.skippedFilterListCount
-                                        )
+                                        AdAnalyticsDashboardCard(analytics = state.analytics)
                                     }
                                     item(key = "ad_lists_header") {
                                         AdListsHeaderRow(

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.R
+import com.aistudio.netgate.data.model.AdAnalyticsSummary
 import com.aistudio.netgate.data.model.AdFilterListItem
 import com.aistudio.netgate.data.model.DnsQueryLogEntry
 import com.aistudio.netgate.data.model.DnsQueryStatus
@@ -103,6 +105,11 @@ fun AdBlockerHeroCard(
     onToggleEssentialPassthrough: (Boolean) -> Unit,
     onToggleUseDohUpstream: (Boolean) -> Unit,
     onRequestEnableFirewall: () -> Unit,
+    analytics: AdAnalyticsSummary = state.analytics,
+    duplicatesRemovedCount: Int = state.duplicatesRemovedCount,
+    compressedCacheBytes: Long = state.compressedCacheBytes,
+    avgLookupLatencyMicros: Long = state.avgLookupLatencyMicros,
+    skippedFilterListCount: Int = state.skippedFilterListCount,
     modifier: Modifier = Modifier
 ) {
     val activeAccent = if (state.isAdBlockerEnabled) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -208,6 +215,20 @@ fun AdBlockerHeroCard(
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Analytics live in this same card so the blocker and its interception metrics read as
+            // one dashboard instead of two separate cards.
+            AdAnalyticsMetricsSection(
+                analytics = analytics,
+                duplicatesRemovedCount = duplicatesRemovedCount,
+                compressedCacheBytes = compressedCacheBytes,
+                avgLookupLatencyMicros = avgLookupLatencyMicros,
+                skippedFilterListCount = skippedFilterListCount
+            )
 
             if (state.isAdBlockerEnabled && !isFirewallActive) {
                 Spacer(modifier = Modifier.height(10.dp))

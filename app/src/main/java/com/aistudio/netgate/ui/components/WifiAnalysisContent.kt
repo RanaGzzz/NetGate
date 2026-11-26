@@ -6,8 +6,10 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,9 +40,12 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SignalWifi4Bar
 import androidx.compose.material.icons.rounded.SignalWifiBad
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiFind
 import androidx.compose.material.icons.rounded.WifiOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -50,9 +55,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +72,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -70,12 +84,14 @@ import com.aistudio.netgate.data.model.WifiSavedAccessStatus
 import com.aistudio.netgate.data.model.WifiSignalQuality
 import com.aistudio.netgate.data.model.isGoodWifiSignal
 import com.aistudio.netgate.data.model.rssiToSignalPercent
+import com.aistudio.netgate.data.network.WifiConnector
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.DataAccent
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.WarningAmber
 import com.aistudio.netgate.ui.theme.WifiAccent
+import androidx.compose.foundation.text.KeyboardOptions
 
 @Composable
 fun WifiAnalysisContent(
@@ -90,6 +106,46 @@ fun WifiAnalysisContent(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ ->
         onRefreshWifi()
+    }
+
+    var pendingConnectNetwork by remember { mutableStateOf<SavedWifiNetworkInfo?>(null) }
+    var connectingSsid by remember { mutableStateOf<String?>(null) }
+
+    fun connectToNetwork(network: SavedWifiNetworkInfo, passphrase: String?) {
+        connectingSsid = network.ssid
+        WifiConnector.connect(
+            context = context,
+            ssid = network.ssid,
+            securityLabel = network.securityLabel,
+            passphrase = passphrase
+        ) { success, message ->
+            connectingSsid = null
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            if (success) onRefreshWifi()
+        }
+    }
+
+    fun requestConnect(network: SavedWifiNetworkInfo) {
+        if (!WifiConnector.canJoinFromApp(network.securityLabel)) {
+            Toast.makeText(context, WifiConnector.WEP_UNSUPPORTED_MESSAGE, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (WifiConnector.requiresPassphrase(network.securityLabel)) {
+            pendingConnectNetwork = network
+        } else {
+            connectToNetwork(network, null)
+        }
+    }
+
+    pendingConnectNetwork?.let { network ->
+        WifiPasswordDialog(
+            ssid = network.ssid,
+            onDismiss = { pendingConnectNetwork = null },
+            onConnect = { passphrase ->
+                pendingConnectNetwork = null
+                connectToNetwork(network, passphrase)
+            }
+        )
     }
 
     LazyColumn(
@@ -149,6 +205,8 @@ fun WifiAnalysisContent(
             ) { network ->
                 WifiNetworkTelemetryCard(
                     network = network,
+                    isConnecting = connectingSsid == network.ssid,
+                    onConnect = { requestConnect(network) },
                     modifier = Modifier.testTag("saved_wifi_card_${network.ssid.lowercase().replace(" ", "_")}")
                 )
             }
@@ -190,7 +248,11 @@ fun WifiAnalysisContent(
                 items = state.nearbyNetworks.take(20),
                 key = { "nearby_${it.ssid.lowercase()}_${it.bssid}" }
             ) { network ->
-                WifiNetworkTelemetryCard(network = network)
+                WifiNetworkTelemetryCard(
+                    network = network,
+                    isConnecting = connectingSsid == network.ssid,
+                    onConnect = { requestConnect(network) }
+                )
             }
         }
     }
@@ -760,6 +822,8 @@ private fun EmptyWifiListCard(
 @Composable
 private fun WifiNetworkTelemetryCard(
     network: SavedWifiNetworkInfo,
+    isConnecting: Boolean = false,
+    onConnect: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val accent = qualityAccentColor(network.quality)
@@ -857,9 +921,133 @@ private fun WifiNetworkTelemetryCard(
                 if (network.securityLabel.isNotBlank()) {
                     WifiSpecChip(label = "Security", value = network.securityLabel, icon = Icons.Rounded.Lock)
                 }
+                when {
+                    network.isCurrentlyConnected -> WifiActionChip(
+                        label = "Connected",
+                        icon = Icons.Rounded.CheckCircle,
+                        accent = accent,
+                        enabled = false,
+                        testTag = "wifi_connected_chip_${network.ssid.lowercase().replace(" ", "_")}",
+                        onClick = {}
+                    )
+                    onConnect != null -> WifiActionChip(
+                        label = if (isConnecting) "Connecting…" else "Connect",
+                        icon = Icons.Rounded.Wifi,
+                        accent = WifiAccent,
+                        enabled = !isConnecting,
+                        testTag = "wifi_connect_${network.ssid.lowercase().replace(" ", "_")}",
+                        onClick = onConnect
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun WifiActionChip(
+    label: String,
+    icon: ImageVector,
+    accent: Color,
+    enabled: Boolean,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = accent.copy(alpha = 0.16f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.45f)),
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = accent
+            )
+        }
+    }
+}
+
+@Composable
+private fun WifiPasswordDialog(
+    ssid: String,
+    onDismiss: () -> Unit,
+    onConnect: (String) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var isVisible by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.Lock,
+                contentDescription = null,
+                tint = WifiAccent
+            )
+        },
+        title = { Text("Connect to $ssid") },
+        text = {
+            Column {
+                Text(
+                    text = "Enter this network's Wi-Fi password. Android keeps the credential in its own Wi-Fi settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    singleLine = true,
+                    label = { Text("Wi-Fi password") },
+                    visualTransformation = if (isVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { isVisible = !isVisible }) {
+                            Icon(
+                                imageVector = if (isVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = if (isVisible) "Hide password" else "Show password"
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("wifi_password_field")
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConnect(password) },
+                enabled = password.isNotBlank(),
+                modifier = Modifier.testTag("wifi_connect_confirm_button")
+            ) {
+                Text("Connect")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
