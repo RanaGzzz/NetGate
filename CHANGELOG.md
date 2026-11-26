@@ -1,3 +1,14 @@
+# What's New — NetGate 3.9.5
+
+### Ad & Website Blocker
+- **One protection dashboard:** the analytics metrics now live in the Ad & Tracker Blocker card — totals, category breakdowns and the filter engine stats together with the protection controls — and the separate card below lists the Top Blocked Domains and Top Apps.
+- **Fixed the broken engine stats row:** "Memory budget: N lists skipped" no longer squeezes into a single vertical letter per line and leaves a large empty gap in the card; the stats wrap onto extra lines instead.
+
+### Network & Usage
+- **Join Wi-Fi from the saved networks list:** each Wi-Fi card has a Connect action. Open networks join straight away, secured ones ask for the password, and the result is confirmed with a toast.
+- **The joined network is actually used:** the join request now asks for internet access, so the phone moves its traffic (and the VPN) onto the network you just connected to instead of staying on the previous connection.
+- **No dead-end WEP prompt:** a WEP network no longer opens a password dialog it could never accept; on Android 10 and newer it points you to the system Wi-Fi settings, where WEP can still be joined.
+
 # What's New — NetGate 3.9.4
 
 ### Interface

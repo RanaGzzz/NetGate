@@ -56,6 +56,27 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.5",
+            subtitle = "Unified Protection Dashboard and Wi-Fi Connect",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Ad & Website Blocker",
+                    bullets = listOf(
+                        "The analytics metrics now live in the Ad & Tracker Blocker card, with Top Blocked Domains and Top Apps listed in the card below.",
+                        "The filter engine stats row wraps instead of squeezing its text into a vertical column and leaving an empty gap."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Network & Usage",
+                    bullets = listOf(
+                        "Saved and nearby Wi-Fi cards gain a Connect action, with a password prompt for secured networks.",
+                        "A joined network is now actually used: the request keeps internet access instead of creating a local-only connection.",
+                        "WEP networks no longer open a password dialog they cannot accept; Android 10+ points to the system Wi-Fi settings instead."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9.4",
             subtitle = "Interface Alignment and Layout Fixes",
             sections = listOf(
