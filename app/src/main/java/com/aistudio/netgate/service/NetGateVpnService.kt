@@ -312,6 +312,7 @@ class NetGateVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                AppLogCollector.info("Service", "Firewall VPN service stopping", "Received ACTION_STOP command")
                 serviceScope.launch {
                     preferences.setFirewallEnabled(false)
                     stopFirewall()
@@ -320,6 +321,7 @@ class NetGateVpnService : VpnService() {
             }
             ACTION_RELOAD_RULES -> {
                 if (prepare(this) != null) {
+                    AppLogCollector.warn("Service", "Firewall reload aborted", "Missing VpnService consent")
                     serviceScope.launch {
                         preferences.setFirewallEnabled(false)
                         stopFirewall()
@@ -332,17 +334,20 @@ class NetGateVpnService : VpnService() {
                 // Android allows a single VpnService per profile: if the VPN Guard tunnel owns the
                 // slot (or a transition is in flight) this service must not establish a second one.
                 if (!VpnSessionCoordinator.instance.claimLocalFirewall()) {
+                    AppLogCollector.warn("Service", "Firewall reload skipped", "VPN Guard currently holds the system VPN slot")
                     serviceScope.launch {
                         preferences.setFirewallEnabled(false)
                         stopFirewall()
                     }
                     return START_NOT_STICKY
                 }
+                AppLogCollector.info("Service", "Reloading firewall rules", "Rebuilding NetGate VPN tunnel")
                 serviceScope.launch { rebuildTunnel(forceRebuild = true) }
                 return START_STICKY
             }
             else -> {
                 if (prepare(this) != null) {
+                    AppLogCollector.warn("Service", "Firewall start aborted", "Missing VpnService consent")
                     serviceScope.launch {
                         preferences.setFirewallEnabled(false)
                         stopFirewall()
@@ -353,12 +358,14 @@ class NetGateVpnService : VpnService() {
                     buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
                 )
                 if (!VpnSessionCoordinator.instance.claimLocalFirewall()) {
+                    AppLogCollector.warn("Service", "Firewall start deferred", "VPN Guard holds the VPN slot")
                     serviceScope.launch {
                         preferences.setFirewallEnabled(false)
                         stopFirewall()
                     }
                     return START_NOT_STICKY
                 }
+                AppLogCollector.info("Service", "Firewall VPN service started", "Initializing tunnel and rule engine")
                 serviceScope.launch {
                     preferences.setFirewallEnabled(true)
                     recomputeNetworkAndRebuild()
@@ -369,6 +376,7 @@ class NetGateVpnService : VpnService() {
     }
 
     override fun onRevoke() {
+        AppLogCollector.warn("Service", "VPN permission revoked", "Android system or another VPN app revoked NetGate TUN")
         serviceScope.launch {
             preferences.setFirewallEnabled(false)
             stopFirewall()
@@ -377,6 +385,7 @@ class NetGateVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        AppLogCollector.info("Service", "NetGateVpnService destroyed", "Released wakelock and closed TUN interface")
         unregisterPhysicalNetworkCallback()
         rulesJob?.cancel()
         timerJob?.cancel()
@@ -1844,6 +1853,7 @@ class NetGateVpnService : VpnService() {
     }
 
     private suspend fun stopFirewall() {
+        AppLogCollector.info("Service", "Firewall tunnel stopped", "Torn down local VPN TUN and proxy")
         tunnelMutex.withLock {
             drainJob?.cancel()
             drainJob = null

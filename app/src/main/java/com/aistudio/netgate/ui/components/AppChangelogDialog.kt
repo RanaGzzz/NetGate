@@ -49,10 +49,8 @@ import com.aistudio.netgate.data.model.BundledChangelog
 import com.aistudio.netgate.data.model.ChangelogEntry
 import com.aistudio.netgate.data.model.ChangelogSection
 import com.aistudio.netgate.data.model.GitHubReleaseInfo
-import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
-import com.aistudio.netgate.ui.theme.LocalThemeStyle
 import com.aistudio.netgate.ui.theme.WifiAccent
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,7 +63,6 @@ fun AppChangelogSheet(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val themeStyle = LocalThemeStyle.current
 
     val remoteEntries = updateState.recentReleases.map { rel ->
         rel.toChangelogEntry()
@@ -83,18 +80,20 @@ fun AppChangelogSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface.copy(
-            alpha = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) 0.96f else 0.94f
-        ),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        tonalElevation = 0.dp,
+        dragHandle = null,
         modifier = Modifier.testTag("changelog_sheet")
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-        ) {
+        FrostedSheetContainer {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp)
+            ) {
+                FrostedSheetDragHandle()
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -211,6 +210,7 @@ fun AppChangelogSheet(
                         }
                     )
                 }
+            }
             }
         }
     }

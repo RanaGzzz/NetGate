@@ -442,7 +442,8 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                         severity = com.aistudio.netgate.data.model.VpnDpiLogSeverity.ERROR,
                         title = "App crash: ${report.headline}",
                         detail = report.detail,
-                        timestampMs = report.timestampMs
+                        timestampMs = report.timestampMs,
+                        mirrorToAppLog = false
                     )
                 }
         }
@@ -1344,6 +1345,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 blockWifi = blockWifi,
                 blockMobileData = blockMobileData
             )
+            com.aistudio.netgate.service.AppLogCollector.info(
+                tag = "Firewall",
+                title = "App rule updated: $packageName",
+                message = "Wi-Fi=${if (blockWifi) "BLOCK" else "ALLOW"}, MobileData=${if (blockMobileData) "BLOCK" else "ALLOW"}"
+            )
         }
     }
 
@@ -1421,6 +1427,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 BatchAction.ALLOW_ALL -> "Restored full access for $count app${if (count == 1) "" else "s"}"
             }
             _snackbarMessages.tryEmit(actionLabel)
+            com.aistudio.netgate.service.AppLogCollector.info(
+                tag = "Firewall",
+                title = "Batch rule change",
+                message = actionLabel
+            )
             exitSelectionMode()
         }
     }
@@ -1432,6 +1443,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             }
             preferences.setFirewallEnabled(true)
             NetGateVpnService.startOrReload(getApplication())
+            com.aistudio.netgate.service.AppLogCollector.info(
+                tag = "Firewall",
+                title = "Firewall enabled",
+                message = "User initiated local NetGate VPN service"
+            )
             _snackbarMessages.tryEmit("NetGate Firewall active")
         }
     }
@@ -1440,6 +1456,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             preferences.setFirewallEnabled(false)
             NetGateVpnService.stop(getApplication())
+            com.aistudio.netgate.service.AppLogCollector.info(
+                tag = "Firewall",
+                title = "Firewall paused",
+                message = "User paused local NetGate VPN service"
+            )
             _snackbarMessages.tryEmit("NetGate Firewall paused")
         }
     }
@@ -1513,12 +1534,22 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                     canInstallDirectly = ota.isUpdateAvailable && ota.build.apkUrl.isNotBlank()
                 )
                 _snackbarMessages.tryEmit(ota.reason)
+                com.aistudio.netgate.service.AppLogCollector.info(
+                    tag = "Updater",
+                    title = "Update check complete",
+                    message = ota.reason
+                )
             }.onFailure { err ->
                 val msg = err.message ?: "Unable to check for updates"
                 appUpdateStateFlow.value = appUpdateStateFlow.value.copy(
                     status = AppUpdateStatus.ERROR,
                     lastCheckedAtMs = now,
                     errorMessage = msg
+                )
+                com.aistudio.netgate.service.AppLogCollector.warn(
+                    tag = "Updater",
+                    title = "Update check failed",
+                    message = msg
                 )
                 _snackbarMessages.tryEmit(msg)
             }
@@ -1717,7 +1748,7 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun clearVpnDpiLogs() {
         vpnDpiLogMonitor.clear()
-        com.aistudio.netgate.service.CrashLogRecorder.clear(getApplication<android.app.Application>())
+        com.aistudio.netgate.service.AppLogCollector.clear(appContext)
         _snackbarMessages.tryEmit("Cleared diagnostics logs")
     }
 
@@ -1943,6 +1974,12 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setBlurIntensity(intensity: Float) {
+        viewModelScope.launch {
+            preferences.setBlurIntensity(intensity)
+        }
+    }
+
     fun setBlurAnimationEnabled(enabled: Boolean) {
         viewModelScope.launch {
             preferences.setBlurAnimationEnabled(enabled)
@@ -1989,6 +2026,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 else -> "Website ${mode.title} selected — enable NetGate Firewall to apply"
             }
             _snackbarMessages.tryEmit(msg)
+            com.aistudio.netgate.service.AppLogCollector.info(
+                tag = "DNS",
+                title = "Website Filter Mode: ${mode.title}",
+                message = msg
+            )
         }
     }
 
@@ -2048,6 +2090,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 else -> "Ad Blocker enabled — activate Firewall to filter ads"
             }
             _snackbarMessages.tryEmit(msg)
+            com.aistudio.netgate.service.AppLogCollector.info(
+                tag = "DNS",
+                title = "Ad & Tracker Blocker ${if (enabled) "enabled" else "disabled"}",
+                message = msg
+            )
         }
     }
 

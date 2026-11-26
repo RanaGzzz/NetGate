@@ -148,6 +148,15 @@ enum class BlurEngineStyle(
         tintAlphaDark = 0.44f,
         tintAlphaLight = 0.58f,
         saturationBoost = 1.28f
+    ),
+    MORPH(
+        title = "Morph",
+        subtitle = "Heavy gaussian blur, soft glowing gradient & subtle dither grain",
+        backdropRadiusDp = 96f,
+        modalBlurDp = 22f,
+        tintAlphaDark = 0.46f,
+        tintAlphaLight = 0.60f,
+        saturationBoost = 1.24f
     )
 }
 
@@ -618,6 +627,7 @@ data class FirewallPreferencesState(
     val showStatusBarDailyUsage: Boolean = true,
     val isDeepMonitorEnabled: Boolean = true,
     val blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
+    val blurIntensity: Float = 1.0f,
     val isBlurAnimationEnabled: Boolean = true,
     val backgroundAnimation: BackgroundAnimationStyle = BackgroundAnimationStyle.NONE,
     val backgroundParallaxEnabled: Boolean = false,

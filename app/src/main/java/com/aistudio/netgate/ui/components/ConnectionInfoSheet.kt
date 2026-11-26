@@ -52,17 +52,21 @@ fun ConnectionInfoSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        dragHandle = null
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-                .testTag("connection_info_sheet")
-        ) {
+        FrostedSheetContainer {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp)
+                    .testTag("connection_info_sheet")
+            ) {
+            FrostedSheetDragHandle()
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -214,6 +218,7 @@ fun ConnectionInfoSheet(
                 }
             }
         }
+    }
     }
 }
 

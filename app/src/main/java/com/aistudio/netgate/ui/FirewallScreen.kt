@@ -117,6 +117,7 @@ import com.aistudio.netgate.ui.components.HotspotAndWifiContent
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
 import com.aistudio.netgate.ui.components.AdvancedProtectionSheet
 import com.aistudio.netgate.ui.components.VpnGuardContent
+import com.aistudio.netgate.service.AppLogCollector
 import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineModalDepth
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.LocalOverlayLiquidState
@@ -135,6 +136,7 @@ fun FirewallScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val advancedPreferences by viewModel.advancedPreferences.collectAsStateWithLifecycle()
     val backupState by viewModel.backupState.collectAsStateWithLifecycle()
+    val appLogs by AppLogCollector.entries.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
     var showAdvancedProtection by rememberSaveable { mutableStateOf(false) }
@@ -706,7 +708,7 @@ fun FirewallScreen(
                                                     uiState = uiState,
                                                     isGrid = false,
                                                     viewModel = viewModel,
-                                                    bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 96.dp,
+                                                    bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 120.dp,
                                                     headerContent = {
                                                         Column(
                                                             modifier = Modifier
@@ -835,6 +837,7 @@ fun FirewallScreen(
             onThemeStyleChange = viewModel::setThemeStyle,
             onToggleDynamicColor = viewModel::setUseDynamicColor,
             onBlurStyleChange = viewModel::setBlurEngineStyle,
+            onBlurIntensityChange = viewModel::setBlurIntensity,
             onToggleBlurAnimation = viewModel::setBlurAnimationEnabled,
             onOpenBackgroundAnimation = {
                 viewModel.closeSettings()
@@ -851,7 +854,7 @@ fun FirewallScreen(
             onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
             onToggleExcludeFromRecents = viewModel::setExcludeFromRecents,
             appUpdateState = uiState.appUpdateState,
-            vpnDpiLogsCount = uiState.vpnDpiLogs.size,
+            vpnDpiLogsCount = maxOf(uiState.vpnDpiLogs.size, appLogs.size),
             onCheckForUpdates = viewModel::checkForGitHubUpdates,
             onDownloadUpdate = viewModel::downloadAndInstallUpdate,
             onOpenAdvancedProtection = {
@@ -909,6 +912,7 @@ fun FirewallScreen(
     if (uiState.isVpnDpiLogsOpen) {
         VpnDpiLogsSheet(
             logs = uiState.vpnDpiLogs,
+            appLogs = appLogs,
             initialCategory = uiState.vpnDpiLogsInitialCategory,
             vpnRuntimeState = uiState.vpnRuntimeState,
             vpnGuardRuntimeState = uiState.vpnGuardState.runtimeState,

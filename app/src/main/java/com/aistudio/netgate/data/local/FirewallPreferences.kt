@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -72,6 +73,7 @@ class FirewallPreferences(private val context: Context) {
         val SHOW_STATUS_BAR_DAILY_USAGE = booleanPreferencesKey("show_status_bar_daily_usage")
         val IS_DEEP_MONITOR_ENABLED = booleanPreferencesKey("is_deep_monitor_enabled")
         val BLUR_ENGINE_STYLE = stringPreferencesKey("blur_engine_style")
+        val BLUR_INTENSITY = floatPreferencesKey("blur_intensity")
         val IS_BLUR_ANIMATION_ENABLED = booleanPreferencesKey("is_blur_animation_enabled")
         val BACKGROUND_ANIMATION = stringPreferencesKey("background_animation")
         val BACKGROUND_PARALLAX_ENABLED = booleanPreferencesKey("background_parallax_enabled")
@@ -173,6 +175,7 @@ class FirewallPreferences(private val context: Context) {
             showStatusBarDailyUsage = prefs[Keys.SHOW_STATUS_BAR_DAILY_USAGE] ?: true,
             isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true,
             blurEngineStyle = blurStyle,
+            blurIntensity = (prefs[Keys.BLUR_INTENSITY] ?: 1.0f).coerceIn(0.4f, 1.5f),
             isBlurAnimationEnabled = prefs[Keys.IS_BLUR_ANIMATION_ENABLED] ?: true,
             backgroundAnimation = backgroundAnimation,
             backgroundParallaxEnabled = prefs[Keys.BACKGROUND_PARALLAX_ENABLED] ?: false,
@@ -401,6 +404,10 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setBlurEngineStyle(style: BlurEngineStyle) {
         context.firewallDataStore.edit { it[Keys.BLUR_ENGINE_STYLE] = style.name }
+    }
+
+    suspend fun setBlurIntensity(intensity: Float) {
+        context.firewallDataStore.edit { it[Keys.BLUR_INTENSITY] = intensity.coerceIn(0.4f, 1.5f) }
     }
 
     suspend fun setBlurAnimationEnabled(enabled: Boolean) {

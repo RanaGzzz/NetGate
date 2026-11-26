@@ -225,6 +225,11 @@ object VpnGuardManager {
                 }
             }
 
+            AppLogCollector.info(
+                tag = "VPN Guard",
+                title = "Connecting ${profile.protocol.label} (${profile.name})",
+                message = "Endpoint ${profile.endpointHost.ifBlank { "auto" }}"
+            )
             _runtimeState.value = _runtimeState.value.copy(
                 connectionState = VpnGuardConnectionState.CONNECTING,
                 protocol = profile.protocol,
@@ -252,10 +257,22 @@ object VpnGuardManager {
                         effectivePackages = effectivePackages
                     )
                 }
+            }.onSuccess {
+                AppLogCollector.info(
+                    tag = "VPN Guard",
+                    title = "Connected ${profile.protocol.label} (${profile.name})",
+                    message = "Tunnel active • Endpoint ${profile.endpointHost.ifBlank { "auto" }}"
+                )
             }.onFailure { err ->
                 stopStatsPolling()
                 VpnGuardService.stop(appContext)
                 val friendlyMessage = formatTunnelError(err, profile.protocol)
+                AppLogCollector.error(
+                    tag = "VPN Guard",
+                    title = "VPN Guard connect failed (${profile.name})",
+                    message = friendlyMessage,
+                    throwable = err
+                )
                 _runtimeState.value = VpnGuardRuntimeState(
                     connectionState = VpnGuardConnectionState.ERROR,
                     protocol = profile.protocol,
@@ -457,6 +474,12 @@ object VpnGuardManager {
             val session = coordinator.state.value
             when (transition) {
                 is VpnTransitionResult.Failed -> {
+                    AppLogCollector.error(
+                        tag = "VPN Guard",
+                        title = "VPN Guard disconnect failed",
+                        message = transition.message,
+                        throwable = transition.cause
+                    )
                     _runtimeState.value = VpnGuardRuntimeState(
                         connectionState = VpnGuardConnectionState.ERROR,
                         protocol = _runtimeState.value.protocol,
@@ -471,6 +494,11 @@ object VpnGuardManager {
                     Result.failure(IllegalStateException(transition.message, transition.cause))
                 }
                 else -> {
+                    AppLogCollector.info(
+                        tag = "VPN Guard",
+                        title = "VPN Guard disconnected",
+                        message = if (session.firewallRestorePending) "Restoring NetGate Firewall TUN" else "Tunnel stopped cleanly"
+                    )
                     _runtimeState.value = VpnGuardRuntimeState(
                         connectionState = VpnGuardConnectionState.DISCONNECTED,
                         pausedLocalFirewallForVpn = session.firewallRestorePending

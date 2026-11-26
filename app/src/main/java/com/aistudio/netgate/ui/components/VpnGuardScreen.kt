@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -258,7 +259,7 @@ fun VpnGuardContent(
             start = 16.dp,
             end = 16.dp,
             top = 8.dp,
-            bottom = bottomInset + 104.dp
+            bottom = bottomInset + 120.dp
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
@@ -1662,14 +1663,21 @@ private fun SplitTunnelAppPickerSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        dragHandle = null
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 600.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
+        FrostedSheetContainer {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 620.dp)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 12.dp)
+            ) {
+                FrostedSheetDragHandle()
             Text(
                 text = "Split-Tunnel Apps (${profile.name})",
                 style = MaterialTheme.typography.titleLarge,
@@ -1801,6 +1809,7 @@ private fun SplitTunnelAppPickerSheet(
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
+            }
         }
     }
 }

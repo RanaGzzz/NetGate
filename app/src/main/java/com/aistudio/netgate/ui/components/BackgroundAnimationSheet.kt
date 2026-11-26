@@ -51,8 +51,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.BackgroundAnimationStyle
 import com.aistudio.netgate.data.model.FirewallPreferencesState
-import com.aistudio.netgate.data.model.NetGateThemeStyle
-import com.aistudio.netgate.ui.theme.LocalThemeStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,16 +62,15 @@ fun BackgroundAnimationSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val themeStyle = LocalThemeStyle.current
     var presetsExpanded by rememberSaveable { mutableStateOf(true) }
     var effectsExpanded by rememberSaveable { mutableStateOf(true) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface.copy(
-            alpha = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) 0.94f else 0.92f
-        )
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        tonalElevation = 0.dp,
+        dragHandle = null
     ) {
         FrostedSheetContainer {
             Column(
@@ -85,6 +82,7 @@ fun BackgroundAnimationSheet(
                     .padding(bottom = 28.dp)
                     .testTag("background_animation_sheet")
             ) {
+                FrostedSheetDragHandle()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

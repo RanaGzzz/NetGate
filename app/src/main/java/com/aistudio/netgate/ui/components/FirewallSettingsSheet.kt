@@ -3,15 +3,6 @@ package com.aistudio.netgate.ui.components
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -54,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -80,18 +73,11 @@ import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.service.BackgroundPowerHelper
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
-import com.aistudio.netgate.ui.theme.LocalThemeStyle
 import com.aistudio.netgate.ui.theme.WarningAmber
 import com.aistudio.netgate.ui.theme.WifiAccent
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private enum class SettingsPage {
-    MAIN,
-    APPEARANCE,
-    BACKGROUND_SYSTEM
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +87,7 @@ fun FirewallSettingsSheet(
     onThemeStyleChange: (NetGateThemeStyle) -> Unit = {},
     onToggleDynamicColor: (Boolean) -> Unit,
     onBlurStyleChange: (BlurEngineStyle) -> Unit,
+    onBlurIntensityChange: (Float) -> Unit = {},
     onToggleBlurAnimation: (Boolean) -> Unit,
     onOpenBackgroundAnimation: () -> Unit = {},
     onAppIconChange: (AppIconStyle) -> Unit = {},
@@ -132,163 +119,139 @@ fun FirewallSettingsSheet(
         isIgnoringBatteryOptimizations = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
     }
 
-    var currentPage by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
+    var appearanceExpanded by rememberSaveable { mutableStateOf(false) }
+    var backgroundSystemExpanded by rememberSaveable { mutableStateOf(false) }
     var monitorExpanded by rememberSaveable { mutableStateOf(false) }
     var architectureExpanded by rememberSaveable { mutableStateOf(false) }
     var logsExpanded by rememberSaveable { mutableStateOf(false) }
     var protectionExpanded by rememberSaveable { mutableStateOf(false) }
-    var aboutExpanded by rememberSaveable(appUpdateState.status) {
+    var aboutExpanded by rememberSaveable {
         mutableStateOf(appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE)
     }
     var resetExpanded by rememberSaveable { mutableStateOf(false) }
 
-    BackHandler(enabled = currentPage != SettingsPage.MAIN) {
-        currentPage = SettingsPage.MAIN
+    LaunchedEffect(appUpdateState.status) {
+        if (appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE) {
+            aboutExpanded = true
+        }
     }
-
-    val themeStyle = LocalThemeStyle.current
-    val sheetSurfaceColor = MaterialTheme.colorScheme.surface
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = sheetSurfaceColor.copy(
-            alpha = if (themeStyle == NetGateThemeStyle.LIQUID_GLASS) 0.94f else 0.92f
-        )
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        dragHandle = null
     ) {
         FrostedSheetContainer {
-            AnimatedContent(
-                targetState = currentPage,
-                transitionSpec = {
-                    val forward = targetState != SettingsPage.MAIN && initialState == SettingsPage.MAIN
-                    val enter = if (forward) {
-                        slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 5 } +
-                            fadeIn(tween(180))
-                    } else {
-                        slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 5 } +
-                            fadeIn(tween(180))
-                    }
-                    val exit = if (forward) {
-                        slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { -it / 6 } +
-                            fadeOut(tween(130))
-                    } else {
-                        slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { it / 6 } +
-                            fadeOut(tween(130))
-                    }
-                    enter togetherWith exit
-                },
-                label = "settings_subpage_drilldown"
-            ) { page ->
-                when (page) {
-                    SettingsPage.APPEARANCE -> {
-                        AppearanceSettingsContent(
-                            preferences = preferences,
-                            onThemeModeChange = onThemeModeChange,
-                            onThemeStyleChange = onThemeStyleChange,
-                            onToggleDynamicColor = onToggleDynamicColor,
-                            onBlurStyleChange = onBlurStyleChange,
-                            onToggleBlurAnimation = onToggleBlurAnimation,
-                            onOpenBackgroundAnimation = onOpenBackgroundAnimation,
-                            onAppIconChange = onAppIconChange,
-                            onBack = { currentPage = SettingsPage.MAIN }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 28.dp)
+                    .testTag("firewall_settings_sheet")
+            ) {
+                FrostedSheetDragHandle()
+                // Sheet Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Settings",
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Appearance, background controls & protection",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    SettingsStatusPill(
+                        label = "v${BuildConfig.VERSION_NAME}",
+                        accent = MaterialTheme.colorScheme.primary
+                    )
+                }
 
-                    SettingsPage.BACKGROUND_SYSTEM -> {
-                        BackgroundSystemSettingsContent(
-                            context = context,
-                            preferences = preferences,
-                            isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
-                            onToggleStatusBarSpeed = onToggleStatusBarSpeed,
-                            onToggleExcludeFromRecents = onToggleExcludeFromRecents,
-                            onBack = { currentPage = SettingsPage.MAIN }
-                        )
-                    }
+                Spacer(modifier = Modifier.height(18.dp))
 
-                    SettingsPage.MAIN -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .navigationBarsPadding()
-                                .padding(horizontal = 20.dp)
-                                .padding(bottom = 28.dp)
-                                .testTag("firewall_settings_sheet")
-                        ) {
-                            // Sheet Header
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Settings",
-                                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Appearance, background controls & protection",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                SettingsStatusPill(
-                                    label = "v${BuildConfig.VERSION_NAME}",
-                                    accent = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                // ─────────────────────────────────────────────────────────────
+                // SECTION 1: PERSONALIZATION & SYSTEM MENUS
+                // ─────────────────────────────────────────────────────────────
+                SettingsSectionHeader(
+                    title = "Personalization & System",
+                    icon = Icons.Rounded.Palette
+                )
 
-                            Spacer(modifier = Modifier.height(18.dp))
+                SettingsAccordionCard(
+                    title = "Appearance",
+                    summary = "${preferences.themeMode.label} • ${preferences.themeStyle.title} • ${preferences.blurEngineStyle.title}",
+                    icon = Icons.Rounded.Palette,
+                    statusLabel = preferences.themeStyle.badgeLabel,
+                    expanded = appearanceExpanded,
+                    onToggleExpand = { appearanceExpanded = !appearanceExpanded },
+                    modifier = Modifier.testTag("settings_appearance_card"),
+                    headerModifier = Modifier.testTag("settings_open_appearance")
+                ) {
+                    AppearanceSettingsAccordionBody(
+                        preferences = preferences,
+                        onThemeModeChange = onThemeModeChange,
+                        onThemeStyleChange = onThemeStyleChange,
+                        onToggleDynamicColor = onToggleDynamicColor,
+                        onBlurStyleChange = onBlurStyleChange,
+                        onBlurIntensityChange = onBlurIntensityChange,
+                        onToggleBlurAnimation = onToggleBlurAnimation,
+                        onOpenBackgroundAnimation = onOpenBackgroundAnimation,
+                        onAppIconChange = onAppIconChange
+                    )
+                }
 
-                            // ─────────────────────────────────────────────────────────────
-                            // SECTION 1: PERSONALIZATION & SYSTEM MENUS
-                            // ─────────────────────────────────────────────────────────────
-                            SettingsSectionHeader(
-                                title = "Personalization & System",
-                                icon = Icons.Rounded.Palette
-                            )
+                Spacer(modifier = Modifier.height(12.dp))
 
-                            SettingsNavigationCard(
-                                title = "Appearance",
-                                summary = "${preferences.themeMode.label} • ${preferences.themeStyle.title} • ${preferences.appIconStyle.title}",
-                                icon = Icons.Rounded.Palette,
-                                statusLabel = preferences.themeStyle.badgeLabel,
-                                onClick = { currentPage = SettingsPage.APPEARANCE },
-                                modifier = Modifier.testTag("settings_open_appearance")
-                            )
+                val systemActiveCount = listOf(
+                    preferences.isStatusBarSpeedEnabled,
+                    preferences.excludeFromRecents,
+                    isIgnoringBatteryOptimizations
+                ).count { it }
+                SettingsAccordionCard(
+                    title = "Background & System",
+                    summary = "Status Bar Speed Icon • Exclude from Recents • Background & Battery",
+                    icon = Icons.Rounded.Tune,
+                    iconAccent = if (isIgnoringBatteryOptimizations) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        WarningAmber
+                    },
+                    statusLabel = "$systemActiveCount/3",
+                    statusAccent = if (isIgnoringBatteryOptimizations) {
+                        EmeraldPrimary
+                    } else {
+                        WarningAmber
+                    },
+                    expanded = backgroundSystemExpanded,
+                    onToggleExpand = { backgroundSystemExpanded = !backgroundSystemExpanded },
+                    modifier = Modifier.testTag("settings_background_system_card"),
+                    headerModifier = Modifier.testTag("settings_open_background_system")
+                ) {
+                    BackgroundSystemSettingsAccordionBody(
+                        context = context,
+                        preferences = preferences,
+                        isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
+                        onToggleStatusBarSpeed = onToggleStatusBarSpeed,
+                        onToggleExcludeFromRecents = onToggleExcludeFromRecents
+                    )
+                }
 
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            val systemActiveCount = listOf(
-                                preferences.isStatusBarSpeedEnabled,
-                                preferences.excludeFromRecents,
-                                isIgnoringBatteryOptimizations
-                            ).count { it }
-                            SettingsNavigationCard(
-                                title = "Background & System",
-                                summary = "Status Bar Speed Icon • Exclude from Recents • Background & Battery",
-                                icon = Icons.Rounded.Tune,
-                                iconAccent = if (isIgnoringBatteryOptimizations) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    WarningAmber
-                                },
-                                statusLabel = "$systemActiveCount/3",
-                                statusAccent = if (isIgnoringBatteryOptimizations) {
-                                    EmeraldPrimary
-                                } else {
-                                    WarningAmber
-                                },
-                                onClick = { currentPage = SettingsPage.BACKGROUND_SYSTEM },
-                                modifier = Modifier.testTag("settings_open_background_system")
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                             // ─────────────────────────────────────────────────────────────
                             // SECTION 2: FIREWALL & MONITORING
@@ -818,9 +781,6 @@ fun FirewallSettingsSheet(
                                 }
                             }
                         }
-                    }
-                }
-            }
         }
     }
 }

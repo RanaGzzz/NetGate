@@ -196,7 +196,7 @@ class ThemeStyleTest {
         composeRule.waitForIdle()
         assertEquals(NetGateThemeStyle.MATERIAL_YOU_LITE, currentPrefs.themeStyle)
 
-        composeRule.onNodeWithTag("appearance_back_button").performScrollTo().performClick()
+        composeRule.onNodeWithTag("settings_open_appearance").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_open_appearance").performScrollTo().assertIsDisplayed()
     }

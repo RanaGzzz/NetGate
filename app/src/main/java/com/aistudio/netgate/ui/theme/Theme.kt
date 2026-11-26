@@ -1,5 +1,7 @@
 package com.aistudio.netgate.ui.theme
 
+import android.content.ComponentCallbacks
+import android.content.res.Configuration
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -15,9 +17,14 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.BlurEngineStyle
@@ -26,6 +33,7 @@ import com.aistudio.netgate.data.model.ThemeMode
 
 val LocalIsDarkTheme = staticCompositionLocalOf { true }
 val LocalThemeStyle = staticCompositionLocalOf { NetGateThemeStyle.NETGATE_DEFAULT }
+val LocalDynamicColorEnabled = staticCompositionLocalOf { true }
 
 private val DarkColorScheme = darkColorScheme(
     primary = EmeraldBright,
@@ -362,40 +370,82 @@ fun NetGateTheme(
     themeStyle: NetGateThemeStyle = NetGateThemeStyle.NETGATE_DEFAULT,
     dynamicColor: Boolean = true,
     blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
+    blurIntensity: Float = 1.0f,
     blurAnimationEnabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val systemDark = isSystemInDarkTheme()
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    var liveNightModeBits by remember(configuration.uiMode) {
+        mutableIntStateOf(configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
+    }
+
+    DisposableEffect(context) {
+        val callbacks = object : ComponentCallbacks {
+            override fun onConfigurationChanged(newConfig: Configuration) {
+                val nextBits = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                if (nextBits != liveNightModeBits) {
+                    liveNightModeBits = nextBits
+                }
+            }
+
+            override fun onLowMemory() = Unit
+        }
+        context.applicationContext.registerComponentCallbacks(callbacks)
+        onDispose {
+            runCatching { context.applicationContext.unregisterComponentCallbacks(callbacks) }
+        }
+    }
+
+    val composeSystemDark = isSystemInDarkTheme()
+    val systemDark = when (liveNightModeBits) {
+        Configuration.UI_MODE_NIGHT_YES -> true
+        Configuration.UI_MODE_NIGHT_NO -> false
+        else -> composeSystemDark
+    }
+
     val darkTheme = when (themeMode) {
         ThemeMode.SYSTEM -> systemDark
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
 
+    val dynamicPalette = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        null
+    }
+
     val targetColorScheme = when (themeStyle) {
         NetGateThemeStyle.LIQUID_GLASS -> {
-            if (darkTheme) LiquidGlassDarkColorScheme else LiquidGlassLightColorScheme
+            val base = if (darkTheme) LiquidGlassDarkColorScheme else LiquidGlassLightColorScheme
+            if (dynamicPalette != null) {
+                base.copy(
+                    primary = dynamicPalette.primary,
+                    onPrimary = dynamicPalette.onPrimary,
+                    primaryContainer = dynamicPalette.primaryContainer,
+                    onPrimaryContainer = dynamicPalette.onPrimaryContainer,
+                    secondary = dynamicPalette.secondary,
+                    onSecondary = dynamicPalette.onSecondary,
+                    secondaryContainer = dynamicPalette.secondaryContainer,
+                    onSecondaryContainer = dynamicPalette.onSecondaryContainer,
+                    tertiary = dynamicPalette.tertiary,
+                    onTertiary = dynamicPalette.onTertiary,
+                    tertiaryContainer = dynamicPalette.tertiaryContainer,
+                    onTertiaryContainer = dynamicPalette.onTertiaryContainer
+                )
+            } else {
+                base
+            }
         }
         NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> {
-            if (darkTheme) ExpressiveDarkColorScheme else ExpressiveLightColorScheme
+            dynamicPalette ?: if (darkTheme) ExpressiveDarkColorScheme else ExpressiveLightColorScheme
         }
         NetGateThemeStyle.MATERIAL_YOU_LITE -> {
-            if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val context = LocalContext.current
-                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            } else {
-                if (darkTheme) YouLiteDarkColorScheme else YouLiteLightColorScheme
-            }
+            dynamicPalette ?: if (darkTheme) YouLiteDarkColorScheme else YouLiteLightColorScheme
         }
         NetGateThemeStyle.NETGATE_DEFAULT -> {
-            when {
-                dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                    val context = LocalContext.current
-                    if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-                }
-                darkTheme -> DarkColorScheme
-                else -> LightColorScheme
-            }
+            dynamicPalette ?: if (darkTheme) DarkColorScheme else LightColorScheme
         }
     }
 
@@ -405,11 +455,14 @@ fun NetGateTheme(
     CompositionLocalProvider(
         LocalIsDarkTheme provides darkTheme,
         LocalThemeStyle provides themeStyle,
+        LocalDynamicColorEnabled provides (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
         LocalExpressiveMotion provides motionSpec,
         LocalBlurEngineConfig provides BlurEngineConfig(
             style = blurEngineStyle,
+            intensity = blurIntensity.coerceIn(0.4f, 1.5f),
             animateMotion = blurAnimationEnabled,
-            themeStyle = themeStyle
+            themeStyle = themeStyle,
+            useDynamicColor = dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
         )
     ) {
         MaterialTheme(

@@ -78,6 +78,13 @@ object CrashLogRecorder {
             val file = File(dir, "$FILE_PREFIX$now.txt")
             file.writeText(text)
             trim(dir)
+            AppLogCollector.crash(
+                tag = "Crash",
+                title = "App crash: ${throwable.javaClass.simpleName}",
+                message = "${throwable.javaClass.name}: ${throwable.message ?: "Uncaught exception"} on ${thread.name}",
+                stackTrace = text,
+                timestampMs = now
+            )
             file
         }.getOrNull()
     }

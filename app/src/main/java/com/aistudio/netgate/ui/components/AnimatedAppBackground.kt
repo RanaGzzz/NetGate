@@ -5,18 +5,11 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,16 +18,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.BackgroundAnimationStyle
+import com.aistudio.netgate.ui.theme.LocalBlurEngineConfig
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
+import com.aistudio.netgate.ui.theme.rememberLifecycleMotionProgress
+import com.aistudio.netgate.ui.theme.rememberMotionActive
 import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.cos
@@ -44,8 +42,8 @@ import kotlin.random.Random
 
 /**
  * Ambient animation painted behind every NetGate screen, above the aurora backdrop and below all
- * content. It is a single [Canvas]; the animated phase is read inside the draw scope so the
- * composition never re-runs while the animation plays.
+ * content. Uses an offscreen hardware compositing layer and lifecycle-aware phase progress that
+ * pauses when backgrounded or when Android "Remove animations" is enabled.
  */
 @Composable
 fun AnimatedAppBackground(
@@ -55,6 +53,9 @@ fun AnimatedAppBackground(
     modifier: Modifier = Modifier
 ) {
     if (style == BackgroundAnimationStyle.NONE) return
+
+    val blurConfig = LocalBlurEngineConfig.current
+    val motionActive by rememberMotionActive(blurConfig.animateMotion)
 
     // "Random" is resolved once per screen lifetime, not per frame.
     val resolved = remember(style) {
@@ -66,8 +67,13 @@ fun AnimatedAppBackground(
             style
         }
     }
-    val phase = backgroundPhase()
-    val parallax = rememberParallaxOffset(parallaxEnabled)
+    val phase = rememberLifecycleMotionProgress(
+        active = motionActive,
+        durationMillis = 20_000,
+        initialPhase = 0.12f,
+        label = "appBackground"
+    )
+    val parallax = rememberParallaxOffset(enabled = parallaxEnabled && motionActive)
     val isDark = LocalIsDarkTheme.current
     val primary = MaterialTheme.colorScheme.primary
     val secondary = seasonalAccent(seasonalEnabled, MaterialTheme.colorScheme.secondary)
@@ -75,7 +81,11 @@ fun AnimatedAppBackground(
     val alphaScale = if (isDark) 1f else 0.72f
     val lineWidth = 1.4.dp
 
-    Canvas(modifier = modifier.fillMaxSize()) {
+    Canvas(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    ) {
         val t = phase.value
         translate(parallax.x.dp.toPx(), parallax.y.dp.toPx()) {
             when (resolved) {
@@ -94,27 +104,16 @@ fun AnimatedAppBackground(
     }
 }
 
-@Composable
-private fun backgroundPhase(): State<Float> {
-    val transition = rememberInfiniteTransition(label = "appBackground")
-    return transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 26_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "appBackgroundPhase"
-    )
-}
-
 /** Device tilt used by the parallax toggle; values are in dp so the draw scope can scale them. */
 @Composable
 private fun rememberParallaxOffset(enabled: Boolean): Offset {
     var offset by remember { mutableStateOf(Offset.Zero) }
-    if (!enabled) return Offset.Zero
     val context = LocalContext.current
-    DisposableEffect(context) {
+    DisposableEffect(context, enabled) {
+        if (!enabled) {
+            offset = Offset.Zero
+            return@DisposableEffect onDispose { }
+        }
         val manager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val sensor = manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         if (manager == null || sensor == null) {
@@ -122,7 +121,7 @@ private fun rememberParallaxOffset(enabled: Boolean): Offset {
         }
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                val maxDp = 9f
+                val maxDp = 11f
                 offset = Offset(
                     x = (-event.values[0] / SensorManager.GRAVITY_EARTH * maxDp).coerceIn(-maxDp, maxDp),
                     y = (event.values[1] / SensorManager.GRAVITY_EARTH * maxDp).coerceIn(-maxDp, maxDp)
@@ -240,28 +239,29 @@ private fun DrawScope.drawSpace(
     repeat(70) { index ->
         val baseX = random.nextFloat()
         val baseY = random.nextFloat()
-        val drift = 0.01f * sin(twoPi * t + index * 0.7f)
-        val x = size.width * ((baseX + drift + 1f) % 1f)
-        val y = size.height * baseY
-        val twinkle = 0.25f + 0.75f * (0.5f + 0.5f * sin(twoPi * (t * 2f) + index * 1.9f))
+        val driftX = 0.055f * sin(twoPi * t + index * 0.7f)
+        val driftY = 0.032f * cos(twoPi * t * 0.8f + index * 0.5f)
+        val x = size.width * ((baseX + driftX + 1f) % 1f)
+        val y = size.height * ((baseY + driftY + 1f) % 1f)
+        val twinkle = 0.25f + 0.75f * (0.5f + 0.5f * sin(twoPi * (t * 3f) + index * 1.9f))
         val radius = (0.7f + (index % 4) * 0.55f).dp.toPx()
         drawCircle(
             color = (if (index % 5 == 0) secondary else primary)
-                .copy(alpha = 0.55f * twinkle * alphaScale),
+                .copy(alpha = 0.62f * twinkle * alphaScale),
             radius = radius,
             center = Offset(x, y)
         )
         if (index % 17 == 0) {
             val sparkle = 5.dp.toPx()
             drawLine(
-                color = secondary.copy(alpha = 0.35f * twinkle * alphaScale),
+                color = secondary.copy(alpha = 0.42f * twinkle * alphaScale),
                 start = Offset(x - sparkle, y),
                 end = Offset(x + sparkle, y),
                 strokeWidth = 1.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
-                color = secondary.copy(alpha = 0.35f * twinkle * alphaScale),
+                color = secondary.copy(alpha = 0.42f * twinkle * alphaScale),
                 start = Offset(x, y - sparkle),
                 end = Offset(x, y + sparkle),
                 strokeWidth = 1.dp.toPx(),
@@ -284,9 +284,10 @@ private fun DrawScope.drawShapes(
     repeat(4) { index ->
         val sides = 3 + index
         val radius = size.minDimension * (0.09f + index * 0.025f)
-        val cx = size.width * (0.22f + 0.18f * index)
+        val cx = size.width * (0.22f + 0.18f * index) +
+            size.width * 0.045f * cos(twoPi * t + index * 1.1f)
         val cy = size.height * (0.28f + 0.16f * (index % 2)) +
-            size.height * 0.04f * sin(twoPi * t + index)
+            size.height * 0.065f * sin(twoPi * t + index)
         val path = Path()
         repeat(sides) { corner ->
             val angle = twoPi * corner / sides - (PI / 2).toFloat()
@@ -296,12 +297,12 @@ private fun DrawScope.drawShapes(
         }
         path.close()
         rotate(
-            degrees = t * 360f * (if (index % 2 == 0) 1f else -1f) * 0.25f,
+            degrees = t * 360f * (if (index % 2 == 0) 1f else -1f),
             pivot = Offset(cx, cy)
         ) {
             drawPath(
                 path = path,
-                color = colors[index % colors.size].copy(alpha = 0.30f * alphaScale),
+                color = colors[index % colors.size].copy(alpha = 0.34f * alphaScale),
                 style = Stroke(width = strokeWidth)
             )
         }

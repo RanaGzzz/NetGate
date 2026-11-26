@@ -204,7 +204,8 @@ class SystemAndWidgetEnhancementsTest {
             .performScrollTo()
             .assertIsDisplayed()
 
-        composeRule.onNodeWithTag("background_system_back_button")
+        // Collapse inline Background & System accordion back in place
+        composeRule.onNodeWithTag("settings_open_background_system")
             .performScrollTo()
             .performClick()
         composeRule.waitForIdle()

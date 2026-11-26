@@ -8,6 +8,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,6 +20,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -82,8 +84,22 @@ class MainActivity : ComponentActivity() {
                 themeStyle = uiState.preferences.themeStyle,
                 dynamicColor = uiState.preferences.useDynamicColor,
                 blurEngineStyle = uiState.preferences.blurEngineStyle,
+                blurIntensity = uiState.preferences.blurIntensity,
                 blurAnimationEnabled = uiState.preferences.isBlurAnimationEnabled
             ) {
+                val activeDarkTheme = com.aistudio.netgate.ui.theme.LocalIsDarkTheme.current
+                SideEffect {
+                    enableEdgeToEdge(
+                        statusBarStyle = SystemBarStyle.auto(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        ) { activeDarkTheme },
+                        navigationBarStyle = SystemBarStyle.auto(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        ) { activeDarkTheme }
+                    )
+                }
                 val vpnConsentLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
                 ) { result ->

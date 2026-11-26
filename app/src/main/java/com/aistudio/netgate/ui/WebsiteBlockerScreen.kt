@@ -257,7 +257,7 @@ fun WebsiteBlockerContent(
     ) {
         val isWide = maxWidth >= 800.dp
         val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val listBottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp
+        val listBottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp
         val sidePadding = if (isWide) 20.dp else 16.dp
 
         Column(modifier = Modifier.fillMaxSize()) {
@@ -794,41 +794,73 @@ fun WebsiteBlockerContent(
                             ) {
                                 item(key = "dns_logs_header") {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 2.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             text = "Filter Log (Live Feed)",
                                             style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
                                         )
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Row(
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             TextButton(
                                                 onClick = onOpenDpiLogs,
-                                                modifier = Modifier.testTag("dns_tab_open_vpn_dpi_logs_button")
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier
+                                                    .heightIn(min = 48.dp)
+                                                    .testTag("dns_tab_open_vpn_dpi_logs_button")
                                             ) {
-                                                Text("VPN & DPI Logs")
+                                                Text(
+                                                    text = "VPN & DPI Logs",
+                                                    maxLines = 1,
+                                                    softWrap = false
+                                                )
                                             }
                                             if (state.dnsQueryLogs.isNotEmpty()) {
                                                 TextButton(
                                                     onClick = onClearDnsLogs,
-                                                    modifier = Modifier.testTag("clear_dns_logs_button")
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                    modifier = Modifier
+                                                        .heightIn(min = 48.dp)
+                                                        .testTag("clear_dns_logs_button")
                                                 ) {
-                                                    Text("Clear (${state.dnsQueryLogs.size})")
+                                                    Text(
+                                                        text = "Clear (${state.dnsQueryLogs.size})",
+                                                        color = BlockedRed,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
                                                 }
                                             }
                                         }
                                     }
                                 }
                                 item(key = "dns_logs_filter_header") {
+                                    val blockedLogsCount = remember(state.dnsQueryLogs) {
+                                        state.dnsQueryLogs.count {
+                                            it.status == DnsQueryStatus.BLOCKED_AD ||
+                                                it.status == DnsQueryStatus.BLOCKED_WEBSITE ||
+                                                it.status == DnsQueryStatus.BLOCKED_HTTPS ||
+                                                it.status == DnsQueryStatus.BLOCKED_APP
+                                        }
+                                    }
+                                    val allowedLogsCount = (state.dnsQueryLogs.size - blockedLogsCount).coerceAtLeast(0)
                                     DnsLogsFilterCard(
                                         searchQuery = dnsLogSearchQuery,
                                         selectedFilter = dnsLogFilter,
                                         totalLogsCount = state.dnsQueryLogs.size,
+                                        blockedCount = blockedLogsCount,
+                                        allowedCount = allowedLogsCount,
                                         onSearchQueryChange = { dnsLogSearchQuery = it },
                                         onSelectFilter = { dnsLogFilter = it }
                                     )

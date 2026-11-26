@@ -14,15 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BrightnessAuto
@@ -36,8 +32,8 @@ import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,18 +57,24 @@ import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.ThemeMode
+import kotlin.math.roundToInt
 
+/**
+ * Inline Appearance controls rendered directly inside the Appearance [SettingsAccordionCard]
+ * on the main Settings list (no separate full-page drill-down).
+ */
 @Composable
-fun AppearanceSettingsContent(
+fun AppearanceSettingsAccordionBody(
     preferences: FirewallPreferencesState,
     onThemeModeChange: (ThemeMode) -> Unit,
     onThemeStyleChange: (NetGateThemeStyle) -> Unit,
     onToggleDynamicColor: (Boolean) -> Unit,
     onBlurStyleChange: (BlurEngineStyle) -> Unit,
+    onBlurIntensityChange: (Float) -> Unit = {},
     onToggleBlurAnimation: (Boolean) -> Unit,
     onOpenBackgroundAnimation: () -> Unit,
     onAppIconChange: (AppIconStyle) -> Unit,
-    onBack: () -> Unit
+    modifier: Modifier = Modifier
 ) {
     var themeModeExpanded by rememberSaveable { mutableStateOf(false) }
     var themeStyleExpanded by rememberSaveable { mutableStateOf(false) }
@@ -81,67 +83,12 @@ fun AppearanceSettingsContent(
     var appIconExpanded by rememberSaveable { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 28.dp)
-            .testTag("appearance_settings_view")
+            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .testTag("appearance_settings_view"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Header with Back Navigation
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("appearance_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back to Settings"
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Appearance",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Theme mode, glass engine, motion & launcher icon",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            SettingsStatusPill(
-                label = preferences.themeStyle.badgeLabel,
-                accent = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // Section 1: Theme & Style
-        SettingsSectionHeader(
-            title = "Theme & Colors",
-            icon = Icons.Rounded.Palette
-        )
-
         val themeModeIcon = when (preferences.themeMode) {
             ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
             ThemeMode.LIGHT -> Icons.Rounded.LightMode
@@ -173,7 +120,7 @@ fun AppearanceSettingsContent(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
                     Row(
                         modifier = Modifier
@@ -243,9 +190,6 @@ fun AppearanceSettingsContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Theme Style & Motion (Accordion + 2x2 compact grid)
         SettingsAccordionCard(
             title = "Theme Style & Motion",
             summary = preferences.themeStyle.subtitle,
@@ -260,7 +204,7 @@ fun AppearanceSettingsContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 NetGateThemeStyle.entries.chunked(2).forEach { rowStyles ->
@@ -319,15 +263,6 @@ fun AppearanceSettingsContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Section 2: Glass, Motion & Launcher Icon
-        SettingsSectionHeader(
-            title = "Glass, Motion & Icon",
-            icon = Icons.Rounded.BlurOn
-        )
-
-        // Blur Engine Effect + Ambient Motion
         SettingsAccordionCard(
             title = "Blur Engine Effect",
             summary = preferences.blurEngineStyle.subtitle,
@@ -343,7 +278,7 @@ fun AppearanceSettingsContent(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     BlurEngineStyle.entries.chunked(2).forEach { rowStyles ->
@@ -389,7 +324,38 @@ fun AppearanceSettingsContent(
                                     )
                                 }
                             }
+                            if (rowStyles.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
+                    }
+
+                    if (preferences.blurEngineStyle != BlurEngineStyle.OFF) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Blur Intensity & Depth",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${(preferences.blurIntensity * 100f).roundToInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = preferences.blurIntensity.coerceIn(0.4f, 1.5f),
+                            onValueChange = onBlurIntensityChange,
+                            valueRange = 0.4f..1.5f,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("blur_intensity_slider")
+                        )
                     }
                 }
 
@@ -406,9 +372,6 @@ fun AppearanceSettingsContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Background Animation Accordion Card
         SettingsAccordionCard(
             title = "Background Animation",
             summary = "Live backdrop rendered behind every screen",
@@ -422,7 +385,7 @@ fun AppearanceSettingsContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
@@ -455,9 +418,6 @@ fun AppearanceSettingsContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // App Icon Accordion Card
         SettingsAccordionCard(
             title = "App Icon",
             summary = "Adaptive launcher icon style",
@@ -471,7 +431,7 @@ fun AppearanceSettingsContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 AppIconStyle.entries.forEach { style ->

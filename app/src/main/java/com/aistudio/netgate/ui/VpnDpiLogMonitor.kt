@@ -10,6 +10,7 @@ import com.aistudio.netgate.data.model.VpnDpiLogSeverity
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
 import com.aistudio.netgate.data.model.VpnGuardRuntimeState
+import com.aistudio.netgate.service.AppLogCollector
 import com.aistudio.netgate.service.VpnRuntimeState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -326,7 +327,8 @@ class VpnDpiLogMonitor {
         severity: VpnDpiLogSeverity,
         title: String,
         detail: String,
-        timestampMs: Long = System.currentTimeMillis()
+        timestampMs: Long = System.currentTimeMillis(),
+        mirrorToAppLog: Boolean = true
     ) {
         val item = VpnDpiLogEntry(
             id = nextId.getAndIncrement(),
@@ -338,6 +340,35 @@ class VpnDpiLogMonitor {
         )
         _logs.update { current ->
             (listOf(item) + current).take(MAX_LOG_ENTRIES)
+        }
+        if (mirrorToAppLog) {
+            val tag = when (category) {
+                VpnDpiLogCategory.VPN_GUARD -> "VPN Guard"
+                VpnDpiLogCategory.DPI_BYPASS -> "DPI"
+                VpnDpiLogCategory.VPN_TUNNEL -> "Firewall"
+                VpnDpiLogCategory.APP -> "Crash"
+                VpnDpiLogCategory.ALL -> "NetGate"
+            }
+            when (severity) {
+                VpnDpiLogSeverity.ERROR -> AppLogCollector.error(
+                    tag = tag,
+                    title = title,
+                    message = detail,
+                    timestampMs = timestampMs
+                )
+                VpnDpiLogSeverity.WARNING -> AppLogCollector.warn(
+                    tag = tag,
+                    title = title,
+                    message = detail,
+                    timestampMs = timestampMs
+                )
+                VpnDpiLogSeverity.INFO, VpnDpiLogSeverity.SUCCESS -> AppLogCollector.info(
+                    tag = tag,
+                    title = title,
+                    message = detail,
+                    timestampMs = timestampMs
+                )
+            }
         }
     }
 

@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -217,7 +219,7 @@ fun FilterLogEntryCard(
 
                 IconButton(
                     onClick = { isExpanded = !isExpanded },
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.minimumInteractiveComponentSize()
                 ) {
                     Icon(
                         imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -291,11 +293,12 @@ fun FilterLogEntryCard(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 6 Quick Actions Bar
-                    Row(
+                    // 6 Quick Actions Bar (wrapping cleanly without clipping)
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Action 1: Allow (Temporary / Permanent)
                         Box {
@@ -394,14 +397,14 @@ fun FilterLogEntryCard(
                                 onNotifyCopied("Copied ${entry.domain} to clipboard")
                             },
                             modifier = Modifier
-                                .size(36.dp)
+                                .minimumInteractiveComponentSize()
                                 .testTag("filter_log_action_copy_${entry.domain}")
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.ContentCopy,
                                 contentDescription = "Copy domain",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
@@ -411,14 +414,14 @@ fun FilterLogEntryCard(
                                 openBrowserSafe(context, "https://who.is/whois/${entry.domain}")
                             },
                             modifier = Modifier
-                                .size(36.dp)
+                                .minimumInteractiveComponentSize()
                                 .testTag("filter_log_action_whois_${entry.domain}")
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.OpenInBrowser,
                                 contentDescription = "Whois Lookup",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
@@ -428,14 +431,14 @@ fun FilterLogEntryCard(
                                 openBrowserSafe(context, "https://www.virustotal.com/gui/domain/${entry.domain}")
                             },
                             modifier = Modifier
-                                .size(36.dp)
+                                .minimumInteractiveComponentSize()
                                 .testTag("filter_log_action_virustotal_${entry.domain}")
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Security,
                                 contentDescription = "VirusTotal Scan",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
@@ -443,14 +446,14 @@ fun FilterLogEntryCard(
                         IconButton(
                             onClick = { showFalsePositiveDialog = true },
                             modifier = Modifier
-                                .size(36.dp)
+                                .minimumInteractiveComponentSize()
                                 .testTag("filter_log_action_false_positive_${entry.domain}")
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Feedback,
                                 contentDescription = "Report False Positive",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }

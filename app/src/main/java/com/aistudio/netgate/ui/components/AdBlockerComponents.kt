@@ -934,6 +934,7 @@ fun AdFilterListRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DnsLogsFilterCard(
     searchQuery: String,
@@ -941,7 +942,9 @@ fun DnsLogsFilterCard(
     totalLogsCount: Int,
     onSearchQueryChange: (String) -> Unit,
     onSelectFilter: (DnsLogFilter) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    blockedCount: Int? = null,
+    allowedCount: Int? = null
 ) {
     FrostedSurface(
         shape = RoundedCornerShape(18.dp),
@@ -954,7 +957,10 @@ fun DnsLogsFilterCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Icon(
                         imageVector = Icons.Rounded.Dns,
                         contentDescription = null,
@@ -965,8 +971,40 @@ fun DnsLogsFilterCard(
                     Text(
                         text = "Live DNS Query Log ($totalLogsCount)",
                         style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                }
+                if (blockedCount != null && allowedCount != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = BlockedRed.copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                text = "$blockedCount Blocked",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = BlockedRed,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = EmeraldPrimary.copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                text = "$allowedCount Allowed",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = EmeraldPrimary,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -984,7 +1022,7 @@ fun DnsLogsFilterCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -994,7 +1032,11 @@ fun DnsLogsFilterCard(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Box(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 8.dp)
+                    ) {
                         if (searchQuery.isEmpty()) {
                             Text(
                                 text = "Search domains in DNS log…",
@@ -1018,21 +1060,22 @@ fun DnsLogsFilterCard(
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { onSearchQueryChange("") },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.minimumInteractiveComponentSize()
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Close,
                                 contentDescription = "Clear DNS log search",
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 DnsLogFilter.entries.forEach { filter ->
                     FilterChip(
@@ -1041,7 +1084,9 @@ fun DnsLogsFilterCard(
                         label = {
                             Text(
                                 text = filter.label,
-                                style = MaterialTheme.typography.labelMedium
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         },
                         shape = RoundedCornerShape(12.dp),

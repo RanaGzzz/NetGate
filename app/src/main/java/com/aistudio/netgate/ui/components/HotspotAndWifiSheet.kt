@@ -225,7 +225,7 @@ fun HotspotAndWifiContent(
                         .align(Alignment.TopCenter)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp, bottom = navInsetBottom + 96.dp),
+                        .padding(top = 8.dp, bottom = navInsetBottom + 120.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     HotspotProxyCard(

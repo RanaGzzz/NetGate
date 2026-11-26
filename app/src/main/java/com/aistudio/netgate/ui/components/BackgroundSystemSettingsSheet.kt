@@ -8,23 +8,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -44,14 +38,18 @@ import com.aistudio.netgate.service.BackgroundPowerHelper
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.WarningAmber
 
+/**
+ * Inline Background & System controls rendered inside the Background & System [SettingsAccordionCard]
+ * on the main Settings list (no separate full-page drill-down).
+ */
 @Composable
-fun BackgroundSystemSettingsContent(
+fun BackgroundSystemSettingsAccordionBody(
     context: Context,
     preferences: FirewallPreferencesState,
     isIgnoringBatteryOptimizations: Boolean,
     onToggleStatusBarSpeed: (Boolean) -> Unit,
     onToggleExcludeFromRecents: (Boolean) -> Unit,
-    onBack: () -> Unit
+    modifier: Modifier = Modifier
 ) {
     var statusBarSpeedExpanded by rememberSaveable { mutableStateOf(false) }
     var excludeRecentsExpanded by rememberSaveable { mutableStateOf(false) }
@@ -60,69 +58,12 @@ fun BackgroundSystemSettingsContent(
     val batteryAccent = if (isIgnoringBatteryOptimizations) EmeraldPrimary else WarningAmber
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 28.dp)
-            .testTag("background_system_settings_view")
+            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .testTag("background_system_settings_view"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Header with Back Navigation
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("background_system_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back to Settings"
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Background & System",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Speed icon, recents privacy & battery",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            SettingsStatusPill(
-                label = if (isIgnoringBatteryOptimizations) "Allowed" else "Restricted",
-                accent = batteryAccent
-            )
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        SettingsSectionHeader(
-            title = "System & Background Controls",
-            icon = Icons.Rounded.Tune
-        )
-
-        // 1. Status Bar Speed Icon
         SettingsAccordionCard(
             title = "Status Bar Speed Icon",
             summary = "Live upload/download speed & daily usage",
@@ -152,9 +93,6 @@ fun BackgroundSystemSettingsContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 2. Exclude from Recents
         SettingsAccordionCard(
             title = "Exclude from Recents",
             summary = "Hide NetGate from Android Recent Apps",
@@ -184,9 +122,6 @@ fun BackgroundSystemSettingsContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 3. Background & Battery
         SettingsAccordionCard(
             title = "Background & Battery",
             summary = if (isIgnoringBatteryOptimizations) {
@@ -212,7 +147,7 @@ fun BackgroundSystemSettingsContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
@@ -268,7 +203,7 @@ private fun AccordionToggleBody(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(

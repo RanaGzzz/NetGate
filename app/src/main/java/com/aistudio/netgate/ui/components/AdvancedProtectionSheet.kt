@@ -124,7 +124,9 @@ fun AdvancedProtectionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.93f)
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        tonalElevation = 0.dp,
+        dragHandle = null
     ) {
         FrostedSheetContainer {
             Column(
@@ -136,16 +138,18 @@ fun AdvancedProtectionSheet(
                     .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-            Text(
-                text = "Kill Switch, Backup & Automation",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "VPN kill switch, auto-reconnect, trusted Wi-Fi & AES-256 encrypted backup.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                FrostedSheetDragHandle()
+                Text(
+                    text = "Kill Switch, Backup & Automation",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "VPN kill switch, auto-reconnect, trusted Wi-Fi & AES-256 encrypted backup.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
             SectionCard {
                 SwitchRow(
@@ -183,7 +187,8 @@ fun AdvancedProtectionSheet(
                     Column {
                         Text(
                             text = "Trusted Wi-Fi Auto-VPN",
-                            style = MaterialTheme.typography.titleSmall
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = currentSsid ?: "Not connected to Wi-Fi",
@@ -238,7 +243,8 @@ fun AdvancedProtectionSheet(
                     Column {
                         Text(
                             text = "Encrypted Backup & Restore",
-                            style = MaterialTheme.typography.titleSmall
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Rules, site lists, DNS settings and VPN profiles in one AES-256 file",
@@ -358,7 +364,11 @@ private fun SwitchRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.labelSmall,

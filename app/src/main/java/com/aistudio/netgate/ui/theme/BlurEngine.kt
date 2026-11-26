@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -44,10 +45,24 @@ import com.aistudio.netgate.data.model.NetGateThemeStyle
 import io.github.fletchmckee.liquid.LiquidState
 import kotlin.math.roundToInt
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 data class BlurEngineConfig(
     val style: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
+    val intensity: Float = 1.0f,
     val animateMotion: Boolean = true,
-    val themeStyle: NetGateThemeStyle = NetGateThemeStyle.NETGATE_DEFAULT
+    val themeStyle: NetGateThemeStyle = NetGateThemeStyle.NETGATE_DEFAULT,
+    val useDynamicColor: Boolean = false
 )
 
 data class ExpressiveMotionSpec(
@@ -67,18 +82,137 @@ val LocalExpressiveMotion = staticCompositionLocalOf { ExpressiveMotionSpec() }
 val LocalBackdropLiquidState = staticCompositionLocalOf<LiquidState?> { null }
 val LocalOverlayLiquidState = staticCompositionLocalOf<LiquidState?> { null }
 
-fun BlurEngineStyle.liquidFrostDp(): Dp = when (this) {
+fun BlurEngineStyle.liquidFrostDp(intensity: Float = 1f): Dp = when (this) {
     BlurEngineStyle.OFF -> 0.dp
-    BlurEngineStyle.SOFT_GLASS -> 8.dp
-    BlurEngineStyle.ACRYLIC_PRO -> 14.dp
-    BlurEngineStyle.ULTRA_FROST -> 20.dp
+    BlurEngineStyle.SOFT_GLASS -> (8f * intensity).dp
+    BlurEngineStyle.ACRYLIC_PRO -> (14f * intensity).dp
+    BlurEngineStyle.ULTRA_FROST -> (20f * intensity).dp
+    BlurEngineStyle.MORPH -> (24f * intensity).dp
 }
 
-fun BlurEngineStyle.navLiquidFrostDp(): Dp = when (this) {
+fun BlurEngineStyle.navLiquidFrostDp(intensity: Float = 1f): Dp = when (this) {
     BlurEngineStyle.OFF -> 0.dp
-    BlurEngineStyle.SOFT_GLASS -> 6.dp
-    BlurEngineStyle.ACRYLIC_PRO -> 10.dp
-    BlurEngineStyle.ULTRA_FROST -> 15.dp
+    BlurEngineStyle.SOFT_GLASS -> (6f * intensity).dp
+    BlurEngineStyle.ACRYLIC_PRO -> (10f * intensity).dp
+    BlurEngineStyle.ULTRA_FROST -> (15f * intensity).dp
+    BlurEngineStyle.MORPH -> (18f * intensity).dp
+}
+
+/**
+ * Observes both Lifecycle resumed state and Android's "Remove animations" accessibility setting
+ * (`ANIMATOR_DURATION_SCALE == 0f`) so ambient background & glass animations pause when backgrounded
+ * and fall back to a static composition when animations are disabled.
+ */
+@Composable
+fun rememberMotionActive(animateMotion: Boolean): State<Boolean> {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val initialResumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    val initialReduced = remember(context) { isSystemRemoveAnimationsEnabled(context) }
+
+    val isResumed = remember { mutableStateOf(initialResumed) }
+    val isReducedMotion = remember { mutableStateOf(initialReduced) }
+    val activeState = remember { mutableStateOf(animateMotion && initialResumed && !initialReduced) }
+
+    DisposableEffect(lifecycleOwner, animateMotion) {
+        isResumed.value = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        activeState.value = animateMotion && isResumed.value && !isReducedMotion.value
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isResumed.value = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> isResumed.value = false
+                else -> Unit
+            }
+            activeState.value = animateMotion && isResumed.value && !isReducedMotion.value
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(context, animateMotion) {
+        val resolver = context.contentResolver
+        val contentObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                isReducedMotion.value = isSystemRemoveAnimationsEnabled(context)
+                activeState.value = animateMotion && isResumed.value && !isReducedMotion.value
+            }
+        }
+        runCatching {
+            resolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+                false,
+                contentObserver
+            )
+        }
+        onDispose {
+            runCatching { resolver.unregisterContentObserver(contentObserver) }
+        }
+    }
+
+    return activeState
+}
+
+fun isSystemRemoveAnimationsEnabled(context: android.content.Context): Boolean {
+    return runCatching {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f
+        ) == 0f
+    }.getOrDefault(false)
+}
+
+/**
+ * Provides a normalized 0f..1f cyclic progress [State] that:
+ * - Instantiates `rememberInfiniteTransition` unconditionally (safe under Compose test clocks).
+ * - Pauses in place when [active] becomes false (backgrounded or "Remove animations" enabled),
+ *   stopping frame reads so Canvas/DrawScope incurs zero background CPU/GPU drain.
+ * - Resumes smoothly from the exact paused phase without jumping when [active] returns true.
+ */
+@Composable
+fun rememberLifecycleMotionProgress(
+    active: Boolean,
+    durationMillis: Int = 18_000,
+    initialPhase: Float = 0.14f,
+    label: String = "lifecycleMotion"
+): State<Float> {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = label)
+    val runningPhase = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(
+                durationMillis = durationMillis,
+                easing = androidx.compose.animation.core.LinearEasing
+            ),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
+        ),
+        label = "${label}_phase"
+    )
+    val frozenPhase = remember { androidx.compose.runtime.mutableFloatStateOf(initialPhase) }
+    val phaseShift = remember { androidx.compose.runtime.mutableFloatStateOf(initialPhase) }
+    val wasActive = remember { androidx.compose.runtime.mutableStateOf(active) }
+
+    androidx.compose.runtime.LaunchedEffect(active) {
+        if (active && !wasActive.value) {
+            phaseShift.floatValue = (frozenPhase.floatValue - runningPhase.value + 2f) % 1f
+        } else if (!active && wasActive.value) {
+            frozenPhase.floatValue = (runningPhase.value + phaseShift.floatValue) % 1f
+        }
+        wasActive.value = active
+    }
+
+    return remember(active) {
+        androidx.compose.runtime.derivedStateOf {
+            if (active) {
+                val p = (runningPhase.value + phaseShift.floatValue) % 1f
+                frozenPhase.floatValue = p
+                p
+            } else {
+                frozenPhase.floatValue
+            }
+        }
+    }
 }
 
 /**
@@ -240,6 +374,7 @@ object BlurEngine {
             BlurEngineStyle.SOFT_GLASS -> 0.55f
             BlurEngineStyle.ACRYLIC_PRO -> 0.82f
             BlurEngineStyle.ULTRA_FROST -> 1.0f
+            BlurEngineStyle.MORPH -> 1.12f
         }
         val primaryEdge = borderAccent ?: if (isLiquid) LiquidGlassCyan else EmeraldBright
         val secondaryEdge = if (isLiquid) LiquidGlassPrismViolet else LiquidGlassCyan

@@ -169,7 +169,7 @@ fun DataUsageContent(
                         state = state.wifiDiagnostics,
                         onRefreshWifi = onRefreshWifi,
                         onClearObservedHistory = onClearObservedWifi,
-                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
+                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp,
                         modifier = Modifier
                             .weight(1f)
                             .align(Alignment.CenterHorizontally)
@@ -211,7 +211,7 @@ fun DataUsageContent(
                         onQuickAllowSite = onQuickAllowSite,
                         onQuickBlockApp = onQuickBlockApp,
                         onQuickAllowApp = onQuickAllowApp,
-                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
+                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -235,7 +235,7 @@ fun DataUsageContent(
                                     onOpenFlaggedSitesFromAudit()
                             }
                         },
-                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 96.dp,
+                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -359,7 +359,7 @@ fun DataUsageContent(
                         start = 16.dp,
                         end = 16.dp,
                         top = 8.dp,
-                        bottom = navInsetBottom + 96.dp
+                        bottom = navInsetBottom + 120.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
