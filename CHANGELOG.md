@@ -1,3 +1,23 @@
+# What's New — NetGate 3.9.7
+
+### Network & Usage
+- **Wi-Fi joins survive the app:** joining a saved network also registers it with the system as a Wi-Fi suggestion, so Android keeps auto-joining it after NetGate is closed or killed instead of dropping back to the previous network when the join request ends.
+- **Hotspot proxy on Android 17:** the local-network permission is now declared, and the proxy explains why it stopped instead of failing silently once NetGate targets Android 17.
+
+### Performance
+- **Full rulesets fit in memory:** blocked domains are stored as packed 64-bit hashes instead of strings, so the matcher uses a fraction of the heap it used to and fewer enabled lists are dropped on smaller devices.
+
+### Battery
+- **Low Power Mode:** samples live speed every 5 seconds instead of every second and rebuilds the status-bar icon less often. Filtering, DNS and the firewall behave exactly as before.
+
+### Updates & Diagnostics
+- **Beta channel:** a new Update Channel setting lets the in-app updater include pre-release builds, which GitHub's latest-release endpoint never returns.
+- **Reports that are ready to send:** copied diagnostic logs now carry the app version, build and device details, so a pasted crash report no longer needs a second round of questions.
+
+### Quality
+- **Device smoke tests in CI:** an emulator job launches the app and checks VPN consent and the Wi-Fi permissions before a release is tagged.
+- **Cold-start benchmark:** a scheduled macrobenchmark records launch timing so the 3.9 performance work cannot regress unnoticed.
+
 # What's New — NetGate 3.9.6
 
 ### Interface & Appearance

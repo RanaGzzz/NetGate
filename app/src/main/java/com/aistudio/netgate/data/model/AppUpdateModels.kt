@@ -56,6 +56,38 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.7",
+            subtitle = "Persistent Wi-Fi Joins, Compact Ruleset, Low Power & Beta Channel",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Network & Usage",
+                    bullets = listOf(
+                        "Wi-Fi networks joined from the app are handed to the system as suggestions, so Android keeps auto-joining them after NetGate is closed.",
+                        "The hotspot proxy declares the Android 17 local-network permission and says why it stopped instead of failing silently."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Performance",
+                    bullets = listOf(
+                        "Blocked domains are stored as packed 64-bit hashes instead of strings, so a full ruleset fits in a fraction of the heap."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Battery",
+                    bullets = listOf(
+                        "Low Power Mode refreshes live speed every 5 seconds and rebuilds the status-bar icon less often; filtering is unaffected."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Updates & Diagnostics",
+                    bullets = listOf(
+                        "An Update Channel setting lets the in-app updater include pre-release builds.",
+                        "Copied diagnostic logs now include the app version, build and device details."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9.6",
             subtitle = "Frosted-Glass Blur, Protection Profiles, Diagnostics Privacy & Backup Layout",
             sections = listOf(
