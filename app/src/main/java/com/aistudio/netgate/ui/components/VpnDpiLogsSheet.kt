@@ -280,7 +280,13 @@ fun VpnDpiLogsSheet(
                                 } else {
                                     formatLogEntriesForClipboard(filteredLogs)
                                 }
-                                copyToClipboard(context, "NetGate Diagnostics Logs", formatted)
+                                // Version, device and build details travel with the pasted log so a
+                                // crash report is actionable without asking for them separately.
+                                val reportText = buildString {
+                                    appendLine(AppLogCollector.deviceAndAppMetadata())
+                                    appendLine(formatted)
+                                }
+                                copyToClipboard(context, "NetGate Diagnostics Logs", reportText)
                                 onCopyLogs("Copied $activeVisibleCount log entries")
                             },
                             enabled = activeVisibleCount > 0,
