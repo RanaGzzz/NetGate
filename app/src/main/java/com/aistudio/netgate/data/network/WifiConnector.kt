@@ -8,6 +8,7 @@ import android.net.NetworkRequest
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
+import android.net.wifi.WifiNetworkSuggestion
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
@@ -57,6 +58,53 @@ object WifiConnector {
      */
     fun canJoinFromApp(label: String): Boolean =
         securityOf(label) != Security.WEP || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+
+    /**
+     * Hands the network to the system as a suggestion, so it outlives this process.
+     *
+     * A specifier join only lives as long as the registered request: when Android kills NetGate the
+     * association is dropped and the phone falls back to the previous network. A suggestion is
+     * remembered like a network joined from Settings, so after the user approves the system prompt
+     * the device keeps auto-joining it on its own.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun suggestNetwork(
+        context: Context,
+        ssid: String,
+        securityLabel: String,
+        passphrase: String?
+    ): Boolean {
+        val security = securityOf(securityLabel)
+        // WEP has no suggestion equivalent; it can only be configured through the legacy path.
+        if (security == Security.WEP) return false
+        val wifiManager = context.applicationContext
+            .getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return false
+        val builder = WifiNetworkSuggestion.Builder().setSsid(ssid)
+        when (security) {
+            Security.OPEN -> Unit
+            Security.WEP -> return false
+            Security.WPA -> builder.setWpa2Passphrase(passphrase.orEmpty())
+        }
+        val suggestion = builder.build()
+        return runCatching {
+            // Reading and removing existing suggestions needs API 30; on 29 the new suggestion is
+            // simply added alongside whatever the system already holds.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val existing = runCatching { wifiManager.networkSuggestions }.getOrNull().orEmpty()
+                    .filter { it.ssid?.trim('"') == ssid }
+                if (existing.isNotEmpty()) {
+                    // Drop the previous suggestion for this SSID first, otherwise a changed
+                    // password would be shadowed by the stale one.
+                    wifiManager.removeNetworkSuggestions(existing)
+                }
+            }
+            wifiManager.addNetworkSuggestions(listOf(suggestion)) ==
+                WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS
+        }.getOrElse { error ->
+            Log.w(TAG, "Could not hand $ssid to the system Wi-Fi suggestions", error)
+            false
+        }
+    }
 
     fun connect(
         context: Context,
@@ -116,6 +164,9 @@ object WifiConnector {
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                // Keep the join after NetGate is gone: the specifier association ends with the
+                // request, but the system keeps auto-joining a suggestion.
+                suggestNetwork(context, ssid, security.name, passphrase)
                 onResult(true, "Connected to $ssid")
             }
 
