@@ -56,6 +56,36 @@ data class ChangelogEntry(
 object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            versionLabel = "NetGate 3.9.8",
+            subtitle = "Firewall That Actually Blocks, Bounded DNS & Leaner Writes",
+            sections = listOf(
+                ChangelogSection(
+                    heading = "Per-App Firewall",
+                    bullets = listOf(
+                        "Blocked apps are now cut off by the VPN route itself on Wi-Fi and mobile data, including raw IPs, QUIC and DNS-over-HTTPS.",
+                        "A new Blocking Priority switch explains the tradeoff and defaults to blocks first; turn it off to keep DNS ad filtering and block apps through DNS and the proxy.",
+                        "Apps without a launcher icon, including background services, now appear in the firewall list."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Performance",
+                    bullets = listOf(
+                        "DNS lookups are bounded to 16 handlers with a 64-query cap instead of one coroutine per packet.",
+                        "Dashboard rankings update at most once per second instead of sorting on every DNS packet.",
+                        "Connection history is merged in memory and flushed in one transaction instead of a database write per connection.",
+                        "Filter log hit counts evict the coldest entries instead of wiping every count."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Reliability",
+                    bullets = listOf(
+                        "TUN writes stop cleanly on interface rebuilds, the logcat collector reaps its process, and proxy relays release their sockets.",
+                        "Crash reports are seeded once per launch, and updates install only when the APK carries the same signing certificate as the installed app."
+                    )
+                )
+            )
+        ),
+        ChangelogEntry(
             versionLabel = "NetGate 3.9.7",
             subtitle = "Persistent Wi-Fi Joins, Compact Ruleset, Low Power & Beta Channel",
             sections = listOf(
