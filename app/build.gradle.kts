@@ -125,6 +125,13 @@ android {
   }
 }
 
+// Export the Room schema JSONs into app/schemas so migrations can be reviewed and
+// covered by MigrationTestHelper. This does not change the database version or any
+// existing migration.
+ksp {
+  arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {

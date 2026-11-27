@@ -2,9 +2,11 @@ package com.aistudio.netgate.data.local
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -34,7 +36,10 @@ import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
 private val Context.firewallDataStore: DataStore<Preferences> by preferencesDataStore(
-    name = "netgate_preferences"
+    name = "netgate_preferences",
+    // A truncated/corrupt preferences file must not crash-loop the app: reset to
+    // empty preferences (all existing keys then fall back to their defaults).
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
 
 class FirewallPreferences(private val context: Context) {

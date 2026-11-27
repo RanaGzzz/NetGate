@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         VpnGuardProfileEntity::class
     ],
     version = 10,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class NetGateDatabase : RoomDatabase() {
     abstract fun appNetworkRuleDao(): AppNetworkRuleDao
