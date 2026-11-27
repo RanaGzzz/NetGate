@@ -107,12 +107,13 @@ fun BlurEngineStyle.navLiquidFrostDp(intensity: Float = 1f): Dp = when (this) {
 fun rememberMotionActive(animateMotion: Boolean): State<Boolean> {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val initialResumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     val initialReduced = remember(context) { isSystemRemoveAnimationsEnabled(context) }
 
-    val isResumed = remember { mutableStateOf(initialResumed) }
+    // Lifecycle.currentState must not be read during composition: doing so never observes later
+    // changes. The DisposableEffect below seeds the real value, and it runs before the first frame.
+    val isResumed = remember { mutableStateOf(false) }
     val isReducedMotion = remember { mutableStateOf(initialReduced) }
-    val activeState = remember { mutableStateOf(animateMotion && initialResumed && !initialReduced) }
+    val activeState = remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner, animateMotion) {
         isResumed.value = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
