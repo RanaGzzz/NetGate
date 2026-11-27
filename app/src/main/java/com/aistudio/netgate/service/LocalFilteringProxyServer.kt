@@ -14,11 +14,14 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 data class ProxyFilterDecision(
@@ -81,6 +84,7 @@ class LocalFilteringProxyServer(
     private val resolveClientApp: ((Socket) -> Pair<String, String>?)? = null
 ) {
     private val running = AtomicBoolean(false)
+    private val threadCounter = AtomicInteger(0)
     private var serverSocket: ServerSocket? = null
     private var acceptExecutor: ExecutorService? = null
     private var workerExecutor: ExecutorService? = null
@@ -115,7 +119,7 @@ class LocalFilteringProxyServer(
             boundPort = server.localPort
             serverSocket = server
             acceptExecutor = Executors.newSingleThreadExecutor()
-            workerExecutor = Executors.newCachedThreadPool()
+            workerExecutor = newWorkerExecutor()
 
             acceptExecutor?.execute {
                 while (running.get() && !server.isClosed) {
@@ -834,7 +838,9 @@ class LocalFilteringProxyServer(
         val throttleBytesPerSec = runCatching { clientThrottleBytesPerSec(clientIp) }
             .getOrDefault(0L)
             .coerceAtLeast(0L)
-        val relayDoneLatch = CountDownLatch(2)
+        // Both pumps report here. The last one to finish flushes the remaining counters and
+        // closes both sockets, so a tunnel never needs a third thread parked on a latch.
+        val pumpsRemaining = AtomicInteger(2)
 
         fun enforceClientQuotaOrBan(): Boolean {
             if (clientIp.isNotEmpty() && clientBlockReason(clientIp) != null) {
@@ -868,8 +874,37 @@ class LocalFilteringProxyServer(
             return
         }
 
-        executor.execute {
-            try {
+        fun finishPump() {
+            if (pumpsRemaining.decrementAndGet() != 0) return
+            val remSent = sentCounter.getAndSet(0L)
+            val remRecv = recvCounter.getAndSet(0L)
+            if (remSent > 0L || remRecv > 0L) {
+                onTrafficRelayed(host, port, protocol, remoteIp, remSent, remRecv, decision)
+                if (clientIp.isNotEmpty()) {
+                    onClientTraffic(clientIp, host, remSent, remRecv, true)
+                }
+            }
+            runCatching { upstream.close() }
+            runCatching { client.close() }
+        }
+
+        // A rejected submit means the pool is at its cap; that pump can never run, so release its
+        // slot here and let the remaining pump do the final flush and close.
+        fun submitPump(work: () -> Unit) {
+            val accepted = runCatching {
+                executor.execute {
+                    try {
+                        work()
+                    } finally {
+                        finishPump()
+                    }
+                }
+            }.isSuccess
+            if (!accepted) finishPump()
+        }
+
+        submitPump {
+            runCatching {
                 copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy, throttleBytesPerSec) { chunkBytes ->
                     val pending = sentCounter.addAndGet(chunkBytes)
                     if (pending >= 32_768L) {
@@ -884,13 +919,11 @@ class LocalFilteringProxyServer(
                     }
                 }
                 runCatching { upstream.shutdownOutput() }
-            } finally {
-                relayDoneLatch.countDown()
             }
         }
 
-        executor.execute {
-            try {
+        submitPump {
+            runCatching {
                 copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy, throttleBytesPerSec) { chunkBytes ->
                     val pending = recvCounter.addAndGet(chunkBytes)
                     if (pending >= 32_768L) {
@@ -905,29 +938,29 @@ class LocalFilteringProxyServer(
                     }
                 }
                 runCatching { client.shutdownOutput() }
-            } finally {
-                relayDoneLatch.countDown()
             }
         }
+    }
 
-        executor.execute {
-            try {
-                relayDoneLatch.await()
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-            } finally {
-                val remSent = sentCounter.getAndSet(0L)
-                val remRecv = recvCounter.getAndSet(0L)
-                if (remSent > 0L || remRecv > 0L) {
-                    onTrafficRelayed(host, port, protocol, remoteIp, remSent, remRecv, decision)
-                    if (clientIp.isNotEmpty()) {
-                        onClientTraffic(clientIp, host, remSent, remRecv, true)
-                    }
-                }
-                runCatching { upstream.close() }
-                runCatching { client.close() }
+    /**
+     * A tunnel needs a thread the moment it is accepted; there is no queue to park in. The pool is
+     * capped so a flood of connections cannot create unbounded threads the way a cached pool could,
+     * and the accept loop closes a client whose submit is rejected.
+     */
+    private fun newWorkerExecutor(): ExecutorService {
+        val threadFactory = ThreadFactory { runnable ->
+            Thread(runnable, WORKER_THREAD_PREFIX + threadCounter.incrementAndGet()).apply {
+                isDaemon = true
             }
         }
+        return ThreadPoolExecutor(
+            0,
+            MAX_CONCURRENT_TUNNEL_THREADS,
+            WORKER_KEEP_ALIVE_SECONDS,
+            TimeUnit.SECONDS,
+            SynchronousQueue(),
+            threadFactory
+        )
     }
 
     private fun copyStreamWithProgress(
@@ -1001,6 +1034,11 @@ class LocalFilteringProxyServer(
     companion object {
         /** Upper bound for executor termination on stop; never blocks the caller for long. */
         private const val SHUTDOWN_GRACE_MS = 500L
+
+        /** Generous cap on tunnel threads: each CONNECT tunnel takes up to two relay threads. */
+        private const val MAX_CONCURRENT_TUNNEL_THREADS = 256
+        private const val WORKER_KEEP_ALIVE_SECONDS = 30L
+        private const val WORKER_THREAD_PREFIX = "netgate-proxy-worker-"
 
         fun sortIpv4First(addresses: List<InetAddress>): List<InetAddress> {
             if (addresses.size <= 1) return addresses

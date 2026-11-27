@@ -57,30 +57,29 @@ object BundledChangelog {
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
             versionLabel = "NetGate 3.9.8",
-            subtitle = "Firewall That Actually Blocks, Bounded DNS & Leaner Writes",
+            subtitle = "Foreground-Service Fixes, Local Diagnostics & Bounded Relays",
             sections = listOf(
                 ChangelogSection(
-                    heading = "Per-App Firewall",
+                    heading = "Reliability",
                     bullets = listOf(
-                        "Blocked apps are now cut off by the VPN route itself on Wi-Fi and mobile data, including raw IPs, QUIC and DNS-over-HTTPS.",
-                        "A new Blocking Priority switch explains the tradeoff and defaults to blocks first; turn it off to keep DNS ad filtering and block apps through DNS and the proxy.",
-                        "Apps without a launcher icon, including background services, now appear in the firewall list."
+                        "The firewall service now posts its notification before the consent and VPN-slot checks, so an early return can no longer get the app killed with ForegroundServiceDidNotStartInTimeException.",
+                        "A background start refused by Android 12+ is skipped instead of thrown, so the widget, timer and settings screens keep running.",
+                        "Blocking-schedule and Wi-Fi automation alarms retry on their next alarm instead of crashing the process."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "Diagnostics",
+                    bullets = listOf(
+                        "Tunnel establish, VPN Guard connect and proxy start failures are written to a local log with the exception type and stack frames only; no domains, IPs, package names or keys, and nothing is uploaded.",
+                        "The log rotates at 512 KB and keeps one previous copy in private app storage."
                     )
                 ),
                 ChangelogSection(
                     heading = "Performance",
                     bullets = listOf(
-                        "DNS lookups are bounded to 16 handlers with a 64-query cap instead of one coroutine per packet.",
-                        "Dashboard rankings update at most once per second instead of sorting on every DNS packet.",
-                        "Connection history is merged in memory and flushed in one transaction instead of a database write per connection.",
-                        "Filter log hit counts evict the coldest entries instead of wiping every count."
-                    )
-                ),
-                ChangelogSection(
-                    heading = "Reliability",
-                    bullets = listOf(
-                        "TUN writes stop cleanly on interface rebuilds, the logcat collector reaps its process, and proxy relays release their sockets.",
-                        "Crash reports are seeded once per launch, and updates install only when the APK carries the same signing certificate as the installed app."
+                        "Proxy tunnels run on a capped thread pool with no work queue, so a connection burst closes the excess clients instead of creating threads without limit.",
+                        "A relay no longer parks a third worker thread on a latch; the last direction to finish flushes the byte counts and closes both sockets.",
+                        "DNS lookups are gated by a 64-permit semaphore acquired inside the lookup coroutine, so the TUN read loop never waits for a resolver slot."
                     )
                 )
             )

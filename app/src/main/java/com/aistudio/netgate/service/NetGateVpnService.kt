@@ -65,7 +65,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
@@ -1268,6 +1270,12 @@ class NetGateVpnService : VpnService() {
     }
 
     private val dnsQueryDispatcher = Dispatchers.IO.limitedParallelism(DNS_QUERY_CONCURRENCY)
+
+    /**
+     * Second, explicit ceiling on DNS work. A permit is acquired inside the launched coroutine, so
+     * the TUN read loop keeps draining packets and never waits for a resolver slot.
+     */
+    private val dnsQuerySemaphore = Semaphore(MAX_IN_FLIGHT_DNS_QUERIES)
     private val dnsInFlight = AtomicInteger(0)
     private val droppedDnsQueries = AtomicLong(0L)
 
@@ -1416,7 +1424,9 @@ class NetGateVpnService : VpnService() {
         dnsInFlight.incrementAndGet()
         serviceScope.launch(dnsQueryDispatcher) {
             try {
-                if (output.isUsable) handleDnsQuery(query, output)
+                dnsQuerySemaphore.withPermit {
+                    if (output.isUsable) handleDnsQuery(query, output)
+                }
             } finally {
                 dnsInFlight.decrementAndGet()
             }

@@ -1,22 +1,17 @@
 # What's New — NetGate 3.9.8
 
-### Per-App Firewall
-- **Blocked apps actually lose connectivity.** The tunnel used to carry only DNS and the local proxy, so a blocked app kept working over raw IPs, QUIC or its own DNS-over-HTTPS. Blocks are now enforced by the VPN route itself, on Wi-Fi and mobile data alike.
-- **Blocking Priority switch.** Android gives one VPN session to one app set, so kernel-level app blocks and DNS ad filtering cannot run together. *Blocks First* is the default and is explained in Firewall & Monitoring; switch it off to keep filtering and block apps through DNS and the proxy instead.
-- **Every installed app is listed.** Apps without a launcher icon — background services and embedded SDKs — now appear in the firewall, so they can be blocked too.
+### Reliability
+- **The VPN service always reaches the foreground.** The filter service is started with `startForegroundService()`, but the notification was only posted after the consent and VPN-slot checks, so an early return on Android 26+ could kill the app with `ForegroundServiceDidNotStartInTimeException`. The notification now goes up first on every path.
+- **A refused start no longer crashes the caller.** Android 12+ can reject a background `startForegroundService()`; the request is skipped and the current state is kept instead of throwing out of the widget, the timer receiver or the settings screen.
+- **Timer alarms cannot take the app down.** Blocking-schedule and Wi-Fi automation alarms now swallow a failure and retry on their next alarm instead of crashing the process.
+
+### Diagnostics
+- **A local-only app log.** Tunnel establish, VPN Guard connect and proxy start failures are written to `logs/netgate.log` in the app's private storage with the exception type and stack frames only — never domains, IPs, package names, configuration text or keys — and nothing is uploaded anywhere. The file rotates at 512 KB and keeps one previous copy.
 
 ### Performance
-- **Bounded DNS work.** Lookups run on 16 handlers with a 64-query in-flight cap instead of one unbounded coroutine per packet.
-- **Quieter analytics.** Domain and app rankings are computed at most once per second instead of on every DNS packet.
-- **Fewer database writes.** Connection history is merged in memory and written in one transaction every couple of seconds instead of a write plus a trim per connection.
-- **Filter log keeps its counts.** The hit counter evicts the coldest entries instead of wiping every count when it fills up.
-
-### Reliability
-- **Tunnel rebuilds are safe.** Writes to a closed TUN interface are dropped through a latch, so in-flight DNS work stops instead of throwing.
-- **No orphaned logcat process.** The diagnostics collector always reaps its child process and restarts after a failure.
-- **No leaked proxy sockets.** The relay releases both sockets when the worker pool has already stopped.
-- **Crash reports seed once.** Diagnostics no longer re-add the same crash lines every time the log sheet opens.
-- **Signed updates only.** A downloaded APK is installed only when it is signed by the same certificate as the running app.
+- **Bounded proxy concurrency.** The filtering proxy relayed tunnels on an unbounded cached thread pool. Tunnels now run on a capped pool with no work queue, so a connection burst closes the excess client sockets instead of creating threads without limit.
+- **Two threads per tunnel instead of three.** The relay no longer parks a worker thread on a latch: whichever direction finishes last flushes the remaining byte counts and closes both sockets, with the same traffic reporting and order as before.
+- **DNS lookups take a permit.** Concurrent DNS handling is gated by a 64-permit semaphore acquired inside the lookup coroutine and released in `finally`, so the TUN read loop never waits for a resolver slot.
 
 # What's New — NetGate 3.9.7
 
