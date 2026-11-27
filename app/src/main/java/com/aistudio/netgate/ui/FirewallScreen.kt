@@ -70,7 +70,9 @@ import androidx.compose.material.icons.rounded.Search
 import android.net.VpnService
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -116,6 +118,7 @@ import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.AppDestination
 import com.aistudio.netgate.data.model.AppFilterMode
+import com.aistudio.netgate.data.model.DataUsageSubTab
 import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.UpstreamDnsServer
@@ -445,8 +448,13 @@ fun FirewallScreen(
                                 modifier = Modifier.testTag("nav_rail_hotspot")
                             )
                             NavigationRailItem(
-                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.DATA_USAGE,
-                                onClick = { selectAppDestination(AppDestination.DATA_USAGE) },
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.DATA_USAGE &&
+                                    uiState.dataUsageState.selectedSubTab != DataUsageSubTab.WIFI &&
+                                    uiState.dataUsageState.selectedSubTab != DataUsageSubTab.SPEED_TEST,
+                                onClick = {
+                                    selectAppDestination(AppDestination.DATA_USAGE)
+                                    viewModel.selectDataUsageSubTab(DataUsageSubTab.OVERVIEW)
+                                },
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Rounded.BarChart,
@@ -455,6 +463,38 @@ fun FirewallScreen(
                                 },
                                 label = { Text(stringResource(R.string.nav_data_usage)) },
                                 modifier = Modifier.testTag("nav_rail_data_usage")
+                            )
+                            NavigationRailItem(
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.DATA_USAGE &&
+                                    uiState.dataUsageState.selectedSubTab == DataUsageSubTab.WIFI,
+                                onClick = {
+                                    selectAppDestination(AppDestination.DATA_USAGE)
+                                    viewModel.selectDataUsageSubTab(DataUsageSubTab.WIFI)
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Wifi,
+                                        contentDescription = "Wi-Fi"
+                                    )
+                                },
+                                label = { Text("Wi-Fi") },
+                                modifier = Modifier.testTag("nav_rail_wifi")
+                            )
+                            NavigationRailItem(
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.DATA_USAGE &&
+                                    uiState.dataUsageState.selectedSubTab == DataUsageSubTab.SPEED_TEST,
+                                onClick = {
+                                    selectAppDestination(AppDestination.DATA_USAGE)
+                                    viewModel.selectDataUsageSubTab(DataUsageSubTab.SPEED_TEST)
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Speed,
+                                        contentDescription = "Speed Test"
+                                    )
+                                },
+                                label = { Text("Speed Test") },
+                                modifier = Modifier.testTag("nav_rail_speed_test")
                             )
                         }
                     }
@@ -1105,12 +1145,24 @@ fun FirewallScreen(
                             isConnectionInfoOpen = uiState.isConnectionInfoOpen,
                             onSelectFirewall = { selectAppDestination(AppDestination.FIREWALL) },
                             onSelectWebsites = { selectAppDestination(AppDestination.WEBSITES) },
-                            onSelectDataUsage = { selectAppDestination(AppDestination.DATA_USAGE) },
+                            onSelectDataUsage = {
+                                selectAppDestination(AppDestination.DATA_USAGE)
+                                viewModel.selectDataUsageSubTab(DataUsageSubTab.OVERVIEW)
+                            },
                             onSelectDnsProtection = { selectAppDestination(AppDestination.DNS) },
                             onSelectHotspot = { selectAppDestination(AppDestination.HOTSPOT) },
                             onSelectVpnGuard = { selectAppDestination(AppDestination.VPN_GUARD) },
                             isSniDpiSelected = isSniDpiSelected,
-                            onSelectSniDpi = selectSniDpi
+                            onSelectSniDpi = selectSniDpi,
+                            currentDataUsageSubTab = uiState.dataUsageState.selectedSubTab,
+                            onSelectWifi = {
+                                selectAppDestination(AppDestination.DATA_USAGE)
+                                viewModel.selectDataUsageSubTab(DataUsageSubTab.WIFI)
+                            },
+                            onSelectSpeedTest = {
+                                selectAppDestination(AppDestination.DATA_USAGE)
+                                viewModel.selectDataUsageSubTab(DataUsageSubTab.SPEED_TEST)
+                            }
                         )
                     }
 

@@ -1,20 +1,10 @@
 package com.aistudio.netgate.ui.components
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BarChart
-import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.vectorResource
-import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.AppDestination
+import com.aistudio.netgate.data.model.DataUsageSubTab
 
-@Suppress("UNUSED_PARAMETER")
 @Composable
 fun FloatingFrostedNavBar(
     currentDestination: AppDestination,
@@ -27,72 +17,99 @@ fun FloatingFrostedNavBar(
     onSelectVpnGuard: () -> Unit = {},
     isSniDpiSelected: Boolean = false,
     onSelectSniDpi: () -> Unit = {},
+    currentDataUsageSubTab: DataUsageSubTab? = null,
+    onSelectWifi: () -> Unit = {},
+    onSelectSpeedTest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val vpnTunnelIcon = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
-    val items = listOf(
-        GlassPillNavItem(
-            icon = Icons.Rounded.Shield,
-            label = "Firewall",
-            contentDescription = "Firewall",
-            testTag = "nav_tab_firewall",
-            onClick = onSelectFirewall
-        ),
-        GlassPillNavItem(
-            icon = Icons.Rounded.Public,
-            label = "Ad Blocker",
-            contentDescription = "Ad & Network Guard",
-            testTag = "nav_tab_websites",
-            onClick = onSelectWebsites
-        ),
-        GlassPillNavItem(
-            icon = Icons.Rounded.Settings,
-            label = "SNI & DPI",
-            contentDescription = "SNI Proxy & DPI Bypass",
-            testTag = "nav_tab_sni_dpi",
-            onClick = onSelectSniDpi
-        ),
-        GlassPillNavItem(
-            icon = vpnTunnelIcon,
-            label = "VPN",
-            contentDescription = "VPN Guard (WireGuard & OpenVPN)",
-            testTag = "floating_nav_vpn_guard",
-            onClick = onSelectVpnGuard
-        ),
-        GlassPillNavItem(
-            icon = Icons.Rounded.Dns,
-            label = "DNS",
-            contentDescription = "1.1.1.1 DNS Protection",
-            testTag = "floating_nav_dns",
-            onClick = onSelectDnsProtection
-        ),
-        GlassPillNavItem(
-            icon = Icons.Rounded.WifiTethering,
-            label = "Hotspot",
-            contentDescription = "Hotspot & Wi-Fi",
-            testTag = "floating_nav_hotspot",
-            onClick = onSelectHotspot
-        ),
-        GlassPillNavItem(
-            icon = Icons.Rounded.BarChart,
-            label = "Usage",
-            contentDescription = "Network & Data Usage",
-            testTag = "nav_tab_data_usage",
-            onClick = onSelectDataUsage
-        )
-    )
-    val selectedIndex = if (isSniDpiSelected) {
-        2
-    } else {
-        when (currentDestination) {
-            AppDestination.FIREWALL -> 0
-            AppDestination.WEBSITES -> 1
-            AppDestination.VPN_GUARD -> 3
-            AppDestination.DNS -> 4
-            AppDestination.HOTSPOT -> 5
-            AppDestination.DATA_USAGE -> 6
+    val config = LocalBottomNavConfig.current
+    val activeTabs = config.activeOrderedTabs
+
+    val items = activeTabs.map { tabId ->
+        when (tabId) {
+            BottomNavTabId.FIREWALL -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "Firewall",
+                testTag = tabId.testTag,
+                onClick = onSelectFirewall
+            )
+            BottomNavTabId.AD_BLOCKER -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "Ad & Network Guard",
+                testTag = tabId.testTag,
+                onClick = onSelectWebsites
+            )
+            BottomNavTabId.SNI_DPI -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "SNI Proxy & DPI Bypass",
+                testTag = tabId.testTag,
+                onClick = onSelectSniDpi
+            )
+            BottomNavTabId.VPN -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "VPN Guard (WireGuard & OpenVPN)",
+                testTag = tabId.testTag,
+                onClick = onSelectVpnGuard
+            )
+            BottomNavTabId.DNS -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "1.1.1.1 DNS Protection",
+                testTag = tabId.testTag,
+                onClick = onSelectDnsProtection
+            )
+            BottomNavTabId.HOTSPOT -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "Hotspot & Wi-Fi",
+                testTag = tabId.testTag,
+                onClick = onSelectHotspot
+            )
+            BottomNavTabId.USAGE -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "Network & Data Usage",
+                testTag = tabId.testTag,
+                onClick = onSelectDataUsage
+            )
+            BottomNavTabId.WIFI -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "Wi-Fi Analysis & Tools",
+                testTag = tabId.testTag,
+                onClick = onSelectWifi
+            )
+            BottomNavTabId.SPEED_TEST -> GlassPillNavItem(
+                icon = tabId.resolveIcon(),
+                label = tabId.title,
+                contentDescription = "Network Speed Test",
+                testTag = tabId.testTag,
+                onClick = onSelectSpeedTest
+            )
         }
     }
+
+    val activeTabId: BottomNavTabId = when {
+        isSniDpiSelected -> BottomNavTabId.SNI_DPI
+        currentDestination == AppDestination.FIREWALL -> BottomNavTabId.FIREWALL
+        currentDestination == AppDestination.WEBSITES -> BottomNavTabId.AD_BLOCKER
+        currentDestination == AppDestination.VPN_GUARD -> BottomNavTabId.VPN
+        currentDestination == AppDestination.DNS -> BottomNavTabId.DNS
+        currentDestination == AppDestination.HOTSPOT -> BottomNavTabId.HOTSPOT
+        currentDestination == AppDestination.DATA_USAGE -> {
+            when (currentDataUsageSubTab) {
+                DataUsageSubTab.WIFI -> if (BottomNavTabId.WIFI in activeTabs) BottomNavTabId.WIFI else BottomNavTabId.USAGE
+                DataUsageSubTab.SPEED_TEST -> if (BottomNavTabId.SPEED_TEST in activeTabs) BottomNavTabId.SPEED_TEST else BottomNavTabId.USAGE
+                else -> BottomNavTabId.USAGE
+            }
+        }
+        else -> BottomNavTabId.FIREWALL
+    }
+    val selectedIndex = activeTabs.indexOf(activeTabId).takeIf { it >= 0 } ?: -1
 
     GlassPillBottomNav(
         items = items,

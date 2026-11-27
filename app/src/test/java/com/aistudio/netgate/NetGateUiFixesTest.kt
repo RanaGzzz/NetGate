@@ -54,6 +54,12 @@ import com.aistudio.netgate.ui.components.DnsLogsFilterCard
 import com.aistudio.netgate.ui.components.FilterLogEntryCard
 import com.aistudio.netgate.ui.components.FirewallHeaderCard
 import com.aistudio.netgate.ui.components.FirewallSettingsSheet
+import com.aistudio.netgate.ui.components.AppearanceSettingsAccordionBody
+import com.aistudio.netgate.ui.components.BottomNavConfigManager
+import com.aistudio.netgate.ui.components.BottomNavHeightOption
+import com.aistudio.netgate.ui.components.BottomNavIconScale
+import com.aistudio.netgate.ui.components.BottomNavTabId
+import com.aistudio.netgate.ui.components.BottomNavWidthOption
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
 import com.aistudio.netgate.ui.components.websiteManagementItems
@@ -734,5 +740,99 @@ class NetGateUiFixesTest {
             .assertIsDisplayed()
         composeRule.onNodeWithText("Choose File").assertIsDisplayed()
         composeRule.onNodeWithText("Export").assertIsDisplayed()
+    }
+
+    @Test
+    fun `FloatingFrostedNavBar renders Wi-Fi and Speed Test bottom navigation tabs`() {
+        var clickedWifi = false
+        var clickedSpeedTest = false
+
+        composeRule.setContent {
+            NetGateTheme(dynamicColor = false) {
+                FloatingFrostedNavBar(
+                    currentDestination = AppDestination.DATA_USAGE,
+                    isConnectionInfoOpen = false,
+                    onSelectFirewall = {},
+                    onSelectWebsites = {},
+                    onSelectDataUsage = {},
+                    onSelectDnsProtection = {},
+                    onSelectHotspot = {},
+                    onSelectVpnGuard = {},
+                    onSelectWifi = { clickedWifi = true },
+                    onSelectSpeedTest = { clickedSpeedTest = true }
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("nav_tab_wifi").assertIsDisplayed().performClick()
+        assertTrue(clickedWifi)
+
+        composeRule.onNodeWithTag("nav_tab_speed_test").assertIsDisplayed().performClick()
+        assertTrue(clickedSpeedTest)
+    }
+
+    @Test
+    fun `BottomNavConfigManager modifies options, toggles visibility, and preserves minimum 2 tabs`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        BottomNavConfigManager.init(context)
+
+        BottomNavConfigManager.setHeightOption(context, BottomNavHeightOption.SPACIOUS)
+        assertEquals(BottomNavHeightOption.SPACIOUS, BottomNavConfigManager.configFlow.value.heightOption)
+
+        BottomNavConfigManager.setWidthOption(context, BottomNavWidthOption.EXPANDED)
+        assertEquals(BottomNavWidthOption.EXPANDED, BottomNavConfigManager.configFlow.value.widthOption)
+
+        BottomNavConfigManager.setIconScale(context, BottomNavIconScale.LARGE)
+        assertEquals(BottomNavIconScale.LARGE, BottomNavConfigManager.configFlow.value.iconScale)
+
+        val initialOrder = BottomNavConfigManager.configFlow.value.orderedTabIds
+        BottomNavConfigManager.moveTabDown(context, initialOrder[0])
+        assertEquals(initialOrder[0], BottomNavConfigManager.configFlow.value.orderedTabIds[1])
+
+        BottomNavConfigManager.moveTabUp(context, initialOrder[0])
+        assertEquals(initialOrder[0], BottomNavConfigManager.configFlow.value.orderedTabIds[0])
+
+        BottomNavConfigManager.resetToDefaults(context)
+        assertEquals(BottomNavHeightOption.STANDARD, BottomNavConfigManager.configFlow.value.heightOption)
+        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.visibleTabIds.size)
+    }
+
+    @Test
+    fun `AppearanceSettingsSheet renders Bottom Navigation Bar settings accordion and options`() {
+        composeRule.setContent {
+            NetGateTheme(dynamicColor = false) {
+                AppearanceSettingsAccordionBody(
+                    preferences = FirewallPreferencesState(),
+                    onThemeModeChange = {},
+                    onThemeStyleChange = {},
+                    onToggleDynamicColor = {},
+                    onBlurStyleChange = {},
+                    onBlurIntensityChange = {},
+                    onToggleBlurAnimation = {},
+                    onAppIconChange = {},
+                    onOpenBackgroundAnimation = {}
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_bottom_nav_card").assertExists()
+        composeRule.onNodeWithTag("settings_bottom_nav_header").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("nav_height_compact").assertExists()
+        composeRule.onNodeWithTag("nav_height_standard").assertExists()
+        composeRule.onNodeWithTag("nav_height_spacious").assertExists()
+
+        composeRule.onNodeWithTag("nav_width_compact").assertExists()
+        composeRule.onNodeWithTag("nav_width_standard").assertExists()
+        composeRule.onNodeWithTag("nav_width_expanded").assertExists()
+
+        composeRule.onNodeWithTag("nav_scale_small").assertExists()
+        composeRule.onNodeWithTag("nav_scale_standard").assertExists()
+        composeRule.onNodeWithTag("nav_scale_large").assertExists()
+
+        composeRule.onNodeWithTag("nav_reset_defaults_button").assertExists()
     }
 }

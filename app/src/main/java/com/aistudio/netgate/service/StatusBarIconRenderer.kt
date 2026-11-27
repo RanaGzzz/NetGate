@@ -126,8 +126,7 @@ object StatusBarIconRenderer {
         telemetry: LiveNetworkTelemetry,
         style: StatusBarSpeedStyle
     ): IconCompat {
-        val bitmap = renderSpeedBitmap(telemetry, style)
-        return IconCompat.createWithBitmap(bitmap)
+        return IconCompat.createWithResource(null, "com.aistudio.netgate", com.aistudio.netgate.R.drawable.ic_status_bar_speed)
     }
 
     private fun drawCenteredFittedLine(

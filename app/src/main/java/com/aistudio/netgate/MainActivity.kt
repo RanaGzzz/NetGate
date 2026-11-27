@@ -19,6 +19,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -42,7 +43,9 @@ import com.aistudio.netgate.service.SystemNetworkMonitor
 import com.aistudio.netgate.service.vpn.TunnelWatchdog
 import com.aistudio.netgate.ui.FirewallScreen
 import com.aistudio.netgate.ui.FirewallViewModel
+import com.aistudio.netgate.ui.components.BottomNavConfigManager
 import com.aistudio.netgate.ui.components.GlassToastHost
+import com.aistudio.netgate.ui.components.LocalBottomNavConfig
 import com.aistudio.netgate.ui.components.StartupSplashOverlay
 import com.aistudio.netgate.ui.theme.NetGateTheme
 
@@ -57,12 +60,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Keep the kill switch, auto-reconnect and trusted Wi-Fi automation alive for the whole app.
         TunnelWatchdog.ensureStarted(applicationContext)
+        BottomNavConfigManager.init(applicationContext)
         pendingDestination = parseDestinationExtra(intent)
         pendingVpnConsentRequest = intent?.getBooleanExtra(EXTRA_REQUEST_VPN_CONSENT, false) == true
 
         setContent {
             val viewModel: FirewallViewModel = viewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val bottomNavConfig by BottomNavConfigManager.configFlow.collectAsStateWithLifecycle()
 
             LaunchedEffect(pendingDestination) {
                 pendingDestination?.let { dest ->
@@ -87,7 +92,10 @@ class MainActivity : ComponentActivity() {
                 blurIntensity = uiState.preferences.blurIntensity,
                 blurAnimationEnabled = uiState.preferences.isBlurAnimationEnabled
             ) {
-                val activeDarkTheme = com.aistudio.netgate.ui.theme.LocalIsDarkTheme.current
+                CompositionLocalProvider(
+                    LocalBottomNavConfig provides bottomNavConfig
+                ) {
+                    val activeDarkTheme = com.aistudio.netgate.ui.theme.LocalIsDarkTheme.current
                 SideEffect {
                     enableEdgeToEdge(
                         statusBarStyle = SystemBarStyle.auto(
@@ -132,7 +140,7 @@ class MainActivity : ComponentActivity() {
                         NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                         viewModel.setStatusBarSpeedEnabled(true)
                         if (!SystemNetworkMonitor.isServiceActive) {
-                            NetworkMonitorService.start(this@MainActivity)
+                            runCatching { NetworkMonitorService.start(this@MainActivity) }
                         }
                     } else {
                         viewModel.onStatusBarSpeedPermissionDenied()
@@ -176,14 +184,14 @@ class MainActivity : ComponentActivity() {
                             NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                             viewModel.setStatusBarSpeedEnabled(true)
                             if (!SystemNetworkMonitor.isServiceActive) {
-                                NetworkMonitorService.start(this@MainActivity)
+                                runCatching { NetworkMonitorService.start(this@MainActivity) }
                             }
                         }
                     } else {
                         NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                         viewModel.setStatusBarSpeedEnabled(true)
                         if (!SystemNetworkMonitor.isServiceActive) {
-                            NetworkMonitorService.start(this@MainActivity)
+                            runCatching { NetworkMonitorService.start(this@MainActivity) }
                         }
                     }
                 }
@@ -206,7 +214,7 @@ class MainActivity : ComponentActivity() {
                             ) == PackageManager.PERMISSION_GRANTED
                         if (canNotify) {
                             NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
-                            NetworkMonitorService.start(this@MainActivity)
+                            runCatching { NetworkMonitorService.start(this@MainActivity) }
                         }
                     }
                 }
@@ -220,7 +228,7 @@ class MainActivity : ComponentActivity() {
                             ) == PackageManager.PERMISSION_GRANTED
                         if (canNotify && !NetworkMonitorService.areNotificationsBlocked(this@MainActivity)) {
                             NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
-                            NetworkMonitorService.start(this@MainActivity)
+                            runCatching { NetworkMonitorService.start(this@MainActivity) }
                         }
                     }
                 }
@@ -273,6 +281,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 
     override fun onResume() {
         super.onResume()

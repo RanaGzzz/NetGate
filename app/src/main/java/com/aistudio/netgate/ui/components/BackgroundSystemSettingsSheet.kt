@@ -167,7 +167,7 @@ fun BackgroundSystemSettingsAccordionBody(
                     Spacer(modifier = Modifier.width(12.dp))
                     Switch(
                         checked = preferences.isStatusBarSpeedEnabled,
-                        onCheckedChange = onToggleStatusBarSpeed,
+                        onCheckedChange = null,
                         modifier = Modifier.testTag("settings_status_bar_speed_switch")
                     )
                 }

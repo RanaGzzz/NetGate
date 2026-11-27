@@ -242,6 +242,13 @@ fun GlassPillBottomNav(
     } * intensityScale
     val scrollState = rememberScrollState()
 
+    val navConfig = LocalBottomNavConfig.current
+    val barHeight = navConfig.heightOption.heightDp
+    val maxContainerWidth = navConfig.widthOption.maxDp
+    val configMinTabWidth = navConfig.iconScale.minTabWidth
+    val iconSize = navConfig.iconScale.iconSize
+    val fontSize = navConfig.iconScale.fontSize
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -259,7 +266,7 @@ fun GlassPillBottomNav(
                 brush = outerBorderBrush
             ),
             modifier = Modifier
-                .widthIn(max = 580.dp)
+                .widthIn(max = maxContainerWidth)
                 .fillMaxWidth()
                 .then(
                     if (useFletchLiquid) {
@@ -368,7 +375,7 @@ fun GlassPillBottomNav(
                 ) {
                     val isDenseBar = items.size >= 7
                     val gap = if (isDenseBar) 1.dp else 2.dp
-                    val minTabWidth = if (isDenseBar) 48.dp else 54.dp
+                    val minTabWidth = configMinTabWidth
                     val minRequiredWidth = minTabWidth * items.size + gap * (items.size - 1)
                     val needsScroll = maxWidth < minRequiredWidth
                     val tabWidth = if (needsScroll) {
@@ -432,7 +439,7 @@ fun GlassPillBottomNav(
                                 modifier = Modifier
                                     .offset(x = indicatorOffset)
                                     .width(tabWidth)
-                                    .height(54.dp)
+                                    .height(barHeight)
                                     .graphicsLayer { alpha = indicatorAlpha }
                                     .clip(indicatorShape)
                                     .background(
@@ -485,6 +492,9 @@ fun GlassPillBottomNav(
                                         themeStyle = themeStyle,
                                         useDynamicColor = useDynamicColor,
                                         compactLabel = isDenseBar,
+                                        tabHeight = barHeight,
+                                        iconSize = iconSize,
+                                        fontSize = fontSize,
                                         modifier = Modifier
                                             .width(tabWidth)
                                             .testTag(item.testTag)
@@ -540,6 +550,9 @@ private fun GlassPillTab(
     themeStyle: NetGateThemeStyle,
     useDynamicColor: Boolean,
     compactLabel: Boolean = false,
+    tabHeight: androidx.compose.ui.unit.Dp = 54.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 9.5.sp,
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -597,7 +610,7 @@ private fun GlassPillTab(
         verticalArrangement = Arrangement.Center,
         modifier = modifier
             .minimumInteractiveComponentSize()
-            .heightIn(min = 54.dp)
+            .heightIn(min = tabHeight)
             .clip(RoundedCornerShape(28.dp))
             .clickable(
                 interactionSource = interactionSource,
@@ -605,7 +618,7 @@ private fun GlassPillTab(
                 role = Role.Tab,
                 onClick = item.onClick
             )
-            .padding(horizontal = if (compactLabel) 1.dp else 2.dp, vertical = 5.dp)
+            .padding(horizontal = if (compactLabel) 1.dp else 2.dp, vertical = 4.dp)
             .graphicsLayer {
                 this.scaleX = scaleX
                 this.scaleY = scaleY
@@ -615,14 +628,14 @@ private fun GlassPillTab(
             imageVector = item.icon,
             contentDescription = item.contentDescription,
             tint = contentTint,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(iconSize)
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = item.label,
             color = contentTint,
-            fontSize = if (compactLabel) 9.sp else 9.5.sp,
-            lineHeight = 11.sp,
+            fontSize = fontSize,
+            lineHeight = (fontSize.value + 2f).sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
             softWrap = false,
