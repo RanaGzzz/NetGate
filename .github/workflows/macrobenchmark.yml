@@ -1,0 +1,57 @@
+name: Startup benchmark
+
+# Numbers, not assertions: the 3.9 performance work (throttled analytics, one matcher build per
+# sync, compact ruleset) has no guard today, so this records cold start on a fixed emulator profile
+# weekly and on demand. Compare runs in the job summary when touching the launch path.
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 04:00 UTC.
+    - cron: '0 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macrobenchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cold-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Android build environment
+        uses: ./.github/actions/setup-android
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Measure cold start
+        uses: ReactiveCircus/android-emulator-runner@b530d96654c385303d652368551fb075bc2f0b6b # v2.35.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: gradle :baselineprofile:connectedBenchmarkReleaseAndroidTest
+
+      - name: Upload benchmark output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: startup-benchmark
+          path: |
+            baselineprofile/build/outputs/
+            baselineprofile/build/reports/
+          if-no-files-found: ignore

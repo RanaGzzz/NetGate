@@ -1,0 +1,58 @@
+name: Device smoke tests
+
+# The unit suite cannot start a VpnService or ask the platform for VPN consent, and the last two
+# bugs that reached users (connectivity callback on launch, the Wi-Fi join that lost its internet
+# capability) were only reproducible on a real system. This runs those paths on an emulator for
+# every push to the default branch, and can be triggered by hand before tagging a release.
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instrumentation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connected-tests:
+    runs-on: ubuntu-latest
+    # Bounds emulator boot, Gradle download and the instrumentation run.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The build must not be able to push with the workflow token.
+          persist-credentials: false
+
+      - name: Set up Android build environment
+        uses: ./.github/actions/setup-android
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Run instrumentation smoke tests
+        uses: ReactiveCircus/android-emulator-runner@b530d96654c385303d652368551fb075bc2f0b6b # v2.35.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: gradle :app:connectedDebugAndroidTest
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: instrumentation-reports
+          path: app/build/reports/androidTests/
+          if-no-files-found: ignore
