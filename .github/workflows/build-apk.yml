@@ -31,6 +31,18 @@ jobs:
       - name: Run unit & Robolectric tests
         run: gradle :app:testDebugUnitTest
 
+      # A failing test used to leave no evidence in the run, and Actions logs are only
+      # readable by signed-in users, so publish the per-test XML/HTML reports instead.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-reports
+          path: |
+            app/build/test-results/testDebugUnitTest/**
+            app/build/reports/tests/testDebugUnitTest/**
+          if-no-files-found: warn
+
       - name: Run Android lint
         run: gradle :app:lintDebug
 
