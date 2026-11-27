@@ -144,6 +144,11 @@ class AdBlockMatcherSnapshot(
 
     private fun resolveOwnerMeta(domain: String): AdRuleMatchMeta? {
         if (domainMeta.isNotEmpty()) return domainMeta[domain]
+        val hashed = blockedDomains as? HashedDomainSet
+        if (hashed != null) {
+            val index = hashed.ownerOf(domain)
+            if (index != HashedDomainSet.NO_OWNER) return ownerListMeta.getOrNull(index)
+        }
         val index = ownerListIndex[domain]?.toInt() ?: return null
         return ownerListMeta.getOrNull(index)
     }
@@ -985,8 +990,9 @@ object AdBlockFilterEngine {
     ): AdBlockMatcherSnapshot {
         val startMs = System.currentTimeMillis()
         val budget = domainBudget.coerceAtLeast(1)
-        val blocked = HashSet<String>(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
-        val ownerIndex = HashMap<String, Byte>(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
+        // A compact hashed set instead of HashSet<String>: the domain strings are the bulk of the
+        // matcher's heap, and dropping them is what lets the full ruleset load on smaller devices.
+        val blocked = HashedDomainSet.Builder(minOf(BUILTIN_AD_CORE_DOMAINS.size + 4096, budget))
         val ownerMeta = ArrayList<AdRuleMatchMeta>(8)
         var rawEntriesCount = 0
 
@@ -1002,13 +1008,12 @@ object AdBlockFilterEngine {
 
         for (coreDomain in BUILTIN_AD_CORE_DOMAINS) {
             rawEntriesCount++
-            if (blocked.add(coreDomain)) {
-                ownerIndex[coreDomain] = when (inferCoreDomainReason(coreDomain)) {
-                    AdBlockReason.TELEMETRY -> coreTelemetryIndex
-                    AdBlockReason.TRACKER -> coreTrackerIndex
-                    else -> coreAdsIndex
-                }
+            val coreOwner = when (inferCoreDomainReason(coreDomain)) {
+                AdBlockReason.TELEMETRY -> coreTelemetryIndex
+                AdBlockReason.TRACKER -> coreTrackerIndex
+                else -> coreAdsIndex
             }
+            blocked.add(coreDomain, coreOwner.toInt())
         }
         val exceptions = HashSet<String>(256)
         var truncatedListCount = 0
@@ -1024,7 +1029,7 @@ object AdBlockFilterEngine {
                 else -> null
             } ?: continue
 
-            if (blocked.size >= budget) {
+            if (blocked.uniqueSize >= budget) {
                 truncatedListCount++
                 continue
             }
@@ -1053,32 +1058,30 @@ object AdBlockFilterEngine {
                             if (ex.isNotEmpty()) exceptions.add(ex)
                         } else {
                             rawEntriesCount++
-                            if (blocked.size >= budget) break
-                            if (blocked.add(line) && metaIndex != null) {
-                                ownerIndex[line] = metaIndex
-                            }
+                            if (blocked.uniqueSize >= budget) break
+                            blocked.add(line, metaIndex?.toInt() ?: HashedDomainSet.NO_OWNER)
                         }
                     }
                 }
             }
         }
 
-        val duplicatesRemoved = (rawEntriesCount - blocked.size).coerceAtLeast(0)
+        val duplicatesRemoved = (rawEntriesCount - blocked.uniqueSize).coerceAtLeast(0)
         val buildDurationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L)
         val snapshot = AdBlockMatcherSnapshot(
-            blockedDomains = blocked,
+            blockedDomains = blocked.build(),
             exceptionDomains = exceptions,
             domainMeta = emptyMap(),
             duplicatesRemovedCount = duplicatesRemoved,
             buildDurationMs = buildDurationMs,
-            ownerListIndex = ownerIndex,
+            ownerListIndex = emptyMap(),
             ownerListMeta = ownerMeta,
             truncatedListCount = truncatedListCount
         )
         cachedMatcherRef.set(snapshot)
         val compressedBytes = getCompressedCacheBytes(context, enabledLists)
         _perfStatsFlow.value = _perfStatsFlow.value.copy(
-            totalDomains = blocked.size,
+            totalDomains = snapshot.totalBlockedCount,
             duplicatesRemovedCount = duplicatesRemoved,
             compressedCacheBytes = compressedBytes,
             lastBuildDurationMs = buildDurationMs,
