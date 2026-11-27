@@ -227,7 +227,7 @@ class NetworkMonitorService : Service() {
             .addLine("Today Wi-Fi: ↓ ${formatDataBytes(telemetry.todayWifiRxBytes)}  •  ↑ ${formatDataBytes(telemetry.todayWifiTxBytes)}")
             .addLine("Today Mobile: ↓ ${formatDataBytes(telemetry.todayMobileRxBytes)}  •  ↑ ${formatDataBytes(telemetry.todayMobileTxBytes)}")
 
-        val speedIcon = StatusBarIconRenderer.createSpeedIcon(telemetry, currentStyle)
+        val speedIcon = StatusBarIconRenderer.createSpeedIcon(this, telemetry, currentStyle)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(speedIcon)

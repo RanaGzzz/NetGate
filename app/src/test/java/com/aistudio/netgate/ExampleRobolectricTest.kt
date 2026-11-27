@@ -908,7 +908,7 @@ class ExampleRobolectricTest {
             val bitmap = com.aistudio.netgate.service.StatusBarIconRenderer.renderSpeedBitmap(telemetry, style)
             assertEquals(96, bitmap.width)
             assertEquals(96, bitmap.height)
-            val icon = com.aistudio.netgate.service.StatusBarIconRenderer.createSpeedIcon(telemetry, style)
+            val icon = com.aistudio.netgate.service.StatusBarIconRenderer.createSpeedIcon(context, telemetry, style)
             assertNotNull(icon)
         }
     }

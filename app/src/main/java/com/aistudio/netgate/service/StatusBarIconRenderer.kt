@@ -1,5 +1,6 @@
 package com.aistudio.netgate.service
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -123,10 +124,11 @@ object StatusBarIconRenderer {
     }
 
     fun createSpeedIcon(
+        context: Context,
         telemetry: LiveNetworkTelemetry,
         style: StatusBarSpeedStyle
     ): IconCompat {
-        return IconCompat.createWithResource(null, "com.aistudio.netgate", com.aistudio.netgate.R.drawable.ic_status_bar_speed)
+        return IconCompat.createWithResource(context, com.aistudio.netgate.R.drawable.ic_status_bar_speed)
     }
 
     private fun drawCenteredFittedLine(
