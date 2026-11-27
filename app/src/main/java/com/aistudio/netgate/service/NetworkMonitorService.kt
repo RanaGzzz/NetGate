@@ -111,7 +111,12 @@ class NetworkMonitorService : Service() {
         if (monitorJob?.isActive == true) return
         monitorJob = serviceScope.launch {
             while (isActive) {
-                delay(1000L)
+                // Low power mode trades a coarser refresh for fewer wakeups and notification
+                // rebuilds. Enforcement itself does not depend on this loop.
+                delay(
+                    if (latestPrefs.lowPowerMode) LOW_POWER_SAMPLE_INTERVAL_MS
+                    else DEFAULT_SAMPLE_INTERVAL_MS
+                )
                 BackgroundPowerHelper.acquireServiceWakeLock(applicationContext, "speed-monitor")
                 val telemetry = SystemNetworkMonitor.sampleNow(applicationContext)
                 if (latestPrefs.autoBlockWifiOnIdleEnabled) {
@@ -249,6 +254,8 @@ class NetworkMonitorService : Service() {
         const val LEGACY_CHANNEL_ID = "netgate_speed_monitor_channel"
         const val CHANNEL_ID = "netgate_speed_monitor_channel_v2"
         private const val NOTIFICATION_ID = 4042
+        private const val DEFAULT_SAMPLE_INTERVAL_MS = 1_000L
+        private const val LOW_POWER_SAMPLE_INTERVAL_MS = 5_000L
 
         /**
          * Creates or upgrades the silent-sound IMPORTANCE_DEFAULT channel required on Android 15–17

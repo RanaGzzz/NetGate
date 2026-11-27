@@ -1,6 +1,9 @@
 package com.aistudio.netgate.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.aistudio.netgate.data.network.LocalNetworkPermission
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -567,13 +570,30 @@ fun FirewallScreen(
                                 }
 
                                 AppDestination.HOTSPOT -> {
+                                    val hotspotContext = LocalContext.current
+                                    // Android 17+ needs a runtime grant before the proxy may reach
+                                    // LAN clients. Ask at the moment the user enables it, then run
+                                    // the normal enable path either way: a denial is reported by
+                                    // HotspotProxyManager in the proxy card instead of the switch
+                                    // silently doing nothing.
+                                    val localNetworkLauncher = rememberLauncherForActivityResult(
+                                        contract = ActivityResultContracts.RequestPermission()
+                                    ) { _ ->
+                                        viewModel.setHotspotProxyEnabled(true)
+                                    }
                                     HotspotAndWifiContent(
                                         preferences = uiState.preferences,
                                         hotspotState = uiState.hotspotProxyState,
                                         connectionDetails = uiState.connectionDetails,
                                         idleStatus = uiState.wifiIdleStatus,
                                         nowMillis = uiState.nowMillis,
-                                        onToggleHotspotProxy = viewModel::setHotspotProxyEnabled,
+                                        onToggleHotspotProxy = { enabled ->
+                                            if (enabled && !LocalNetworkPermission.isGranted(hotspotContext)) {
+                                                localNetworkLauncher.launch(LocalNetworkPermission.PERMISSION)
+                                            } else {
+                                                viewModel.setHotspotProxyEnabled(enabled)
+                                            }
+                                        },
                                         onSelectHotspotPort = viewModel::setHotspotProxyPort,
                                         onToggleApplyNetGateFilters = viewModel::setHotspotApplyNetGateFilters,
                                         advancedPreferences = advancedPreferences,
@@ -855,6 +875,8 @@ fun FirewallScreen(
             onToggleExcludeFromRecents = viewModel::setExcludeFromRecents,
             onSelectStatusBarStyle = viewModel::setStatusBarSpeedStyle,
             onToggleShowDailyUsage = viewModel::setShowStatusBarDailyUsage,
+            onToggleLowPowerMode = viewModel::setLowPowerMode,
+            onToggleIncludeBetaUpdates = viewModel::setIncludeBetaUpdates,
             appUpdateState = uiState.appUpdateState,
             vpnDpiLogsCount = maxOf(uiState.vpnDpiLogs.size, appLogs.size),
             onCheckForUpdates = viewModel::checkForGitHubUpdates,

@@ -29,7 +29,12 @@ object GitHubReleaseUpdateChecker {
     private const val READ_TIMEOUT_MS = 12_000
 
     suspend fun checkForUpdates(
-        currentVersionName: String = BuildConfig.VERSION_NAME
+        currentVersionName: String = BuildConfig.VERSION_NAME,
+        /**
+         * The beta channel. `/releases/latest` never returns a pre-release, so opted-in testers are
+         * served from the release list instead.
+         */
+        includePrereleases: Boolean = false
     ): Result<GitHubUpdateCheckResult> = withContext(Dispatchers.IO) {
         runCatching {
             val recentReleases = runCatching {
@@ -37,13 +42,17 @@ object GitHubReleaseUpdateChecker {
                 parseReleasesListJson(listJson)
             }.getOrDefault(emptyList())
 
-            val latestRelease = runCatching {
+            val stableLatest = runCatching {
                 val latestJson = fetchJson(LATEST_RELEASE_API_URL)
                 parseReleaseJson(latestJson)
-            }.getOrElse { err ->
-                recentReleases.firstOrNull { !it.isPrerelease }
-                    ?: recentReleases.firstOrNull()
-                    ?: throw err
+            }
+
+            val latestRelease = selectLatestRelease(
+                recentReleases = recentReleases,
+                stableLatest = stableLatest.getOrNull(),
+                includePrereleases = includePrereleases
+            ) ?: stableLatest.getOrElse { err ->
+                recentReleases.firstOrNull() ?: throw err
             }
 
             val mergedRecent = if (recentReleases.isEmpty()) {
@@ -66,6 +75,24 @@ object GitHubReleaseUpdateChecker {
                 latestVersionCode = 0
             )
         }
+    }
+
+    /**
+     * Picks the release the update card should show. [stableLatest] is `/releases/latest`, which by
+     * definition hides pre-releases, so the beta channel has to look at the release list instead.
+     */
+    internal fun selectLatestRelease(
+        recentReleases: List<GitHubReleaseInfo>,
+        stableLatest: GitHubReleaseInfo?,
+        includePrereleases: Boolean
+    ): GitHubReleaseInfo? {
+        if (includePrereleases) {
+            return recentReleases.maxWithOrNull { a, b -> compareVersions(a.versionName, b.versionName) }
+                ?: stableLatest
+        }
+        return stableLatest
+            ?: recentReleases.firstOrNull { !it.isPrerelease }
+            ?: recentReleases.firstOrNull()
     }
 
     internal fun parseReleaseJson(json: String): GitHubReleaseInfo {

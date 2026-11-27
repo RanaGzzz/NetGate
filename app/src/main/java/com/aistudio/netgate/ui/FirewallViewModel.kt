@@ -1504,8 +1504,12 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
                 currentVersionName = BuildConfig.VERSION_NAME,
                 currentVersionCode = BuildConfig.VERSION_CODE
             )
+            val includeBeta = uiState.value.preferences.includeBetaUpdates
             val github = runCatching {
-                GitHubReleaseUpdateChecker.checkForUpdates(BuildConfig.VERSION_NAME)
+                GitHubReleaseUpdateChecker.checkForUpdates(
+                    currentVersionName = BuildConfig.VERSION_NAME,
+                    includePrereleases = includeBeta
+                )
             }.getOrNull()?.getOrNull()
 
             otaResult.onSuccess { ota ->
@@ -2445,6 +2449,18 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     fun setShowStatusBarDailyUsage(show: Boolean) {
         viewModelScope.launch {
             preferences.setShowStatusBarDailyUsage(show)
+        }
+    }
+
+    fun setLowPowerMode(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setLowPowerMode(enabled)
+        }
+    }
+
+    fun setIncludeBetaUpdates(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setIncludeBetaUpdates(enabled)
         }
     }
 

@@ -59,11 +59,15 @@ fun BackgroundSystemSettingsAccordionBody(
     onToggleExcludeFromRecents: (Boolean) -> Unit,
     onSelectStatusBarStyle: (StatusBarSpeedStyle) -> Unit = {},
     onToggleShowDailyUsage: (Boolean) -> Unit = {},
+    onToggleLowPowerMode: (Boolean) -> Unit = {},
+    onToggleIncludeBetaUpdates: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var statusBarSpeedExpanded by rememberSaveable { mutableStateOf(false) }
     var excludeRecentsExpanded by rememberSaveable { mutableStateOf(false) }
     var batteryExpanded by rememberSaveable { mutableStateOf(false) }
+    var lowPowerExpanded by rememberSaveable { mutableStateOf(false) }
+    var updateChannelExpanded by rememberSaveable { mutableStateOf(false) }
 
     val batteryAccent = if (isIgnoringBatteryOptimizations) EmeraldPrimary else WarningAmber
 
@@ -169,6 +173,67 @@ fun BackgroundSystemSettingsAccordionBody(
                     )
                 }
             }
+        }
+
+        SettingsAccordionCard(
+            title = "Low Power Mode",
+            summary = "Fewer telemetry wakeups for long sessions",
+            icon = Icons.Rounded.BatteryChargingFull,
+            iconAccent = if (preferences.lowPowerMode) {
+                EmeraldPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            statusLabel = if (preferences.lowPowerMode) "On" else "Off",
+            statusAccent = if (preferences.lowPowerMode) {
+                EmeraldPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            expanded = lowPowerExpanded,
+            onToggleExpand = { lowPowerExpanded = !lowPowerExpanded },
+            modifier = Modifier.testTag("settings_low_power_card"),
+            headerModifier = Modifier.testTag("settings_low_power_header")
+        ) {
+            AccordionToggleBody(
+                description = "Samples live speed every 5 seconds instead of every second and rebuilds " +
+                    "the status-bar icon less often. Blocking, DNS filtering and the firewall are " +
+                    "unaffected; only the live readouts become coarser.",
+                toggleLabel = "Reduce telemetry refresh",
+                checked = preferences.lowPowerMode,
+                onCheckedChange = onToggleLowPowerMode,
+                switchTestTag = "settings_low_power_switch"
+            )
+        }
+
+        SettingsAccordionCard(
+            title = "Update Channel",
+            summary = if (preferences.includeBetaUpdates) "Stable and pre-release builds" else "Stable releases only",
+            icon = Icons.Rounded.CheckCircle,
+            iconAccent = if (preferences.includeBetaUpdates) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            statusLabel = if (preferences.includeBetaUpdates) "Beta" else "Stable",
+            statusAccent = if (preferences.includeBetaUpdates) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            expanded = updateChannelExpanded,
+            onToggleExpand = { updateChannelExpanded = !updateChannelExpanded },
+            modifier = Modifier.testTag("settings_update_channel_card"),
+            headerModifier = Modifier.testTag("settings_update_channel_header")
+        ) {
+            AccordionToggleBody(
+                description = "GitHub's latest-release endpoint never returns pre-releases, so beta " +
+                    "builds like 3.10-beta.1 are only offered here when this is on.",
+                toggleLabel = "Include pre-release builds",
+                checked = preferences.includeBetaUpdates,
+                onCheckedChange = onToggleIncludeBetaUpdates,
+                switchTestTag = "settings_update_channel_switch"
+            )
         }
 
         SettingsAccordionCard(

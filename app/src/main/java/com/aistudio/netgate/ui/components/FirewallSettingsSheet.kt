@@ -99,6 +99,8 @@ fun FirewallSettingsSheet(
     onToggleExcludeFromRecents: (Boolean) -> Unit = {},
     onSelectStatusBarStyle: (com.aistudio.netgate.data.model.StatusBarSpeedStyle) -> Unit = {},
     onToggleShowDailyUsage: (Boolean) -> Unit = {},
+    onToggleLowPowerMode: (Boolean) -> Unit = {},
+    onToggleIncludeBetaUpdates: (Boolean) -> Unit = {},
     appUpdateState: AppUpdateUiState = AppUpdateUiState(
         currentVersionName = BuildConfig.VERSION_NAME,
         currentVersionCode = BuildConfig.VERSION_CODE
@@ -251,7 +253,9 @@ fun FirewallSettingsSheet(
                         onToggleStatusBarSpeed = onToggleStatusBarSpeed,
                         onToggleExcludeFromRecents = onToggleExcludeFromRecents,
                         onSelectStatusBarStyle = onSelectStatusBarStyle,
-                        onToggleShowDailyUsage = onToggleShowDailyUsage
+                        onToggleShowDailyUsage = onToggleShowDailyUsage,
+                        onToggleLowPowerMode = onToggleLowPowerMode,
+                        onToggleIncludeBetaUpdates = onToggleIncludeBetaUpdates
                     )
                 }
 

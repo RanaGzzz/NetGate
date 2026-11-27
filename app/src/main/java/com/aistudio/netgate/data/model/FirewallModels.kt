@@ -652,7 +652,11 @@ data class FirewallPreferencesState(
     val blockQuicForDpiBypass: Boolean = true,
     val antiDnsPoisonEnabled: Boolean = true,
     val dnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK,
-    val excludeFromRecents: Boolean = false
+    val excludeFromRecents: Boolean = false,
+    /** Coarser telemetry cadence for long sessions; enforcement behaviour is unchanged. */
+    val lowPowerMode: Boolean = false,
+    /** Include pre-release builds when checking GitHub for updates. */
+    val includeBetaUpdates: Boolean = false
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
