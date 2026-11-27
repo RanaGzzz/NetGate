@@ -101,6 +101,7 @@ class FirewallPreferences(private val context: Context) {
         val EXCLUDE_FROM_RECENTS = booleanPreferencesKey("exclude_from_recents")
         val LOW_POWER_MODE = booleanPreferencesKey("low_power_mode")
         val INCLUDE_BETA_UPDATES = booleanPreferencesKey("include_beta_updates")
+        val FIREWALL_PRIORITY = booleanPreferencesKey("firewall_priority")
         val SAVED_WIFI_OBSERVED_SET = stringSetPreferencesKey("saved_wifi_observed_set")
     }
 
@@ -178,6 +179,7 @@ class FirewallPreferences(private val context: Context) {
             isDeepMonitorEnabled = prefs[Keys.IS_DEEP_MONITOR_ENABLED] ?: true,
             lowPowerMode = prefs[Keys.LOW_POWER_MODE] ?: false,
             includeBetaUpdates = prefs[Keys.INCLUDE_BETA_UPDATES] ?: false,
+            firewallPriority = prefs[Keys.FIREWALL_PRIORITY] ?: true,
             blurEngineStyle = blurStyle,
             blurIntensity = (prefs[Keys.BLUR_INTENSITY] ?: 1.0f).coerceIn(0.4f, 1.5f),
             isBlurAnimationEnabled = prefs[Keys.IS_BLUR_ANIMATION_ENABLED] ?: true,
@@ -412,6 +414,10 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun setIncludeBetaUpdates(enabled: Boolean) {
         context.firewallDataStore.edit { it[Keys.INCLUDE_BETA_UPDATES] = enabled }
+    }
+
+    suspend fun setFirewallPriority(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.FIREWALL_PRIORITY] = enabled }
     }
 
     suspend fun setBlurEngineStyle(style: BlurEngineStyle) {

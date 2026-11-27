@@ -225,21 +225,18 @@ class FirewallRepository(
 
     suspend fun getInstalledApps(): List<InstalledAppInfo> = withContext(Dispatchers.IO) {
         val pm = context.packageManager
-        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
 
-        val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.queryIntentActivities(
-                launcherIntent,
-                PackageManager.ResolveInfoFlags.of(0L)
-            )
+        // Enumerate every installed package, not only MAIN/LAUNCHER entries: services, widgets and
+        // embedded SDK packages make network calls too and must be blockable by the firewall.
+        val applications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0L))
         } else {
             @Suppress("DEPRECATION")
-            pm.queryIntentActivities(launcherIntent, 0)
+            pm.getInstalledApplications(0)
         }
 
-        resolveInfos
+        applications
             .asSequence()
-            .mapNotNull { it.activityInfo?.applicationInfo }
             .distinctBy { it.packageName }
             .filter { it.packageName != context.packageName }
             .map { appInfo ->

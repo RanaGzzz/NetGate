@@ -4,6 +4,14 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+        Per-app firewall: rules must cover every installed package, including apps that have no
+        launcher activity (services, widgets, background SDKs). A <queries> block only covers the
+        MAIN/LAUNCHER intent, which is why non-launcher apps never appeared in the rule list.
+    -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <!-- Android 17+: the hotspot proxy and per-client accounting talk to LAN devices. Ignored on

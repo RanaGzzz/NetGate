@@ -110,6 +110,7 @@ class PerAppVpnFirewallTest {
     fun `hybrid mode keeps TUN signature stable while updating blocked UIDs and stripping bypass conflicts`() {
         val prefs = FirewallPreferencesState(
             isAdBlockerEnabled = true,
+            firewallPriority = false,
             websiteBypassPackages = setOf("com.aistudio.netgate", "com.blocked.app", "com.trusted.bank")
         )
         val installed = setOf("com.aistudio.netgate", "com.blocked.app", "com.trusted.bank")
@@ -142,6 +143,53 @@ class PerAppVpnFirewallTest {
     }
 
     @Test
+    fun `blocked apps are enforced by the kernel sinkhole even when ad filtering is enabled`() {
+        val prefs = FirewallPreferencesState(isAdBlockerEnabled = true)
+        val plan = PerAppFirewallEngine.buildTunnelPlan(
+            networkType = ActiveNetworkType.WIFI,
+            rules = listOf(AppNetworkRuleEntity("com.blocked.app", blockWifi = true, blockMobileData = false)),
+            preferences = prefs,
+            selfPackageName = "com.aistudio.netgate",
+            isPackageInstalled = { it == "com.blocked.app" },
+            resolvePackageUid = { 10201 }
+        )
+
+        // The DNS-only tunnel never saw this app's IP traffic, so blocked apps kept working.
+        assertEquals(FirewallTunnelMode.PER_APP_SINKHOLE, plan.mode)
+        assertEquals(listOf("com.blocked.app"), plan.blockedPackages)
+        assertTrue(plan.signature.sinkholePackages.contains("com.blocked.app"))
+
+        val filtersFirst = PerAppFirewallEngine.buildTunnelPlan(
+            networkType = ActiveNetworkType.WIFI,
+            rules = listOf(AppNetworkRuleEntity("com.blocked.app", blockWifi = true, blockMobileData = false)),
+            preferences = prefs.copy(firewallPriority = false),
+            selfPackageName = "com.aistudio.netgate",
+            isPackageInstalled = { it == "com.blocked.app" },
+            resolvePackageUid = { 10201 }
+        )
+        assertEquals(FirewallTunnelMode.HYBRID_DNS_AND_APP_FILTER, filtersFirst.mode)
+    }
+
+    @Test
+    fun `blocked apps on cellular data use the sinkhole and skip installed packages only`() {
+        val plan = PerAppFirewallEngine.buildTunnelPlan(
+            networkType = ActiveNetworkType.MOBILE_DATA,
+            rules = listOf(
+                AppNetworkRuleEntity("com.blocked.app", blockWifi = false, blockMobileData = true),
+                AppNetworkRuleEntity("com.uninstalled.app", blockWifi = false, blockMobileData = true)
+            ),
+            preferences = FirewallPreferencesState(),
+            selfPackageName = "com.aistudio.netgate",
+            isPackageInstalled = { it == "com.blocked.app" },
+            resolvePackageUid = { 10201 }
+        )
+
+        assertEquals(FirewallTunnelMode.PER_APP_SINKHOLE, plan.mode)
+        assertEquals(listOf("com.blocked.app"), plan.blockedPackages)
+        assertEquals(listOf("com.blocked.app"), plan.signature.sinkholePackages)
+    }
+
+    @Test
     fun `global wifi lock takes priority on Wi-Fi only and yields to cellular`() {
         val prefs = FirewallPreferencesState(
             globalWifiBlocked = true,
@@ -166,6 +214,20 @@ class PerAppVpnFirewallTest {
 
         assertEquals(FirewallTunnelMode.GLOBAL_WIFI_LOCK, wifiPlan.mode)
         assertEquals(FirewallTunnelMode.HYBRID_DNS_AND_APP_FILTER, cellularPlan.mode)
+    }
+
+    @Test
+    fun `global wifi lock outranks per-app block rules`() {
+        val plan = PerAppFirewallEngine.buildTunnelPlan(
+            networkType = ActiveNetworkType.WIFI,
+            rules = listOf(AppNetworkRuleEntity("com.blocked.app", blockWifi = true, blockMobileData = true)),
+            preferences = FirewallPreferencesState(globalWifiBlocked = true),
+            selfPackageName = "com.aistudio.netgate",
+            isPackageInstalled = { true },
+            resolvePackageUid = { 10100 }
+        )
+
+        assertEquals(FirewallTunnelMode.GLOBAL_WIFI_LOCK, plan.mode)
     }
 
     @Test

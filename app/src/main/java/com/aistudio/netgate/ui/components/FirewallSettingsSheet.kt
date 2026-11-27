@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NewReleases
@@ -96,6 +97,7 @@ fun FirewallSettingsSheet(
     onToggleShowOfflineApps: (Boolean) -> Unit,
     onToggleStatusBarSpeed: (Boolean) -> Unit,
     onToggleDeepMonitor: (Boolean) -> Unit,
+    onToggleFirewallPriority: (Boolean) -> Unit = {},
     onToggleExcludeFromRecents: (Boolean) -> Unit = {},
     onSelectStatusBarStyle: (com.aistudio.netgate.data.model.StatusBarSpeedStyle) -> Unit = {},
     onToggleShowDailyUsage: (Boolean) -> Unit = {},
@@ -126,6 +128,7 @@ fun FirewallSettingsSheet(
     var appearanceExpanded by rememberSaveable { mutableStateOf(false) }
     var backgroundSystemExpanded by rememberSaveable { mutableStateOf(false) }
     var monitorExpanded by rememberSaveable { mutableStateOf(false) }
+    var priorityExpanded by rememberSaveable { mutableStateOf(false) }
     var architectureExpanded by rememberSaveable { mutableStateOf(false) }
     var logsExpanded by rememberSaveable { mutableStateOf(false) }
     var protectionExpanded by rememberSaveable { mutableStateOf(false) }
@@ -323,6 +326,39 @@ fun FirewallSettingsSheet(
                                         icon = Icons.Rounded.Public,
                                         onCheckedChange = onToggleDeepMonitor,
                                         testTag = "settings_deep_monitor_switch"
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            SettingsAccordionCard(
+                                title = "Blocking Priority",
+                                summary = if (preferences.firewallPriority) {
+                                    "App blocks enforced by the kernel sinkhole"
+                                } else {
+                                    "DNS & ad filtering kept, app blocks best-effort"
+                                },
+                                icon = Icons.Rounded.Block,
+                                statusLabel = if (preferences.firewallPriority) "Blocks First" else "Filters First",
+                                statusAccent = if (preferences.firewallPriority) {
+                                    EmeraldPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                expanded = priorityExpanded,
+                                onToggleExpand = { priorityExpanded = !priorityExpanded },
+                                modifier = Modifier.testTag("settings_blocking_priority_card")
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    CompactSwitchRow(
+                                        title = "Block Apps Before Filtering",
+                                        summary = "Blocked apps are cut off at the VPN route level",
+                                        expandedDescription = "Android gives a VPN session to one app set at a time. With this on, the tunnel carries only the apps you blocked, so their traffic is rejected even over raw IPs, QUIC or DoH. While it is on, DNS ad & website filtering is paused because that needs every app's DNS. Turn it off to keep filtering and enforce app blocks through DNS and the local proxy instead.",
+                                        checked = preferences.firewallPriority,
+                                        icon = Icons.Rounded.Block,
+                                        onCheckedChange = onToggleFirewallPriority,
+                                        testTag = "settings_firewall_priority_switch"
                                     )
                                 }
                             }

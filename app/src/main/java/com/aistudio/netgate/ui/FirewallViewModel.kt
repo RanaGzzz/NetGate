@@ -433,6 +433,9 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
      * diagnostics log sheet so they can be read and copied out for troubleshooting.
      */
     private fun seedStoredCrashReports() {
+        // One seed per process: this runs on every ViewModel creation, and the log monitor caps its
+        // buffer, so re-seeding re-added the same crash lines each time diagnostics were reopened.
+        if (!crashSeeded.compareAndSet(false, true)) return
         viewModelScope.launch(Dispatchers.IO) {
             com.aistudio.netgate.service.CrashLogRecorder.reports(getApplication<android.app.Application>())
                 .asReversed()
@@ -1222,6 +1225,23 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             repository.setDeepMonitorEnabled(enabled)
             _snackbarMessages.tryEmit(
                 if (enabled) "Deep Site & Region Monitor enabled" else "Deep Site & Region Monitor paused"
+            )
+        }
+    }
+
+    private companion object {
+        val crashSeeded = java.util.concurrent.atomic.AtomicBoolean(false)
+    }
+
+    fun setFirewallPriority(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setFirewallPriority(enabled)
+            _snackbarMessages.tryEmit(
+                if (enabled) {
+                    "Blocked apps are enforced by the VPN route"
+                } else {
+                    "DNS & ad filtering kept; app blocks enforced by DNS and proxy"
+                }
             )
         }
     }

@@ -872,6 +872,7 @@ fun FirewallScreen(
             onToggleShowOfflineApps = viewModel::setShowOfflineApps,
             onToggleStatusBarSpeed = onRequestToggleStatusBarSpeed,
             onToggleDeepMonitor = viewModel::setDeepMonitorEnabled,
+            onToggleFirewallPriority = viewModel::setFirewallPriority,
             onToggleExcludeFromRecents = viewModel::setExcludeFromRecents,
             onSelectStatusBarStyle = viewModel::setStatusBarSpeedStyle,
             onToggleShowDailyUsage = viewModel::setShowStatusBarDailyUsage,

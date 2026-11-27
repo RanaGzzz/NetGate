@@ -85,6 +85,13 @@ object PerAppFirewallEngine {
      * Returns sorted, deduplicated package names blocked on [networkType], always excluding
      * [selfPackageName] so NetGate never deadlocks its own control/upstream sockets.
      */
+    /**
+     * True when the kernel sinkhole is carrying per-app blocks, which means the DNS/ad filter is
+     * not receiving any traffic this session (the UI and the changelog explain the tradeoff).
+     */
+    fun isSinkholeWithoutFiltering(plan: TunnelPlan): Boolean =
+        plan.mode == FirewallTunnelMode.PER_APP_SINKHOLE && plan.blockedPackages.isNotEmpty()
+
     fun evaluateBlockedPackages(
         networkType: ActiveNetworkType,
         rules: List<AppNetworkRuleEntity>,
@@ -137,13 +144,19 @@ object PerAppFirewallEngine {
                 effectiveHttpsProxy ||
                 preferences.isSafeSearchEnabled ||
                 preferences.youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
-                preferences.isYoutubeAdBlockEnabled ||
-                (preferences.isDeepMonitorEnabled && installedBlocked.isEmpty())
+                preferences.isYoutubeAdBlockEnabled
             )
 
+        // A VpnService session can only carry one app set, so DNS filtering (which needs every
+        // app's DNS) and kernel-enforced per-app blocking (which needs only the blocked apps)
+        // cannot run together. Blocking is the promise the firewall makes, so it wins by default;
+        // HYBRID only degraded blocked apps to DNS/proxy filtering, which any app using raw IPs,
+        // its own DoH or QUIC simply ignored.
         val mode = when {
             networkType == ActiveNetworkType.NONE -> FirewallTunnelMode.DISABLED
             globalWifiLockNow -> FirewallTunnelMode.GLOBAL_WIFI_LOCK
+            installedBlocked.isNotEmpty() && preferences.firewallPriority ->
+                FirewallTunnelMode.PER_APP_SINKHOLE
             needsDnsProxy -> FirewallTunnelMode.HYBRID_DNS_AND_APP_FILTER
             installedBlocked.isNotEmpty() -> FirewallTunnelMode.PER_APP_SINKHOLE
             else -> FirewallTunnelMode.DISABLED

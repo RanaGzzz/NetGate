@@ -656,7 +656,13 @@ data class FirewallPreferencesState(
     /** Coarser telemetry cadence for long sessions; enforcement behaviour is unchanged. */
     val lowPowerMode: Boolean = false,
     /** Include pre-release builds when checking GitHub for updates. */
-    val includeBetaUpdates: Boolean = false
+    val includeBetaUpdates: Boolean = false,
+    /**
+     * When true (the default) per-app blocks are enforced by the kernel sinkhole. Android can only
+     * route one app set per VPN session, so that takes the tunnel away from the DNS/ad filter; set
+     * this to false to keep DNS filtering and block apps through DNS + proxy instead.
+     */
+    val firewallPriority: Boolean = true
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {
