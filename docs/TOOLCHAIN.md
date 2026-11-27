@@ -56,6 +56,18 @@ yes | sdkmanager --licenses
 # → app/build/outputs/apk/debug/app-<abi>-debug.apk
 ```
 
+## Device verification
+
+Two checks need a running emulator or device and therefore live in their own workflows:
+
+```shell
+# Launch, VPN-consent and Wi-Fi permission smoke tests (workflow: Device smoke tests)
+./gradlew :app:connectedDebugAndroidTest
+
+# Cold-start macrobenchmark; compare the metrics table between runs
+./gradlew :baselineprofile:connectedBenchmarkReleaseAndroidTest
+```
+
 ## Baseline profile
 
 Release builds ship an ART **Baseline Profile** (and Startup Profile) so the first frames after launch do not wait for JIT warm-up. The setup has three parts:

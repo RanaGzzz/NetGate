@@ -57,7 +57,7 @@ NetGate runs entirely on the device. It uses Android's local `VpnService`, a use
 
 ## Download
 
-Grab the signed APK from the [latest release](https://github.com/RanaGzzz/NetGate/releases/latest) — download **`netgate-release-3.5.apk`** under **Assets**.
+Grab the signed APK from the [latest release](https://github.com/RanaGzzz/NetGate/releases/latest) — download the **universal** `netgate-release-<version>.apk` under **Assets** (or a smaller per-ABI APK).
 
 Requirements: Android 7.0 (API 24) or newer. NetGate uses a local VPN, so Android allows only one active VPN at a time.
 
@@ -96,7 +96,7 @@ Run the unit and Robolectric test suite:
 ./gradlew :app:testDebugUnitTest
 ```
 
-Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`. Pushing a version tag (e.g. `v3.5`) triggers the GitHub Actions release workflow to run tests, sign one APK per ABI plus a universal APK using repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`), extract release notes from `CHANGELOG.md`, and publish the GitHub Release. Release assets are named `netgate-release-<version>-<abi>.apk` (smaller, architecture-specific) and `netgate-release-<version>.apk` (universal, installs anywhere); each has a `.sha256` alongside it. See [docs/RELEASING.md](docs/RELEASING.md) for the signing secrets, the `RELEASE_CERT_SHA256` variable, key rotation and how to withdraw a release.
+Release builds use the keystore configured in `app/build.gradle.kts`; supply `STORE_PASSWORD` and `KEY_PASSWORD` in the environment and run `./gradlew :app:assembleRelease`. Pushing a version tag (e.g. `v3.9.7`) triggers the GitHub Actions release workflow to run tests, sign one APK per ABI plus a universal APK using repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`), extract release notes from `CHANGELOG.md`, and publish the GitHub Release. Release assets are named `netgate-release-<version>-<abi>.apk` (smaller, architecture-specific) and `netgate-release-<version>.apk` (universal, installs anywhere); each has a `.sha256` alongside it. See [docs/RELEASING.md](docs/RELEASING.md) for the signing secrets, the `RELEASE_CERT_SHA256` variable, key rotation and how to withdraw a release.
 
 ### Beta releases
 
@@ -124,7 +124,8 @@ The tag must still equal `versionName` exactly. Because a beta carries its own `
 | `BIND_VPN_SERVICE` | Runs the local firewall, DNS filter, ad/website blocker and Wi-Fi traffic lock |
 | `INTERNET` | Speed tests, DoH/DoTCP forwarding, filter list sync, hotspot relay, GitHub update checks and GeoIP lookups |
 | `ACCESS_NETWORK_STATE` | Detects active Wi-Fi vs. mobile data, DNS servers, external VPN tunnels and Private DNS state |
-| `ACCESS_WIFI_STATE` | Reads Wi-Fi link telemetry and hotspot interface state |
+| `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` | Reads Wi-Fi link telemetry and hotspot interface state, and joins a saved network from the Wi-Fi tab |
+| `ACCESS_LOCAL_NETWORK` *(optional, Android 17+)* | Reaches tethered clients on the local network for the hotspot proxy and per-device usage; inherited from `INTERNET` on Android 16 and older |
 | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` *(optional)* | Reveals connected Wi-Fi SSID & live nearby Wi-Fi scans in the Wi-Fi tab |
 | `PACKAGE_USAGE_STATS` *(optional)* | Reads per-app and OS tethering traffic totals |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE` | Keeps filtering, timers, live speed icon and the hotspot proxy alive in the background |
