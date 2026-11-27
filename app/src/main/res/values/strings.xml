@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">NetGate</string>
+    <string name="firewall_top_title">NetGuard Suite</string>
+    <string name="firewall_top_subtitle">App Firewall, Ad Blocker &amp; SNI/DPI</string>
     <string name="firewall_channel_name">NetGate Firewall</string>
     <string name="firewall_channel_description">Keeps per-app Wi-Fi and mobile data rules active</string>
     <string name="firewall_notification_title">NetGate Firewall Active</string>
@@ -16,9 +18,9 @@
     <string name="speed_monitor_channel_name">Live Network Speed Icon</string>
     <string name="speed_monitor_channel_description">Shows real-time upload/download speed and daily usage in the status bar</string>
     <string name="speed_monitor_stop">Stop Monitor</string>
-    <string name="nav_websites">Ad &amp; Web</string>
-    <string name="websites_title">Ad &amp; Website Blocker</string>
-    <string name="websites_subtitle">System Ad Filter, DNS Log &amp; Lockdown</string>
+    <string name="nav_websites">Ad Blocker</string>
+    <string name="websites_title">Ad &amp; Network Guard</string>
+    <string name="websites_subtitle">System Ad Filter, SNI &amp; DPI Lockdown</string>
     <string name="nav_speed_test">Speed Test</string>
     <string name="speed_test_title">Speed Test</string>
     <string name="speed_test_subtitle">Latency, Download &amp; Upload</string>

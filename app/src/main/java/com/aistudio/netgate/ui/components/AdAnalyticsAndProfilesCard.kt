@@ -65,9 +65,13 @@ fun SmartProtectionProfileCard(
     onSelectProfile: (SmartProtectionProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val primaryAccent = MaterialTheme.colorScheme.primary
+    val selectedBg = MaterialTheme.colorScheme.primaryContainer
+    val selectedOnBg = MaterialTheme.colorScheme.onPrimaryContainer
+
     FrostedSurface(
         shape = RoundedCornerShape(20.dp),
-        borderAccent = EmeraldPrimary.copy(alpha = 0.45f),
+        borderAccent = primaryAccent.copy(alpha = 0.42f),
         modifier = modifier
             .fillMaxWidth()
             .testTag("smart_protection_profile_card")
@@ -100,13 +104,22 @@ fun SmartProtectionProfileCard(
             ) {
                 SmartProtectionProfile.entries.forEach { profile ->
                     val isSelected = profile == currentProfile
-                    val selectedBg = Color(0xFFC4DF28)
-                    val selectedOnBg = Color(0xFF1B2B00)
 
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = if (isSelected) selectedBg else Color.White.copy(alpha = 0.08f),
-                        border = if (isSelected) null else BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                        color = if (isSelected) {
+                            selectedBg
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        },
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) {
+                                primaryAccent.copy(alpha = 0.65f)
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                            }
+                        ),
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .clickable { onSelectProfile(profile) }
@@ -121,7 +134,7 @@ fun SmartProtectionProfileCard(
                                     modifier = Modifier
                                         .size(18.dp)
                                         .clip(CircleShape)
-                                        .background(selectedOnBg.copy(alpha = 0.16f)),
+                                        .background(primaryAccent.copy(alpha = 0.20f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -143,7 +156,7 @@ fun SmartProtectionProfileCard(
                                     text = profile.title,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Medium,
-                                    color = Color.White.copy(alpha = 0.88f)
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -167,7 +180,7 @@ fun SmartProtectionProfileCard(
                     Icon(
                         imageVector = Icons.Rounded.Bolt,
                         contentDescription = null,
-                        tint = EmeraldPrimary,
+                        tint = primaryAccent,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -336,9 +349,10 @@ fun AdAnalyticsDashboardCard(
     analytics: AdAnalyticsSummary,
     modifier: Modifier = Modifier
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     FrostedSurface(
         shape = RoundedCornerShape(20.dp),
-        borderAccent = DataAccent.copy(alpha = 0.4f),
+        borderAccent = accent.copy(alpha = 0.36f),
         modifier = modifier
             .fillMaxWidth()
             .testTag("ad_analytics_dashboard_card")
@@ -354,14 +368,14 @@ fun AdAnalyticsDashboardCard(
             ) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = DataAccent.copy(alpha = 0.16f),
+                    color = accent.copy(alpha = 0.16f),
                     modifier = Modifier.size(38.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Rounded.Analytics,
                             contentDescription = null,
-                            tint = DataAccent,
+                            tint = accent,
                             modifier = Modifier.size(20.dp)
                         )
                     }

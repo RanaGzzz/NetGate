@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -17,23 +18,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Android
-import androidx.compose.material.icons.rounded.SignalCellularAlt
-import androidx.compose.material.icons.rounded.SignalCellularOff
 import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -44,18 +43,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.formatCountdownTimer
 import com.aistudio.netgate.ui.theme.BlockedRed
-import com.aistudio.netgate.ui.theme.DataAccent
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.WarningAmber
-import com.aistudio.netgate.ui.theme.WifiAccent
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -92,7 +92,7 @@ fun AppRuleRow(
     }
     val glassTint = when {
         isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.58f)
+        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.56f)
         else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
     }
 
@@ -117,7 +117,7 @@ fun AppRuleRow(
             .clip(RoundedCornerShape(20.dp))
             .combinedClickable(
                 interactionSource = rowInteraction,
-                indication = androidx.compose.material3.ripple(),
+                indication = ripple(),
                 onClick = onRowClick,
                 onLongClick = onRowLongClick
             )
@@ -145,7 +145,7 @@ fun AppRuleRow(
                     Image(
                         bitmap = iconBitmap!!,
                         contentDescription = "${app.appName} icon",
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(38.dp)
                     )
                 } else {
                     Icon(
@@ -257,9 +257,6 @@ fun AppRuleRow(
                 ) {
                     NetworkRuleToggleButton(
                         isBlocked = app.blockWifi,
-                        allowedIcon = Icons.Rounded.Wifi,
-                        blockedIcon = Icons.Rounded.WifiOff,
-                        allowedAccent = WifiAccent,
                         label = "Wi-Fi",
                         contentDescription = if (app.blockWifi) {
                             "Unblock Wi-Fi for ${app.appName}"
@@ -271,9 +268,6 @@ fun AppRuleRow(
                     )
                     NetworkRuleToggleButton(
                         isBlocked = app.blockMobileData,
-                        allowedIcon = Icons.Rounded.SignalCellularAlt,
-                        blockedIcon = Icons.Rounded.SignalCellularOff,
-                        allowedAccent = DataAccent,
                         label = "Data",
                         contentDescription = if (app.blockMobileData) {
                             "Unblock Mobile Data for ${app.appName}"
@@ -292,76 +286,84 @@ fun AppRuleRow(
 @Composable
 private fun NetworkRuleToggleButton(
     isBlocked: Boolean,
-    allowedIcon: ImageVector,
-    blockedIcon: ImageVector,
-    allowedAccent: Color,
     label: String,
     contentDescription: String,
     onClick: () -> Unit,
     testTag: String
 ) {
+    val isDark = LocalIsDarkTheme.current
+    val primaryColor = MaterialTheme.colorScheme.primary
     val containerColor by animateColorAsState(
-        targetValue = if (isBlocked) {
-            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.80f)
-        } else {
-            allowedAccent.copy(alpha = 0.16f)
+        targetValue = when {
+            !isBlocked -> primaryColor.copy(alpha = if (isDark) 0.26f else 0.16f)
+            isDark -> Color.Black.copy(alpha = 0.28f)
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
         },
         animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "toggleBg"
     )
     val contentColor by animateColorAsState(
-        targetValue = if (isBlocked) {
-            MaterialTheme.colorScheme.error
+        targetValue = if (!isBlocked) {
+            primaryColor
         } else {
-            allowedAccent
+            MaterialTheme.colorScheme.onSurfaceVariant
         },
         animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "toggleFg"
     )
-    val borderColor = if (isBlocked) {
-        MaterialTheme.colorScheme.error.copy(alpha = 0.50f)
+    val borderColor = if (!isBlocked) {
+        primaryColor.copy(alpha = 0.72f)
+    } else if (isDark) {
+        Color.White.copy(alpha = 0.14f)
     } else {
-        allowedAccent.copy(alpha = 0.35f)
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
     }
 
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val buttonScale by animateFloatAsState(
-        targetValue = if (pressed) 0.90f else 1f,
+        targetValue = if (pressed) 0.92f else 1f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = 550f),
         label = "togglePressScale"
     )
 
-    Surface(
-        onClick = onClick,
-        interactionSource = interactionSource,
-        shape = RoundedCornerShape(12.dp),
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor),
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .graphicsLayer {
                 scaleX = buttonScale
                 scaleY = buttonScale
             }
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(),
+                role = Role.Switch,
+                onClick = onClick
+            )
+            .semantics { this.contentDescription = contentDescription }
             .testTag(testTag)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = containerColor,
+            border = BorderStroke(1.dp, borderColor),
+            modifier = Modifier.height(34.dp)
         ) {
-            Icon(
-                imageVector = if (isBlocked) blockedIcon else allowedIcon,
-                contentDescription = contentDescription,
-                tint = contentColor,
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                text = if (isBlocked) "Off" else label,
-                style = MaterialTheme.typography.labelSmall,
-                color = contentColor
-            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (!isBlocked) FontWeight.SemiBold else FontWeight.Medium
+                    ),
+                    color = contentColor,
+                    maxLines = 1
+                )
+            }
         }
     }
 }

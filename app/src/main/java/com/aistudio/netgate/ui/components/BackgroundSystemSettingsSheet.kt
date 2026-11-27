@@ -1,6 +1,10 @@
 package com.aistudio.netgate.ui.components
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,16 +25,21 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,9 +49,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.StatusBarSpeedStyle
 import com.aistudio.netgate.service.BackgroundPowerHelper
+import com.aistudio.netgate.service.NetworkMonitorService
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.WarningAmber
 
@@ -69,12 +82,31 @@ fun BackgroundSystemSettingsAccordionBody(
     var lowPowerExpanded by rememberSaveable { mutableStateOf(false) }
     var updateChannelExpanded by rememberSaveable { mutableStateOf(false) }
 
+    var notificationsBlocked by remember {
+        mutableStateOf(NetworkMonitorService.areNotificationsBlocked(context))
+    }
+    var channelTooLow by remember {
+        mutableStateOf(NetworkMonitorService.isChannelImportanceTooLow(context))
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
+        channelTooLow = NetworkMonitorService.isChannelImportanceTooLow(context)
+    }
+    LaunchedEffect(preferences.isStatusBarSpeedEnabled) {
+        if (preferences.isStatusBarSpeedEnabled) {
+            NetworkMonitorService.ensureNotificationChannel(context)
+        }
+        notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
+        channelTooLow = NetworkMonitorService.isChannelImportanceTooLow(context)
+    }
+
     val batteryAccent = if (isIgnoringBatteryOptimizations) EmeraldPrimary else WarningAmber
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .padding(horizontal = 10.dp, vertical = 10.dp)
             .testTag("background_system_settings_view"),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -82,95 +114,187 @@ fun BackgroundSystemSettingsAccordionBody(
             title = "Status Bar Speed Icon",
             summary = "Live upload/download speed & daily usage",
             icon = Icons.Rounded.NotificationsActive,
-            iconAccent = if (preferences.isStatusBarSpeedEnabled) {
+            iconAccent = if (preferences.isStatusBarSpeedEnabled && !notificationsBlocked && !channelTooLow) {
                 MaterialTheme.colorScheme.primary
+            } else if (preferences.isStatusBarSpeedEnabled) {
+                WarningAmber
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
-            statusLabel = if (preferences.isStatusBarSpeedEnabled) "Active" else "Off",
-            statusAccent = if (preferences.isStatusBarSpeedEnabled) {
-                EmeraldPrimary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+            statusLabel = when {
+                !preferences.isStatusBarSpeedEnabled -> "Off"
+                notificationsBlocked || channelTooLow -> "Needs Perm"
+                else -> "Active"
+            },
+            statusAccent = when {
+                !preferences.isStatusBarSpeedEnabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                notificationsBlocked || channelTooLow -> WarningAmber
+                else -> EmeraldPrimary
             },
             expanded = statusBarSpeedExpanded,
             onToggleExpand = { statusBarSpeedExpanded = !statusBarSpeedExpanded },
             modifier = Modifier.testTag("settings_status_bar_speed_card"),
             headerModifier = Modifier.testTag("settings_status_bar_speed_header")
         ) {
-            AccordionToggleBody(
-                description = "Pins a persistent notification showing live Rx/Tx transfer speed and daily mobile/Wi-Fi usage totals in the status bar.",
-                toggleLabel = "Show live speed icon",
-                checked = preferences.isStatusBarSpeedEnabled,
-                onCheckedChange = onToggleStatusBarSpeed,
-                switchTestTag = "settings_status_bar_speed_switch"
-            )
-
-            if (preferences.isStatusBarSpeedEnabled) {
-                Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
-                    text = "Status Bar Icon Style",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = "Pins a persistent notification showing live Rx/Tx transfer speed and daily mobile/Wi-Fi usage totals in the status bar.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    StatusBarSpeedStyle.entries.forEach { style ->
-                        val selected = preferences.statusBarSpeedStyle == style
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onSelectStatusBarStyle(style) },
-                            label = {
-                                Text(
-                                    text = style.title,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            modifier = Modifier.testTag("settings_status_bar_style_${style.name.lowercase()}")
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onToggleShowDailyUsage(!preferences.showStatusBarDailyUsage) }
+                        .clickable { onToggleStatusBarSpeed(!preferences.isStatusBarSpeedEnabled) }
                         .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Show Today's Total in Notification",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (preferences.showStatusBarDailyUsage) {
-                                "Displays today's Wi-Fi + Mobile Rx/Tx totals"
-                            } else {
-                                "Displays current session Rx/Tx totals"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Text(
+                        text = "Show live speed icon",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = preferences.isStatusBarSpeedEnabled,
+                        onCheckedChange = onToggleStatusBarSpeed,
+                        modifier = Modifier.testTag("settings_status_bar_speed_switch")
+                    )
+                }
+
+                if (preferences.isStatusBarSpeedEnabled && (notificationsBlocked || channelTooLow)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = WarningAmber.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_status_bar_permission_warning")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.WarningAmber,
+                                    contentDescription = null,
+                                    tint = WarningAmber,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (channelTooLow) {
+                                        "Speed icon channel is set to Silent/Low — Android hides status bar icons below Default importance."
+                                    } else {
+                                        "Notifications are disabled for NetGate — allow notifications so the speed icon appears in the status bar."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            FilledTonalButton(
+                                onClick = { openStatusBarNotificationSettings(context, channelTooLow) },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_status_bar_fix_notif_button")
+                            ) {
+                                Text(
+                                    text = "Open Notification Settings",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (preferences.isStatusBarSpeedEnabled) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f))
+
+                    Text(
+                        text = "Status Bar Icon Style",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        StatusBarSpeedStyle.entries.forEach { style ->
+                            val selected = preferences.statusBarSpeedStyle == style
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectStatusBarStyle(style) },
+                                label = {
+                                    Text(
+                                        text = style.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_status_bar_style_${style.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onToggleShowDailyUsage(!preferences.showStatusBarDailyUsage) }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Show Today's Total in Notification",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (preferences.showStatusBarDailyUsage) {
+                                    "Displays today's Wi-Fi + Mobile Rx/Tx totals"
+                                } else {
+                                    "Displays current session Rx/Tx totals"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Switch(
+                            checked = preferences.showStatusBarDailyUsage,
+                            onCheckedChange = onToggleShowDailyUsage,
+                            modifier = Modifier.testTag("settings_status_bar_daily_usage_switch")
                         )
                     }
-                    Switch(
-                        checked = preferences.showStatusBarDailyUsage,
-                        onCheckedChange = onToggleShowDailyUsage,
-                        modifier = Modifier.testTag("settings_status_bar_daily_usage_switch")
-                    )
                 }
             }
         }
@@ -372,5 +496,31 @@ private fun AccordionToggleBody(
                 modifier = Modifier.testTag(switchTestTag)
             )
         }
+    }
+}
+
+private fun openStatusBarNotificationSettings(context: Context, openChannelSettings: Boolean) {
+    val intent = if (openChannelSettings && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            putExtra(Settings.EXTRA_CHANNEL_ID, NetworkMonitorService.CHANNEL_ID)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    } else {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+    val opened = runCatching {
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+    if (!opened) {
+        val fallback = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(fallback) }
     }
 }

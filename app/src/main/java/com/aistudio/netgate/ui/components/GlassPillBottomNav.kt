@@ -100,7 +100,8 @@ fun GlassPillBottomNav(
     showPageIndicatorDots: Boolean = true
 ) {
     if (items.isEmpty()) return
-    val clampedSelected = selectedIndex.coerceIn(0, items.lastIndex)
+    val hasSelection = selectedIndex in items.indices
+    val clampedSelected = if (hasSelection) selectedIndex else 0
 
     val isDark = LocalIsDarkTheme.current
     val blurConfig = LocalBlurEngineConfig.current
@@ -365,8 +366,9 @@ fun GlassPillBottomNav(
                         .background(glassSheenBrush)
                         .padding(horizontal = 6.dp, vertical = 6.dp)
                 ) {
-                    val gap = 2.dp
-                    val minTabWidth = 54.dp
+                    val isDenseBar = items.size >= 7
+                    val gap = if (isDenseBar) 1.dp else 2.dp
+                    val minTabWidth = if (isDenseBar) 48.dp else 54.dp
                     val minRequiredWidth = minTabWidth * items.size + gap * (items.size - 1)
                     val needsScroll = maxWidth < minRequiredWidth
                     val tabWidth = if (needsScroll) {
@@ -398,14 +400,18 @@ fun GlassPillBottomNav(
                         label = "glassPillMorphOffset"
                     )
                     val indicatorAlpha by animateFloatAsState(
-                        targetValue = if (isDimmed) 0.28f else 1f,
+                        targetValue = when {
+                            !hasSelection -> 0f
+                            isDimmed -> 0.28f
+                            else -> 1f
+                        },
                         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                         label = "glassPillIndicatorAlpha"
                     )
 
                     val density = LocalDensity.current
-                    LaunchedEffect(clampedSelected, needsScroll, contentWidth) {
-                        if (needsScroll && scrollState.maxValue > 0) {
+                    LaunchedEffect(clampedSelected, hasSelection, needsScroll, contentWidth) {
+                        if (hasSelection && needsScroll && scrollState.maxValue > 0) {
                             val targetPx = with(density) {
                                 ((tabWidth + gap) * clampedSelected - maxWidth / 2 + tabWidth / 2).toPx()
                             }
@@ -475,9 +481,10 @@ fun GlassPillBottomNav(
                                 items.forEachIndexed { index, item ->
                                     GlassPillTab(
                                         item = item,
-                                        selected = !isDimmed && index == clampedSelected,
+                                        selected = !isDimmed && hasSelection && index == clampedSelected,
                                         themeStyle = themeStyle,
                                         useDynamicColor = useDynamicColor,
+                                        compactLabel = isDenseBar,
                                         modifier = Modifier
                                             .width(tabWidth)
                                             .testTag(item.testTag)
@@ -498,7 +505,7 @@ fun GlassPillBottomNav(
                 modifier = Modifier.testTag("glass_pill_page_dots")
             ) {
                 items.forEachIndexed { index, _ ->
-                    val isCurrent = !isDimmed && index == clampedSelected
+                    val isCurrent = !isDimmed && hasSelection && index == clampedSelected
                     val dotWidth by animateDpAsState(
                         targetValue = if (isCurrent) 14.dp else 4.dp,
                         animationSpec = spring(
@@ -532,6 +539,7 @@ private fun GlassPillTab(
     selected: Boolean,
     themeStyle: NetGateThemeStyle,
     useDynamicColor: Boolean,
+    compactLabel: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -597,7 +605,7 @@ private fun GlassPillTab(
                 role = Role.Tab,
                 onClick = item.onClick
             )
-            .padding(horizontal = 3.dp, vertical = 5.dp)
+            .padding(horizontal = if (compactLabel) 1.dp else 2.dp, vertical = 5.dp)
             .graphicsLayer {
                 this.scaleX = scaleX
                 this.scaleY = scaleY
@@ -613,7 +621,7 @@ private fun GlassPillTab(
         Text(
             text = item.label,
             color = contentTint,
-            fontSize = 10.sp,
+            fontSize = if (compactLabel) 9.sp else 9.5.sp,
             lineHeight = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,

@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Close
@@ -371,65 +373,33 @@ fun VpnDpiLogsSheet(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Stream Mode Switcher (Live App & Crash vs VPN & DPI Events)
-                FrostedSurface(
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        LogStreamTab.entries.forEach { tab ->
-                            val selected = selectedTab == tab
-                            val count = if (tab == LogStreamTab.LIVE_APP) appLogs.size else logs.size
-                            val tag = if (tab == LogStreamTab.LIVE_APP) {
-                                "logs_tab_live_app"
-                            } else {
-                                "logs_tab_vpn_dpi"
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
-                                } else {
-                                    Color.Transparent
-                                },
-                                border = if (selected) {
-                                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
-                                } else {
-                                    null
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 48.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { selectedTab = tab }
-                                    .testTag(tag)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
-                                ) {
-                                    Text(
-                                        text = "${tab.label} ($count)",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                        ),
-                                        color = if (selected) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
+                val streamTabs = LogStreamTab.entries
+                val streamTabItems = streamTabs.map { tab ->
+                    val count = if (tab == LogStreamTab.LIVE_APP) appLogs.size else logs.size
+                    when (tab) {
+                        LogStreamTab.LIVE_APP -> FrostedSegmentedTabItem(
+                            label = "Live App",
+                            testTag = "logs_tab_live_app",
+                            activeIcon = Icons.Rounded.Terminal,
+                            inactiveIcon = Icons.Outlined.Terminal,
+                            badgeText = "$count",
+                            contentDescription = "${tab.label} ($count)"
+                        )
+                        LogStreamTab.VPN_DPI -> FrostedSegmentedTabItem(
+                            label = "VPN & DPI",
+                            testTag = "logs_tab_vpn_dpi",
+                            activeIcon = Icons.Rounded.Shield,
+                            inactiveIcon = Icons.Outlined.Shield,
+                            badgeText = "$count",
+                            contentDescription = "${tab.label} ($count)"
+                        )
                     }
                 }
+                FrostedSegmentedTabBar(
+                    items = streamTabItems,
+                    selectedIndex = streamTabs.indexOf(selectedTab).coerceAtLeast(0),
+                    onSelect = { index -> selectedTab = streamTabs[index] }
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 

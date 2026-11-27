@@ -5,14 +5,18 @@ import android.content.res.Configuration
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.aistudio.netgate.data.local.FirewallPreferences
@@ -23,20 +27,36 @@ import com.aistudio.netgate.data.model.AppUpdateUiState
 import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.DnsQueryLogEntry
 import com.aistudio.netgate.data.model.DnsQueryStatus
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.unit.dp
+import com.aistudio.netgate.data.model.ConnectionDetails
 import com.aistudio.netgate.data.model.FirewallPreferencesState
+import com.aistudio.netgate.data.model.LiveNetworkTelemetry
 import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.ThemeMode
+import com.aistudio.netgate.data.model.WebsiteFilterMode
+import com.aistudio.netgate.data.model.WebsiteRuleItem
+import com.aistudio.netgate.data.model.WebsiteTabSection
 import com.aistudio.netgate.service.AppLogCollector
 import com.aistudio.netgate.service.AppLogEntry
 import com.aistudio.netgate.service.AppLogLevel
 import com.aistudio.netgate.service.CrashLogRecorder
+import com.aistudio.netgate.data.model.AdvancedPreferencesState
+import com.aistudio.netgate.data.model.BackupUiState
+import com.aistudio.netgate.ui.WebsiteBlockerUiState
+import com.aistudio.netgate.ui.components.AdvancedProtectionSheet
 import com.aistudio.netgate.ui.components.AppDetailBottomSheet
+import com.aistudio.netgate.ui.components.AppRuleRow
 import com.aistudio.netgate.ui.components.DnsLogFilter
 import com.aistudio.netgate.ui.components.DnsLogsFilterCard
 import com.aistudio.netgate.ui.components.FilterLogEntryCard
+import com.aistudio.netgate.ui.components.FirewallHeaderCard
 import com.aistudio.netgate.ui.components.FirewallSettingsSheet
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
+import com.aistudio.netgate.ui.components.websiteManagementItems
 import com.aistudio.netgate.ui.theme.LocalBlurEngineConfig
 import com.aistudio.netgate.ui.theme.LocalDynamicColorEnabled
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
@@ -289,6 +309,7 @@ class NetGateUiFixesTest {
     @Test
     fun `GlassPillBottomNav renders stacked icons labels and page dots and switches tabs`() {
         var selected by mutableStateOf(AppDestination.FIREWALL)
+        var sniDpiSelected by mutableStateOf(false)
 
         composeRule.setContent {
             NetGateTheme(
@@ -299,25 +320,64 @@ class NetGateUiFixesTest {
                 FloatingFrostedNavBar(
                     currentDestination = selected,
                     isConnectionInfoOpen = false,
-                    onSelectFirewall = { selected = AppDestination.FIREWALL },
-                    onSelectWebsites = { selected = AppDestination.WEBSITES },
-                    onSelectDataUsage = { selected = AppDestination.DATA_USAGE },
-                    onSelectDnsProtection = { selected = AppDestination.DNS },
-                    onSelectHotspot = { selected = AppDestination.HOTSPOT },
-                    onSelectVpnGuard = { selected = AppDestination.VPN_GUARD }
+                    onSelectFirewall = {
+                        sniDpiSelected = false
+                        selected = AppDestination.FIREWALL
+                    },
+                    onSelectWebsites = {
+                        sniDpiSelected = false
+                        selected = AppDestination.WEBSITES
+                    },
+                    onSelectDataUsage = {
+                        sniDpiSelected = false
+                        selected = AppDestination.DATA_USAGE
+                    },
+                    onSelectDnsProtection = {
+                        sniDpiSelected = false
+                        selected = AppDestination.DNS
+                    },
+                    onSelectHotspot = {
+                        sniDpiSelected = false
+                        selected = AppDestination.HOTSPOT
+                    },
+                    onSelectVpnGuard = {
+                        sniDpiSelected = false
+                        selected = AppDestination.VPN_GUARD
+                    },
+                    isSniDpiSelected = sniDpiSelected,
+                    onSelectSniDpi = {
+                        selected = AppDestination.FIREWALL
+                        sniDpiSelected = true
+                    }
                 )
             }
         }
 
         composeRule.onNodeWithTag("floating_frosted_nav_bar").assertIsDisplayed()
         composeRule.onNodeWithTag("glass_pill_page_dots").assertIsDisplayed()
+        composeRule.onNodeWithTag("nav_tab_firewall").assertIsDisplayed()
+        composeRule.onNodeWithTag("floating_nav_vpn_guard").assertIsDisplayed()
+        composeRule.onNodeWithTag("floating_nav_hotspot").assertIsDisplayed()
+        composeRule.onNodeWithTag("nav_tab_data_usage").assertIsDisplayed()
+
         composeRule.onNodeWithTag("nav_tab_websites").performClick()
         composeRule.waitForIdle()
         assertEquals(AppDestination.WEBSITES, selected)
+        assertFalse(sniDpiSelected)
+
+        composeRule.onNodeWithTag("nav_tab_sni_dpi").performClick()
+        composeRule.waitForIdle()
+        assertTrue(sniDpiSelected)
 
         composeRule.onNodeWithTag("floating_nav_dns").performClick()
         composeRule.waitForIdle()
         assertEquals(AppDestination.DNS, selected)
+        assertFalse(sniDpiSelected)
+
+        composeRule.onNodeWithTag("nav_tab_data_usage").performClick()
+        composeRule.waitForIdle()
+        assertEquals(AppDestination.DATA_USAGE, selected)
+        assertFalse(sniDpiSelected)
     }
 
     @Test
@@ -464,5 +524,215 @@ class NetGateUiFixesTest {
             targetPid = "1234"
         )
         assertNull(gcLog)
+    }
+
+    @Test
+    fun `Redesigned FirewallHeaderCard and AppRuleRow display pills and wire Websites pill click`() {
+        var openedWebsites = false
+        var wifiToggled = false
+        var dataToggled = false
+        val app = ManagedApp(
+            packageName = "com.example.oneoneoneone",
+            appName = "1.1.1.1",
+            isSystemApp = false,
+            hasInternetPermission = true,
+            blockWifi = false,
+            blockMobileData = false
+        )
+
+        composeRule.setContent {
+            NetGateTheme(themeMode = ThemeMode.DARK, dynamicColor = false) {
+                androidx.compose.foundation.layout.Column {
+                    FirewallHeaderCard(
+                        isFirewallActive = true,
+                        connectionDetails = ConnectionDetails(
+                            activeNetworkType = ActiveNetworkType.WIFI,
+                            isWifiRadioEnabled = true,
+                            isWifiConnected = true,
+                            isMobileDataEnabled = false,
+                            isMobileDataConnected = false,
+                            wifiBandLabel = "5 GHz"
+                        ),
+                        totalAppsCount = 222,
+                        wifiBlockedCount = 0,
+                        dataBlockedCount = 0,
+                        activeBlockedNowCount = 0,
+                        isAdBlockerEnabled = true,
+                        blockedAdsCount = 54L,
+                        liveTelemetry = LiveNetworkTelemetry(
+                            downloadBytesPerSec = 125L,
+                            uploadBytesPerSec = 102L
+                        ),
+                        isVpnGuardActive = true,
+                        vpnGuardProfileLabel = "WireGuard & WARP",
+                        blockedWebsitesCount = 1,
+                        websiteRulesBadgeText = "1 Blocked",
+                        dnsSummaryLabel = "1.1.1.1",
+                        onToggleFirewall = {},
+                        onOpenConnectionInfo = {},
+                        onOpenDnsProtection = {},
+                        onOpenWebsitesTab = { openedWebsites = true }
+                    )
+                    AppRuleRow(
+                        app = app,
+                        activeNetworkType = ActiveNetworkType.WIFI,
+                        isFirewallActive = true,
+                        isSelectionMode = false,
+                        isSelected = false,
+                        nowMillis = 1_750_000_000_000L,
+                        loadIcon = { null },
+                        onToggleWifi = { wifiToggled = true },
+                        onToggleData = { dataToggled = true },
+                        onRowClick = {},
+                        onRowLongClick = {}
+                    )
+                }
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Firewall Active").assertIsDisplayed()
+        composeRule.onNodeWithText("Wi-Fi ON").assertIsDisplayed()
+        composeRule.onNodeWithText("Data OFF").assertIsDisplayed()
+        composeRule.onNodeWithText("WI-FI OFF").assertIsDisplayed()
+        composeRule.onNodeWithText("DATA OFF").assertIsDisplayed()
+        composeRule.onNodeWithText("ADS BLK").assertIsDisplayed()
+        composeRule.onNodeWithText("1 Blocked").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("header_websites_blocked_pill").performClick()
+        assertTrue(openedWebsites)
+
+        composeRule.onNodeWithTag("wifi_toggle_com.example.oneoneoneone").performClick()
+        composeRule.onNodeWithTag("data_toggle_com.example.oneoneoneone").performClick()
+        assertTrue(wifiToggled)
+        assertTrue(dataToggled)
+    }
+
+    @Test
+    fun `Website management items render blocklist and whitelist rules inside Firewall Websites tab`() {
+        var addedDomain = ""
+        var addedWhitelist = false
+        val state = WebsiteBlockerUiState(
+            filterMode = WebsiteFilterMode.BLOCKLIST,
+            blocklistRules = listOf(
+                WebsiteRuleItem(
+                    domain = "tracker.example.com",
+                    isWhitelist = false,
+                    isEnabled = true,
+                    createdAt = 1_750_000_000_000L
+                )
+            ),
+            whitelistRules = listOf(
+                WebsiteRuleItem(
+                    domain = "trusted.example.org",
+                    isWhitelist = true,
+                    isEnabled = true,
+                    createdAt = 1_750_000_000_000L
+                )
+            )
+        )
+        var domainInput by mutableStateOf("")
+        var selectedSection by mutableStateOf(WebsiteTabSection.BLOCKLIST)
+
+        composeRule.setContent {
+            NetGateTheme(themeMode = ThemeMode.DARK, dynamicColor = false) {
+                LazyColumn(
+                    modifier = Modifier.testTag("test_websites_lazy_list"),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    websiteManagementItems(
+                        state = state,
+                        isFirewallActive = true,
+                        connectionDetails = ConnectionDetails(),
+                        domainInput = domainInput,
+                        selectedSection = selectedSection,
+                        filteredBypassApps = emptyList(),
+                        appSearchQuery = "",
+                        loadIcon = { null },
+                        onDomainInputChange = { domainInput = it },
+                        onSelectFilterMode = {},
+                        onRequestEnableFirewall = {},
+                        onOpenDnsProtection = {},
+                        onAllowDomainPermanently = {
+                            addedDomain = it
+                            addedWhitelist = true
+                        },
+                        onBlockDomainPermanently = {
+                            addedDomain = it
+                            addedWhitelist = false
+                        },
+                        onAllowDomainTemporarily = { _, _ -> },
+                        onSelectSection = { selectedSection = it },
+                        onClearWebsiteRules = {},
+                        onClearBypassApps = {},
+                        onOpenImport = {},
+                        onOpenExport = {},
+                        onOpenBackupRestore = {},
+                        onAppSearchQueryChange = {},
+                        onToggleWebsiteRuleEnabled = { _, _ -> },
+                        onDeleteWebsiteRule = {},
+                        onToggleBypassApp = {}
+                    )
+                }
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("website_mode_control_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("test_websites_lazy_list")
+            .performScrollToNode(hasTestTag("website_rule_row_tracker.example.com"))
+        composeRule.onNodeWithText("tracker.example.com").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("test_websites_lazy_list")
+            .performScrollToNode(hasTestTag("website_domain_input"))
+        composeRule.onNodeWithTag("website_domain_input").performTextInput("ads.test.net")
+        composeRule.onNodeWithTag("add_blocklist_button").performClick()
+        assertEquals("ads.test.net", addedDomain)
+        assertFalse(addedWhitelist)
+
+        composeRule.onNodeWithTag("test_websites_lazy_list")
+            .performScrollToNode(hasTestTag("website_section_tab_whitelist"))
+        composeRule.onNodeWithTag("website_section_tab_whitelist").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("test_websites_lazy_list")
+            .performScrollToNode(hasTestTag("website_rule_row_trusted.example.org"))
+        composeRule.onNodeWithText("trusted.example.org").assertIsDisplayed()
+    }
+
+    @Test
+    fun `AdvancedProtectionSheet renders Encrypted Backup Export and Choose File buttons cleanly`() {
+        composeRule.setContent {
+            NetGateTheme(themeMode = ThemeMode.DARK, dynamicColor = false) {
+                AdvancedProtectionSheet(
+                    advanced = AdvancedPreferencesState(),
+                    backupState = BackupUiState(),
+                    appUpdateState = AppUpdateUiState(),
+                    currentSsid = null,
+                    onToggleKillSwitch = {},
+                    onToggleAutoReconnect = {},
+                    onToggleAutoVpnUnknownWifi = {},
+                    onSetWifiTrusted = { _, _ -> },
+                    onRequestBatteryExemption = {},
+                    onCheckUpdates = {},
+                    onDownloadUpdate = {},
+                    onExportBackup = {},
+                    onImportBackup = { _, _ -> },
+                    onClearBackupState = {},
+                    onOpenNotificationSettings = {},
+                    onDismiss = {}
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("advanced_backup_export_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("advanced_backup_choose_file_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Choose File").assertIsDisplayed()
+        composeRule.onNodeWithText("Export").assertIsDisplayed()
     }
 }

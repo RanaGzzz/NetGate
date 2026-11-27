@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileUpload
@@ -32,8 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -253,18 +252,24 @@ fun BackupAndRestoreRulesDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                TabRow(selectedTabIndex = selectedTab) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        text = { Text("Backup (JSON)") }
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = { Text("Restore") }
-                    )
-                }
+                FrostedSegmentedTabBar(
+                    items = listOf(
+                        FrostedSegmentedTabItem(
+                            label = "Backup",
+                            testTag = "backup_restore_tab_backup",
+                            activeIcon = Icons.Rounded.Download,
+                            inactiveIcon = Icons.Outlined.Download
+                        ),
+                        FrostedSegmentedTabItem(
+                            label = "Restore",
+                            testTag = "backup_restore_tab_restore",
+                            activeIcon = Icons.Rounded.Restore,
+                            inactiveIcon = Icons.Rounded.Restore
+                        )
+                    ),
+                    selectedIndex = selectedTab,
+                    onSelect = { selectedTab = it }
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
 

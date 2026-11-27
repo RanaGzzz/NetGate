@@ -373,8 +373,8 @@ class ScreenshotGeneratorTest {
             )
             ScreenshotShell(
                 destination = AppDestination.WEBSITES,
-                title = "Ad & Website Blocker",
-                subtitle = "System Ad Filter, DNS Log & Lockdown"
+                title = "Ad & Network Guard",
+                subtitle = "System Ad Filter, SNI & DPI Lockdown"
             ) {
                 WebsiteBlockerContent(
                     state = websiteState,

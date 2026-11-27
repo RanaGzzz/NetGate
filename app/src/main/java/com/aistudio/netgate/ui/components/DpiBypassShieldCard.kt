@@ -3,12 +3,16 @@ package com.aistudio.netgate.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Terminal
@@ -34,6 +39,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,8 +49,13 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -58,7 +69,6 @@ import com.aistudio.netgate.data.model.DpiBypassMode
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.WarningAmber
-import com.aistudio.netgate.ui.theme.WifiAccent
 
 private val CHUNK_SIZE_OPTIONS = listOf(2, 3, 4, 8, 16)
 
@@ -85,18 +95,28 @@ fun DpiBypassShieldCard(
     onFlushCache: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
     onOpenVpnDpiLogs: (() -> Unit)? = null,
+    collapsibleTuning: Boolean = false,
+    initiallyTuningExpanded: Boolean = false,
+    showBottomGuardsInCard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val isEnabled = dpiBypassMode != DpiBypassMode.OFF
+    val primaryAccent = MaterialTheme.colorScheme.primary
     val targetAccent = when {
         !isEnabled -> MaterialTheme.colorScheme.onSurfaceVariant
-        isFirewallActive -> WifiAccent
+        isFirewallActive -> primaryAccent
         else -> WarningAmber
     }
     val accent by animateColorAsState(
         targetValue = targetAccent,
         animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
         label = "dpi_bypass_accent"
+    )
+    var tuningExpanded by rememberSaveable { mutableStateOf(initiallyTuningExpanded) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (tuningExpanded) 180f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "dpi_tuning_chevron"
     )
 
     FrostedSurface(
@@ -117,25 +137,27 @@ fun DpiBypassShieldCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = accent.copy(alpha = 0.16f),
-                        modifier = Modifier.size(42.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (dpiBypassMode == DpiBypassMode.AUTOPILOT) {
-                                    Icons.Rounded.AutoFixHigh
-                                } else {
-                                    ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
-                                },
-                                contentDescription = null,
-                                tint = accent,
-                                modifier = Modifier.size(22.dp)
-                            )
+                    if (!collapsibleTuning) {
+                        Surface(
+                            shape = CircleShape,
+                            color = accent.copy(alpha = 0.16f),
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (dpiBypassMode == DpiBypassMode.AUTOPILOT) {
+                                        Icons.Rounded.AutoFixHigh
+                                    } else {
+                                        ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield)
+                                    },
+                                    contentDescription = null,
+                                    tint = accent,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
+                        Spacer(modifier = Modifier.width(12.dp))
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -143,36 +165,41 @@ fun DpiBypassShieldCard(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "DPI Bypass Shield",
+                                text = if (collapsibleTuning) "DPI Bypass Strategy" else "DPI Bypass Shield",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = accent.copy(alpha = 0.15f)
-                            ) {
-                                Text(
-                                    text = if (isEnabled) dpiBypassMode.title.uppercase() else "OFF",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = accent,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
+                            if (!collapsibleTuning) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = accent.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = if (isEnabled) dpiBypassMode.title.uppercase() else "OFF",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = accent,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
                         Text(
                             text = when {
                                 !isEnabled -> "Rootless TLS SNI fragmentation & anti-DPI engine"
+                                isFirewallActive && collapsibleTuning -> "${dpiBypassMode.title} Active"
                                 isFirewallActive -> dpiBypassMode.subtitle
                                 else -> "Ready • Activate NetGate Firewall to intercept DPI"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = if (isEnabled && !isFirewallActive) {
                                 WarningAmber
+                            } else if (isEnabled && collapsibleTuning) {
+                                accent
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             }
@@ -193,7 +220,7 @@ fun DpiBypassShieldCard(
                     },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = WifiAccent
+                        checkedTrackColor = primaryAccent
                     ),
                     modifier = Modifier.testTag("dpi_master_switch")
                 )
@@ -207,19 +234,19 @@ fun DpiBypassShieldCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 DpiMetricPill(
-                    label = "DPI Bypassed",
+                    label = if (collapsibleTuning) "BYPASSED" else "DPI Bypassed",
                     value = dpiBypassedConnectionsCount.toString(),
                     accent = EmeraldPrimary,
                     modifier = Modifier.weight(1f)
                 )
                 DpiMetricPill(
-                    label = "Learned Hosts",
+                    label = if (collapsibleTuning) "LEARNED HOSTS" else "Learned Hosts",
                     value = dpiAutopilotLearnedCount.toString(),
-                    accent = WifiAccent,
+                    accent = primaryAccent,
                     modifier = Modifier.weight(1f)
                 )
                 DpiMetricPill(
-                    label = "Spoof / QUIC",
+                    label = if (collapsibleTuning) "QUIC" else "Spoof / QUIC",
                     value = "${antiDnsPoisonBlockedCount + quicStrippedCount}",
                     accent = if (antiDnsPoisonBlockedCount > 0L) BlockedRed else WarningAmber,
                     modifier = Modifier.weight(1f)
@@ -246,55 +273,50 @@ fun DpiBypassShieldCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "DPI Reshaping Mode",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                DpiBypassMode.entries.forEach { mode ->
-                    val selected = dpiBypassMode == mode
-                    FilterChip(
-                        selected = selected,
-                        onClick = {
-                            onSelectDpiMode(mode)
-                            if (mode != DpiBypassMode.OFF && !isFirewallActive) {
-                                onRequestEnableFirewall()
-                            }
-                        },
-                        label = {
-                            Text(
-                                text = mode.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = WifiAccent.copy(alpha = 0.22f),
-                            selectedLabelColor = MaterialTheme.colorScheme.onSurface
-                        ),
+            if (collapsibleTuning) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { tuningExpanded = !tuningExpanded }
+                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                        .testTag("dpi_tuning_accordion_toggle"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Bypass Tuning & Chunk Size",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = primaryAccent,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.ExpandMore,
+                        contentDescription = if (tuningExpanded) "Collapse Bypass Tuning" else "Expand Bypass Tuning",
+                        tint = primaryAccent,
                         modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("dpi_mode_${mode.name.lowercase()}")
+                            .size(20.dp)
+                            .rotate(chevronRotation)
                     )
                 }
+            } else {
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
+            val showTuningBody = !collapsibleTuning || tuningExpanded
             AnimatedVisibility(
-                visible = isEnabled,
-                enter = fadeIn(tween(200)) + expandVertically(tween(220)),
-                exit = fadeOut(tween(150)) + shrinkVertically(tween(180))
+                visible = showTuningBody,
+                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
             ) {
-                Column {
-                    Spacer(modifier = Modifier.height(10.dp))
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (collapsibleTuning) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
                     Text(
-                        text = "TLS Fragment Chunk Size",
+                        text = "DPI Reshaping Mode",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -303,124 +325,268 @@ fun DpiBypassShieldCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        CHUNK_SIZE_OPTIONS.forEach { size ->
-                            val selected = dpiFragmentChunkSize == size
+                        DpiBypassMode.entries.forEach { mode ->
+                            val selected = dpiBypassMode == mode
                             FilterChip(
                                 selected = selected,
-                                onClick = { onSelectChunkSize(size) },
-                                label = { Text("${size}B") },
+                                onClick = {
+                                    onSelectDpiMode(mode)
+                                    if (mode != DpiBypassMode.OFF && !isFirewallActive) {
+                                        onRequestEnableFirewall()
+                                    }
+                                },
+                                label = {
+                                    Text(
+                                        text = mode.title,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp),
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = EmeraldPrimary.copy(alpha = 0.2f),
-                                    selectedLabelColor = MaterialTheme.colorScheme.onSurface
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = selected,
+                                    selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
+                                    selectedBorderWidth = 1.25.dp
                                 ),
                                 modifier = Modifier
                                     .heightIn(min = 48.dp)
-                                    .testTag("dpi_chunk_$size")
+                                    .testTag("dpi_mode_${mode.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = isEnabled,
+                        enter = fadeIn(tween(200)) + expandVertically(tween(220)),
+                        exit = fadeOut(tween(150)) + shrinkVertically(tween(180))
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "TLS Fragment Chunk Size",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                CHUNK_SIZE_OPTIONS.forEach { size ->
+                                    val selected = dpiFragmentChunkSize == size
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { onSelectChunkSize(size) },
+                                        label = { Text("${size}B") },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
+                                            selected = selected,
+                                            selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
+                                            selectedBorderWidth = 1.25.dp
+                                        ),
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("dpi_chunk_$size")
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Resilient DNS Transport",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = dnsTransportMode.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        DnsTransportMode.entries.forEach { mode ->
+                            val selected = dnsTransportMode == mode
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectDnsTransportMode(mode) },
+                                label = { Text(mode.title) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = selected,
+                                    selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
+                                    selectedBorderWidth = 1.25.dp
+                                ),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("dns_transport_${mode.name.lowercase()}")
                             )
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            if (showBottomGuardsInCard) {
+                Spacer(modifier = Modifier.height(10.dp))
+                DpiGuardsAndActionsBody(
+                    blockQuicForDpiBypass = blockQuicForDpiBypass,
+                    antiDnsPoisonEnabled = antiDnsPoisonEnabled,
+                    dpiIdleKeepAliveEnabled = dpiIdleKeepAliveEnabled,
+                    antiDnsPoisonBlockedCount = antiDnsPoisonBlockedCount,
+                    quicStrippedCount = quicStrippedCount,
+                    onToggleBlockQuic = onToggleBlockQuic,
+                    onToggleAntiDnsPoison = onToggleAntiDnsPoison,
+                    onToggleIdleKeepAlive = onToggleIdleKeepAlive,
+                    onFlushCache = onFlushCache,
+                    onOpenVpnDpiLogs = onOpenVpnDpiLogs
+                )
+            }
+        }
+    }
+}
 
-            Text(
-                text = "Resilient DNS Transport",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface
+@Composable
+fun DpiNetworkGuardsCard(
+    blockQuicForDpiBypass: Boolean,
+    antiDnsPoisonEnabled: Boolean,
+    dpiIdleKeepAliveEnabled: Boolean,
+    antiDnsPoisonBlockedCount: Long,
+    quicStrippedCount: Long,
+    onToggleBlockQuic: (Boolean) -> Unit,
+    onToggleAntiDnsPoison: (Boolean) -> Unit,
+    onToggleIdleKeepAlive: (Boolean) -> Unit,
+    onFlushCache: () -> Unit,
+    onOpenVpnDpiLogs: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    FrostedSurface(
+        shape = RoundedCornerShape(22.dp),
+        borderAccent = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("dpi_network_guards_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            DpiGuardsAndActionsBody(
+                blockQuicForDpiBypass = blockQuicForDpiBypass,
+                antiDnsPoisonEnabled = antiDnsPoisonEnabled,
+                dpiIdleKeepAliveEnabled = dpiIdleKeepAliveEnabled,
+                antiDnsPoisonBlockedCount = antiDnsPoisonBlockedCount,
+                quicStrippedCount = quicStrippedCount,
+                onToggleBlockQuic = onToggleBlockQuic,
+                onToggleAntiDnsPoison = onToggleAntiDnsPoison,
+                onToggleIdleKeepAlive = onToggleIdleKeepAlive,
+                onFlushCache = onFlushCache,
+                onOpenVpnDpiLogs = onOpenVpnDpiLogs
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = dnsTransportMode.subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    }
+}
+
+@Composable
+private fun DpiGuardsAndActionsBody(
+    blockQuicForDpiBypass: Boolean,
+    antiDnsPoisonEnabled: Boolean,
+    dpiIdleKeepAliveEnabled: Boolean,
+    antiDnsPoisonBlockedCount: Long,
+    quicStrippedCount: Long,
+    onToggleBlockQuic: (Boolean) -> Unit,
+    onToggleAntiDnsPoison: (Boolean) -> Unit,
+    onToggleIdleKeepAlive: (Boolean) -> Unit,
+    onFlushCache: () -> Unit,
+    onOpenVpnDpiLogs: (() -> Unit)?
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        DpiToggleRow(
+            title = "Block QUIC (HTTP/3)",
+            subtitle = if (quicStrippedCount > 0L) {
+                "Forces browsers to fallback to TCP ($quicStrippedCount downgraded)"
+            } else {
+                "Forces browsers to fallback to TCP"
+            },
+            checked = blockQuicForDpiBypass,
+            onCheckedChange = onToggleBlockQuic,
+            switchTestTag = "block_quic_switch"
+        )
+        DpiToggleRow(
+            title = "Anti-DNS Poisoning",
+            subtitle = if (antiDnsPoisonBlockedCount > 0L) {
+                "Rejects forged loopback DNS IPs ($antiDnsPoisonBlockedCount caught)"
+            } else {
+                "Rejects forged loopback DNS IPs"
+            },
+            checked = antiDnsPoisonEnabled,
+            onCheckedChange = onToggleAntiDnsPoison,
+            switchTestTag = "anti_dns_poison_switch"
+        )
+        DpiToggleRow(
+            title = "Messaging Idle Keep-Alive",
+            subtitle = "Keeps chat & social sockets alive (SO_KEEPALIVE) during idle pauses",
+            checked = dpiIdleKeepAliveEnabled,
+            onCheckedChange = onToggleIdleKeepAlive,
+            switchTestTag = "dpi_idle_keep_alive_switch"
+        )
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+    Spacer(modifier = Modifier.height(12.dp))
+
+    FilledTonalButton(
+        onClick = onFlushCache,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .testTag("flush_dpi_cache_button")
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CleaningServices,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Flush DNS & Reset")
+    }
+
+    if (onOpenVpnDpiLogs != null) {
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onOpenVpnDpiLogs,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("dpi_open_logs_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Terminal,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                DnsTransportMode.entries.forEach { mode ->
-                    val selected = dnsTransportMode == mode
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectDnsTransportMode(mode) },
-                        label = { Text(mode.title) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = EmeraldPrimary.copy(alpha = 0.2f),
-                            selectedLabelColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("dns_transport_${mode.name.lowercase()}")
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DpiToggleRow(
-                    title = "Block QUIC (HTTP/3 Downgrade)",
-                    subtitle = "Strips HTTPS/SVCB DNS hints (${quicStrippedCount} downgraded) so browsers fall back to TCP SNI split",
-                    checked = blockQuicForDpiBypass,
-                    onCheckedChange = onToggleBlockQuic,
-                    switchTestTag = "block_quic_switch"
-                )
-                DpiToggleRow(
-                    title = "Anti-DNS Poisoning Guard",
-                    subtitle = "Rejects forged loopback/sinkhole DNS IPs (${antiDnsPoisonBlockedCount} caught) & switches to encrypted/TCP DNS",
-                    checked = antiDnsPoisonEnabled,
-                    onCheckedChange = onToggleAntiDnsPoison,
-                    switchTestTag = "anti_dns_poison_switch"
-                )
-                DpiToggleRow(
-                    title = "Messaging Idle Keep-Alive",
-                    subtitle = "Keeps chat & social sockets alive (SO_KEEPALIVE) during long idle pauses",
-                    checked = dpiIdleKeepAliveEnabled,
-                    onCheckedChange = onToggleIdleKeepAlive,
-                    switchTestTag = "dpi_idle_keep_alive_switch"
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            FilledTonalButton(
-                onClick = onFlushCache,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("flush_dpi_cache_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.CleaningServices,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Flush DNS & Reset Autopilot")
-            }
-
-            if (onOpenVpnDpiLogs != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = onOpenVpnDpiLogs,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("dpi_open_logs_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Terminal,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("View DPI Bypass & VPN Logs")
-                }
-            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("View DPI Bypass & VPN Logs")
         }
     }
 }
@@ -439,7 +605,9 @@ private fun DpiMetricPill(
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 9.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -467,6 +635,7 @@ private fun DpiToggleRow(
     onCheckedChange: (Boolean) -> Unit,
     switchTestTag: String
 ) {
+    val primaryAccent = MaterialTheme.colorScheme.primary
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
@@ -482,7 +651,7 @@ private fun DpiToggleRow(
             Icon(
                 imageVector = Icons.Rounded.Shield,
                 contentDescription = null,
-                tint = if (checked) WifiAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (checked) primaryAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
@@ -502,6 +671,10 @@ private fun DpiToggleRow(
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedTrackColor = primaryAccent
+                ),
                 modifier = Modifier.testTag(switchTestTag)
             )
         }

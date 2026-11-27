@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,14 +28,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.GppGood
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
-import androidx.compose.material.icons.rounded.SignalCellularOff
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiLock
 import androidx.compose.material.icons.rounded.WifiOff
@@ -70,8 +67,6 @@ import com.aistudio.netgate.data.model.LiveNetworkTelemetry
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.data.model.formatSpeedBytesPerSec
 import com.aistudio.netgate.ui.theme.BlockedRed
-import com.aistudio.netgate.ui.theme.DataAccent
-import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalExpressiveMotion
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.LocalThemeStyle
@@ -92,11 +87,15 @@ fun FirewallHeaderCard(
     isHotspotProxyActive: Boolean = false,
     isVpnGuardActive: Boolean = false,
     vpnGuardProfileLabel: String = "",
+    blockedWebsitesCount: Int = 0,
+    websiteRulesBadgeText: String = "$blockedWebsitesCount Blocked",
+    dnsSummaryLabel: String = "1.1.1.1",
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onOpenDnsProtection: () -> Unit,
-    onOpenSpeedTest: () -> Unit,
+    onOpenSpeedTest: () -> Unit = {},
     onOpenAdBlocker: () -> Unit = {},
+    onOpenWebsitesTab: () -> Unit = {},
     onOpenNetworkMonitor: () -> Unit = {},
     onOpenHotspot: () -> Unit = {},
     onOpenVpnGuard: () -> Unit = {},
@@ -113,8 +112,8 @@ fun FirewallHeaderCard(
     )
     val glassTint by animateColorAsState(
         targetValue = when {
-            isFirewallActive && isDark -> primaryColor.copy(alpha = 0.16f)
-            isFirewallActive -> primaryColor.copy(alpha = 0.12f)
+            isFirewallActive && isDark -> primaryColor.copy(alpha = 0.14f)
+            isFirewallActive -> primaryColor.copy(alpha = 0.10f)
             isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f)
             else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
         },
@@ -126,9 +125,9 @@ fun FirewallHeaderCard(
         modifier = modifier
             .fillMaxWidth()
             .testTag("firewall_header_card"),
-        shape = RoundedCornerShape((26 + themeStyle.cornerRadiusBoostDp).dp),
+        shape = RoundedCornerShape((24 + themeStyle.cornerRadiusBoostDp).dp),
         tintColor = glassTint,
-        borderAccent = if (isFirewallActive) primaryColor else null,
+        borderAccent = if (isFirewallActive) primaryColor.copy(alpha = 0.45f) else null,
         enableLiquidTouch = true
     ) {
         Column(
@@ -140,8 +139,9 @@ fun FirewallHeaderCard(
                         stiffness = motionSpec.spatialStiffness
                     )
                 )
-                .padding(18.dp)
+                .padding(16.dp)
         ) {
+            // 1. Header: Shield + Firewall Active + Blocked Apps + Master Switch
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -165,14 +165,14 @@ fun FirewallHeaderCard(
 
                     Surface(
                         shape = CircleShape,
-                        color = accentColor.copy(alpha = 0.20f),
-                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.42f)),
+                        color = accentColor.copy(alpha = 0.18f),
+                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.38f)),
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(44.dp)
                             .drawBehind {
                                 if (isFirewallActive) {
                                     val angle = orbitSweepState.value
-                                    val pad = 4.dp.toPx()
+                                    val pad = 3.dp.toPx()
                                     val arcSize = Size(size.width + pad * 2f, size.height + pad * 2f)
                                     val topLeft = Offset(-pad, -pad)
                                     drawArc(
@@ -206,33 +206,33 @@ fun FirewallHeaderCard(
                                     "Firewall paused"
                                 },
                                 tint = if (isFirewallActive) {
-                                    MaterialTheme.colorScheme.primary
+                                    primaryColor
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
-                                modifier = Modifier.size(26.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(14.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     Column {
                         Text(
                             text = if (isFirewallActive) "Firewall Active" else "Firewall Paused",
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(1.dp))
                         Text(
                             text = when {
-                                !isFirewallActive -> "Enable to enforce Wi-Fi & Data rules"
-                                activeBlockedNowCount > 0 ->
-                                    "Blocking $activeBlockedNowCount app${if (activeBlockedNowCount == 1) "" else "s"} right now"
-                                else -> "Monitoring • 0 apps blocked on current network"
+                                !isFirewallActive -> "Enable to enforce rules"
+                                else -> "$activeBlockedNowCount ${if (activeBlockedNowCount == 1) "app" else "apps"} blocked"
                             },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -245,56 +245,38 @@ fun FirewallHeaderCard(
                     modifier = Modifier.testTag("master_firewall_switch"),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                        checkedTrackColor = primaryColor
                     )
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Live Wi-Fi ON/OFF & Mobile Data ON/OFF radio pills
+            // 2. Radio Status Pills (Wi-Fi ON / Data OFF)
+            val isWifiOn = connectionDetails.isWifiRadioEnabled || connectionDetails.isWifiConnected
+            val isDataOn = connectionDetails.isMobileDataEnabled || connectionDetails.isMobileDataConnected
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 RadioStatusChip(
-                    label = "Wi-Fi",
-                    stateText = when {
-                        connectionDetails.isWifiConnected -> "ON • Active"
-                        connectionDetails.isWifiRadioEnabled -> "ON • Idle"
-                        else -> "OFF"
-                    },
-                    isOn = connectionDetails.isWifiRadioEnabled,
-                    isActive = connectionDetails.isWifiConnected,
-                    icon = if (connectionDetails.isWifiRadioEnabled) {
-                        Icons.Rounded.Wifi
-                    } else {
-                        Icons.Rounded.WifiOff
-                    },
-                    accent = WifiAccent,
+                    label = if (isWifiOn) "Wi-Fi ON" else "Wi-Fi OFF",
+                    isOn = isWifiOn,
+                    icon = if (isWifiOn) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
+                    activeAccent = primaryColor,
+                    inactiveAccent = BlockedRed,
                     modifier = Modifier
                         .weight(1f)
                         .testTag("wifi_radio_status_chip")
                 )
 
                 RadioStatusChip(
-                    label = "Data",
-                    stateText = when {
-                        connectionDetails.isMobileDataConnected &&
-                            connectionDetails.activeNetworkType == ActiveNetworkType.MOBILE_DATA -> "ON • Active"
-                        connectionDetails.isMobileDataConnected || connectionDetails.isMobileDataEnabled -> "ON"
-                        else -> "OFF"
-                    },
-                    isOn = connectionDetails.isMobileDataEnabled || connectionDetails.isMobileDataConnected,
-                    isActive = connectionDetails.isMobileDataConnected &&
-                        connectionDetails.activeNetworkType == ActiveNetworkType.MOBILE_DATA,
-                    icon = if (connectionDetails.isMobileDataEnabled || connectionDetails.isMobileDataConnected) {
-                        Icons.Rounded.SignalCellularAlt
-                    } else {
-                        Icons.Rounded.SignalCellularOff
-                    },
-                    accent = DataAccent,
+                    label = if (isDataOn) "Data ON" else "Data OFF",
+                    isOn = isDataOn,
+                    icon = if (isDataOn) Icons.Rounded.SignalCellularAlt else Icons.Rounded.Block,
+                    activeAccent = primaryColor,
+                    inactiveAccent = BlockedRed,
                     modifier = Modifier
                         .weight(1f)
                         .testTag("data_radio_status_chip")
@@ -303,28 +285,28 @@ fun FirewallHeaderCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Blocked App & Ad Counters
+            // 3. Three Stacked Metric Tiles (WI-FI OFF / DATA OFF / ADS BLK)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatMetricPill(
-                    label = "Wi-Fi Off",
+                StatMetricTile(
+                    label = "WI-FI OFF",
                     count = wifiBlockedCount,
-                    accent = if (wifiBlockedCount > 0) BlockedRed else WifiAccent,
+                    accent = if (wifiBlockedCount > 0) BlockedRed else primaryColor,
                     modifier = Modifier.weight(1f)
                 )
-                StatMetricPill(
-                    label = "Data Off",
+                StatMetricTile(
+                    label = "DATA OFF",
                     count = dataBlockedCount,
-                    accent = if (dataBlockedCount > 0) BlockedRed else DataAccent,
+                    accent = if (dataBlockedCount > 0) BlockedRed else primaryColor,
                     modifier = Modifier.weight(1f)
                 )
-                StatMetricPill(
-                    label = if (isAdBlockerEnabled) "Ads Blk" else "Ad Guard",
+                StatMetricTile(
+                    label = if (isAdBlockerEnabled) "ADS BLK" else "AD GUARD",
                     count = blockedAdsCount.toInt(),
-                    accent = if (isAdBlockerEnabled) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    accent = if (isAdBlockerEnabled) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
@@ -335,175 +317,21 @@ fun FirewallHeaderCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            val quickConnectionSummary = buildString {
-                when (connectionDetails.activeNetworkType) {
-                    ActiveNetworkType.WIFI -> {
-                        val parts = mutableListOf<String>()
-                        connectionDetails.wifiBandLabel?.let { parts.add(it) }
-                        connectionDetails.wifiLinkSpeedMbps?.let { parts.add("$it Mbps") }
-                        connectionDetails.wifiRssiDbm?.let { parts.add("$it dBm") }
-                        connectionDetails.ipv4Address?.let { parts.add(it) }
-                        if (parts.isEmpty()) append("Wi-Fi connected • Tap for details")
-                        else append(parts.joinToString(" • "))
-                    }
-                    ActiveNetworkType.MOBILE_DATA -> {
-                        val parts = mutableListOf("Mobile Data")
-                        connectionDetails.ipv4Address?.let { parts.add(it) }
-                        if (connectionDetails.isMetered) parts.add("Metered")
-                        append(parts.joinToString(" • "))
-                    }
-                    ActiveNetworkType.OTHER -> append("Active network • Tap for IP & DNS info")
-                    ActiveNetworkType.NONE -> append("Offline • Tap for connection status")
-                }
+            // 4. Live Network Speed & Today Usage Strip
+            val innerTileColor = if (isDark) {
+                Color.Black.copy(alpha = 0.22f)
+            } else {
+                Color.White.copy(alpha = 0.62f)
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.65f),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
-                    ),
-                    modifier = Modifier
-                        .weight(1.2f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onOpenConnectionInfo)
-                        .testTag("connection_info_button")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = quickConnectionSummary,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                            contentDescription = "Open Wi-Fi and connection info",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                val isCfDnsActive = connectionDetails.isCloudflarePrivateDns
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isCfDnsActive) {
-                        EmeraldPrimary.copy(alpha = if (isDark) 0.22f else 0.18f)
-                    } else if (isDark) {
-                        Color.White.copy(alpha = 0.08f)
-                    } else {
-                        Color.White.copy(alpha = 0.65f)
-                    },
-                    border = BorderStroke(
-                        1.dp,
-                        if (isCfDnsActive) {
-                            EmeraldPrimary.copy(alpha = 0.55f)
-                        } else if (isDark) {
-                            Color.White.copy(alpha = 0.14f)
-                        } else {
-                            Color.White.copy(alpha = 0.85f)
-                        }
-                    ),
-                    modifier = Modifier
-                        .weight(0.85f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onOpenDnsProtection)
-                        .testTag("dns_protection_button")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Dns,
-                            contentDescription = null,
-                            tint = if (isCfDnsActive) EmeraldPrimary else MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (isCfDnsActive) "1.1.1.1 On" else "1.1.1.1 DNS",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDark) 0.52f else 0.78f),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
-                    ),
-                    modifier = Modifier
-                        .weight(0.85f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onOpenSpeedTest)
-                        .testTag("speed_test_button")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Speed,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Speed",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            maxLines = 1
-                        )
-                    }
-                }
+            val innerTileBorder = if (isDark) {
+                Color.White.copy(alpha = 0.10f)
+            } else {
+                Color.White.copy(alpha = 0.85f)
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Live System-Wide Network Monitor Quick Strip
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = EmeraldPrimary.copy(alpha = if (isDark) 0.14f else 0.10f),
-                border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.36f)),
+                color = innerTileColor,
+                border = BorderStroke(1.dp, innerTileBorder),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
@@ -513,39 +341,26 @@ fun FirewallHeaderCard(
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
                 ) {
                     val speedText =
-                        "↓ ${formatSpeedBytesPerSec(liveTelemetry.downloadBytesPerSec)}  •  " +
-                            "↑ ${formatSpeedBytesPerSec(liveTelemetry.uploadBytesPerSec)}"
-                    val usageText = "Today ${formatDataBytes(liveTelemetry.todayTotalBytes)}"
-                    // Portrait phones are too narrow for speeds + usage on one line: stack the
-                    // usage figure under the speed readout instead of squeezing both.
-                    if (maxWidth < 340.dp) {
+                        "↓ ${formatSpeedBytesPerSec(liveTelemetry.downloadBytesPerSec)}  ↑ ${formatSpeedBytesPerSec(liveTelemetry.uploadBytesPerSec)}"
+                    val usageText = "${formatDataBytes(liveTelemetry.todayTotalBytes)} Today"
+                    if (maxWidth < 310.dp) {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Rounded.MonitorHeart,
-                                    contentDescription = "Open live network monitor",
-                                    tint = EmeraldPrimary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = speedText,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            Text(
+                                text = speedText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = usageText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = EmeraldPrimary,
-                                maxLines = 1,
-                                modifier = Modifier.padding(start = 22.dp)
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = primaryColor,
+                                maxLines = 1
                             )
                         }
                     } else {
@@ -554,35 +369,73 @@ fun FirewallHeaderCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                            Text(
+                                text = speedText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.MonitorHeart,
-                                    contentDescription = "Open live network monitor",
-                                    tint = EmeraldPrimary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = speedText,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = usageText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = EmeraldPrimary,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = primaryColor,
                                 maxLines = 1
                             )
                         }
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 5. Three Equal Quick Action Pills: Connection Band | DNS | Website Rules (Blocked)
+            val conciseConnectionLabel = when (connectionDetails.activeNetworkType) {
+                ActiveNetworkType.WIFI -> connectionDetails.wifiBandLabel ?: "Wi-Fi"
+                ActiveNetworkType.MOBILE_DATA -> "Mobile"
+                ActiveNetworkType.OTHER -> "Active"
+                ActiveNetworkType.NONE -> "Offline"
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                QuickInfoPill(
+                    text = conciseConnectionLabel,
+                    showChevron = true,
+                    highlighted = false,
+                    accent = primaryColor,
+                    onClick = onOpenConnectionInfo,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("connection_info_button")
+                )
+
+                QuickInfoPill(
+                    text = dnsSummaryLabel,
+                    showChevron = true,
+                    highlighted = connectionDetails.isCloudflarePrivateDns,
+                    accent = primaryColor,
+                    onClick = onOpenDnsProtection,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("dns_protection_button")
+                )
+
+                QuickInfoPill(
+                    text = websiteRulesBadgeText,
+                    showChevron = false,
+                    highlighted = true,
+                    accent = primaryColor,
+                    onClick = onOpenWebsitesTab,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("header_websites_blocked_pill")
+                )
             }
 
             if (isGlobalWifiBlocked || isHotspotProxyActive) {
@@ -645,64 +498,52 @@ fun FirewallHeaderCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            val vpnAccent = if (isVpnGuardActive) EmeraldPrimary else MaterialTheme.colorScheme.secondary
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = vpnAccent.copy(alpha = if (isDark) 0.14f else 0.10f),
-                border = BorderStroke(1.dp, vpnAccent.copy(alpha = 0.36f)),
+            // 6. Compact Inline VPN Guard Status Link
+            val vpnAccent = if (isVpnGuardActive) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .clickable(onClick = onOpenVpnGuard)
-                    .testTag("header_vpn_guard_strip")
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                    .testTag("header_vpn_guard_strip"),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
-                            contentDescription = "Open VPN Guard",
-                            tint = vpnAccent,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isVpnGuardActive) {
-                                "VPN Guard Connected • $vpnGuardProfileLabel"
-                            } else {
-                                "VPN Guard • WireGuard, WARP & VPNGate Split-Tunnel"
-                            },
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (isVpnGuardActive) EmeraldPrimary else MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = "Open VPN Guard",
-                        tint = vpnAccent,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                Icon(
+                    imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
+                    contentDescription = "Open VPN Guard",
+                    tint = vpnAccent,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isVpnGuardActive) {
+                        "VPN Guard • ${vpnGuardProfileLabel.ifBlank { "WireGuard & WARP" }} Active"
+                    } else {
+                        "VPN Guard • WireGuard & WARP"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isVpnGuardActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = vpnAccent,
+                    modifier = Modifier.size(14.dp)
+                )
             }
 
             if (!isFirewallActive && (wifiBlockedCount > 0 || dataBlockedCount > 0)) {
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "${wifiBlockedCount + dataBlockedCount} rule(s) queued across $totalAppsCount apps — turn on Firewall to apply.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = primaryColor
                 )
             }
         }
@@ -712,31 +553,29 @@ fun FirewallHeaderCard(
 @Composable
 private fun RadioStatusChip(
     label: String,
-    stateText: String,
     isOn: Boolean,
-    isActive: Boolean,
     icon: ImageVector,
-    accent: Color,
+    activeAccent: Color,
+    inactiveAccent: Color,
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
-    val highlight = if (isActive) EmeraldPrimary else accent
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
         color = if (isOn) {
-            highlight.copy(alpha = if (isDark) 0.16f else 0.14f)
+            activeAccent.copy(alpha = if (isDark) 0.16f else 0.14f)
         } else if (isDark) {
-            Color.White.copy(alpha = 0.06f)
+            Color.White.copy(alpha = 0.05f)
         } else {
-            Color.White.copy(alpha = 0.55f)
+            Color.White.copy(alpha = 0.52f)
         },
         border = BorderStroke(
             1.dp,
             if (isOn) {
-                highlight.copy(alpha = 0.45f)
+                activeAccent.copy(alpha = 0.55f)
             } else if (isDark) {
-                Color.White.copy(alpha = 0.12f)
+                Color.White.copy(alpha = 0.10f)
             } else {
                 Color.White.copy(alpha = 0.80f)
             }
@@ -749,14 +588,16 @@ private fun RadioStatusChip(
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = "$label $stateText",
-                tint = if (isOn) highlight else MaterialTheme.colorScheme.onSurfaceVariant,
+                contentDescription = label,
+                tint = if (isOn) activeAccent else inactiveAccent,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "$label: $stateText",
-                style = MaterialTheme.typography.labelMedium,
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (isOn) FontWeight.SemiBold else FontWeight.Medium
+                ),
                 color = if (isOn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -766,7 +607,7 @@ private fun RadioStatusChip(
 }
 
 @Composable
-private fun StatMetricPill(
+private fun StatMetricTile(
     label: String,
     count: Int,
     accent: Color,
@@ -776,29 +617,92 @@ private fun StatMetricPill(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
-        color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.65f),
+        color = if (isDark) Color.Black.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.62f),
         border = BorderStroke(
             1.dp,
-            if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f)
+            if (isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.85f)
         )
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = accent,
+                maxLines = 1
+            )
+            Spacer(modifier = Modifier.height(1.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickInfoPill(
+    text: String,
+    showChevron: Boolean,
+    highlighted: Boolean,
+    accent: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDark = LocalIsDarkTheme.current
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = when {
+            highlighted -> accent.copy(alpha = if (isDark) 0.14f else 0.12f)
+            isDark -> Color.Black.copy(alpha = 0.20f)
+            else -> Color.White.copy(alpha = 0.62f)
+        },
+        border = BorderStroke(
+            1.dp,
+            when {
+                highlighted -> accent.copy(alpha = 0.55f)
+                isDark -> Color.White.copy(alpha = 0.12f)
+                else -> Color.White.copy(alpha = 0.85f)
+            }
+        ),
+        modifier = modifier
+            .heightIn(min = 38.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+    ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             Text(
-                text = count.toString(),
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = accent
+                text = text,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (highlighted) FontWeight.SemiBold else FontWeight.Medium
+                ),
+                color = if (highlighted) accent else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.width(5.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
+            if (showChevron) {
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
     }
 }

@@ -1,17 +1,12 @@
 package com.aistudio.netgate.ui.components
 
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,28 +21,18 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.CellTower
 import androidx.compose.material.icons.rounded.MonitorHeart
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,7 +44,6 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,17 +54,11 @@ import com.aistudio.netgate.data.model.StatusBarSpeedStyle
 import com.aistudio.netgate.data.model.ThroughputSample
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.data.model.formatSpeedBytesPerSec
-import com.aistudio.netgate.service.NetworkMonitorService
 import com.aistudio.netgate.ui.theme.DataAccent
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.WarningAmber
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import com.aistudio.netgate.ui.theme.WifiAccent
-
-import android.os.Build
-import com.aistudio.netgate.service.BackgroundPowerHelper
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -97,20 +75,6 @@ fun SystemNetworkMonitorCard(
     modifier: Modifier = Modifier
 ) {
     val isDark = LocalIsDarkTheme.current
-    val context = LocalContext.current
-    var notificationsBlocked by remember { mutableStateOf(false) }
-    var channelTooLow by remember { mutableStateOf(false) }
-    var isIgnoringBattery by remember { mutableStateOf(true) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
-        channelTooLow = NetworkMonitorService.isChannelImportanceTooLow(context)
-        isIgnoringBattery = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
-    }
-    LaunchedEffect(isStatusBarSpeedEnabled) {
-        notificationsBlocked = NetworkMonitorService.areNotificationsBlocked(context)
-        channelTooLow = NetworkMonitorService.isChannelImportanceTooLow(context)
-        isIgnoringBattery = BackgroundPowerHelper.isIgnoringBatteryOptimizations(context)
-    }
     val isOnline = telemetry.activeNetworkType != ActiveNetworkType.NONE
     val networkLabel = when (telemetry.activeNetworkType) {
         ActiveNetworkType.WIFI -> "Wi-Fi"
@@ -536,32 +500,6 @@ private fun LiveThroughputSparkline(
                 )
             }
         }
-    }
-}
-
-private fun openNotificationSettings(context: Context, openChannelSettings: Boolean) {
-    val intent = if (openChannelSettings && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
-            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-            putExtra(Settings.EXTRA_CHANNEL_ID, NetworkMonitorService.CHANNEL_ID)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-    } else {
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-    }
-    val opened = runCatching {
-        context.startActivity(intent)
-        true
-    }.getOrDefault(false)
-    if (!opened) {
-        val fallback = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { context.startActivity(fallback) }
     }
 }
 

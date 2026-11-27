@@ -85,7 +85,7 @@ fun AppearanceSettingsAccordionBody(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .padding(horizontal = 10.dp, vertical = 10.dp)
             .testTag("appearance_settings_view"),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {

@@ -35,6 +35,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Block
@@ -81,6 +86,8 @@ import com.aistudio.netgate.data.model.UsageFilterCategory
 import com.aistudio.netgate.data.model.UsageTimeRange
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.ui.components.BlockedVsAllowedBarChart
+import com.aistudio.netgate.ui.components.FrostedSegmentedTabBar
+import com.aistudio.netgate.ui.components.FrostedSegmentedTabItem
 import com.aistudio.netgate.ui.components.FrostedSurface
 import com.aistudio.netgate.ui.components.HistoricalTrafficChartCard
 import com.aistudio.netgate.ui.components.SecurityAuditContent
@@ -491,121 +498,44 @@ private fun DataUsageSubTabBar(
     onSelectSubTab: (DataUsageSubTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = LocalIsDarkTheme.current
-    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        val useWeight = maxWidth >= 640.dp
-        val rowModifier = if (useWeight) {
-            Modifier.fillMaxWidth()
+    val tabs = DataUsageSubTab.entries
+    val tabItems = tabs.map { tab ->
+        val (activeIcon, inactiveIcon) = when (tab) {
+            DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart to Icons.Outlined.BarChart
+            DataUsageSubTab.WIFI -> Icons.Rounded.Wifi to Icons.Outlined.Wifi
+            DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public to Icons.Outlined.Public
+            DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security to Icons.Outlined.Security
+            DataUsageSubTab.SPEED_TEST -> Icons.Rounded.Speed to Icons.Outlined.Speed
+        }
+        val badgeText = when (tab) {
+            DataUsageSubTab.OVERVIEW -> null
+            DataUsageSubTab.WIFI -> if (wifiCount > 0) "$wifiCount" else null
+            DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
+            DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
+            DataUsageSubTab.SPEED_TEST -> null
+        }
+        val badgeColor = if (tab == DataUsageSubTab.SECURITY_AUDIT && flaggedCount > 0) {
+            BlockedRed
         } else {
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
+            MaterialTheme.colorScheme.primary
         }
-        Row(
-            modifier = rowModifier,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            DataUsageSubTab.entries.forEach { tab ->
-                val selected = selectedSubTab == tab
-                val icon = when (tab) {
-                    DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart
-                    DataUsageSubTab.WIFI -> Icons.Rounded.Wifi
-                    DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public
-                    DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security
-                    DataUsageSubTab.SPEED_TEST -> Icons.Rounded.Speed
-                }
-                val badgeText = when (tab) {
-                    DataUsageSubTab.OVERVIEW -> null
-                    DataUsageSubTab.WIFI -> if (wifiCount > 0) "$wifiCount" else null
-                    DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
-                    DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
-                    DataUsageSubTab.SPEED_TEST -> null
-                }
-                val badgeColor = if (tab == DataUsageSubTab.SECURITY_AUDIT && flaggedCount > 0) {
-                    BlockedRed
-                } else {
-                    MaterialTheme.colorScheme.primary
-                }
-
-                val pillModifier = if (useWeight) {
-                    Modifier.weight(1f)
-                } else {
-                    Modifier.defaultMinSize(minWidth = 104.dp)
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
-                    } else if (isDark) {
-                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.65f)
-                    } else {
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
-                    },
-                    border = BorderStroke(
-                        1.dp,
-                        if (selected) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.68f)
-                        } else {
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                        }
-                    ),
-                    modifier = pillModifier
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onSelectSubTab(tab) }
-                        .testTag("data_usage_subtab_${tab.name.lowercase()}")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .then(if (useWeight) Modifier.fillMaxSize() else Modifier.fillMaxHeight())
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = tab.label,
-                        tint = if (selected) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = tab.label,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                        ),
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (badgeText != null) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Surface(
-                            shape = CircleShape,
-                            color = badgeColor.copy(alpha = 0.20f)
-                        ) {
-                            Text(
-                                text = badgeText,
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = badgeColor,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        FrostedSegmentedTabItem(
+            label = tab.label,
+            testTag = "data_usage_subtab_${tab.name.lowercase()}",
+            activeIcon = activeIcon,
+            inactiveIcon = inactiveIcon,
+            badgeText = badgeText,
+            badgeColor = badgeColor
+        )
     }
-}
+
+    FrostedSegmentedTabBar(
+        items = tabItems,
+        selectedIndex = tabs.indexOf(selectedSubTab).coerceAtLeast(0),
+        onSelect = { index -> onSelectSubTab(tabs[index]) },
+        minScrollableTabWidth = 108.dp,
+        modifier = modifier
+    )
 }
 
 @Composable

@@ -50,6 +50,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.model.AdvancedPreferencesState
 import com.aistudio.netgate.data.model.AppUpdateUiState
@@ -186,7 +188,7 @@ fun AdvancedProtectionSheet(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.padding(4.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = "Trusted Wi-Fi Auto-VPN",
@@ -242,7 +244,7 @@ fun AdvancedProtectionSheet(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.padding(4.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = "Encrypted Backup & Restore",
@@ -256,11 +258,12 @@ fun AdvancedProtectionSheet(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Backup password (min 8 characters)") },
+                    label = { Text("Backup password") },
+                    placeholder = { Text("Min 8 characters") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -268,9 +271,10 @@ fun AdvancedProtectionSheet(
                         .fillMaxWidth()
                         .testTag("advanced_backup_password")
                 )
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
@@ -280,10 +284,10 @@ fun AdvancedProtectionSheet(
                         },
                         enabled = password.length >= 8 && !backupState.isWorking,
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("advanced_backup_export_button")
                     ) {
                         Icon(
@@ -296,17 +300,18 @@ fun AdvancedProtectionSheet(
                             text = "Export",
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
-                            softWrap = false
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     OutlinedButton(
                         onClick = { openBackupLauncher.launch(arrayOf("*/*")) },
                         enabled = !backupState.isWorking,
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("advanced_backup_choose_file_button")
                     ) {
                         Icon(
@@ -319,17 +324,19 @@ fun AdvancedProtectionSheet(
                             text = "Choose File",
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
-                            softWrap = false
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
                 if (pendingImportPayload != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = "Selected: $pendingImportName",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(6.dp))
                     Button(
                         onClick = {
                             pendingImportPayload?.let { payload ->
@@ -338,14 +345,17 @@ fun AdvancedProtectionSheet(
                         },
                         enabled = password.isNotEmpty() && !backupState.isWorking,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                     ) {
-                        Icon(Icons.Rounded.Lock, contentDescription = null)
-                        Spacer(modifier = Modifier.padding(3.dp))
-                        Text("Decrypt & Restore")
+                        Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Decrypt & Restore", maxLines = 1, softWrap = false)
                     }
                 }
                 backupState.message?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = it,
                         style = MaterialTheme.typography.labelSmall,
@@ -353,6 +363,7 @@ fun AdvancedProtectionSheet(
                     )
                 }
                 backupState.error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = it,
                         style = MaterialTheme.typography.labelSmall,
@@ -360,6 +371,7 @@ fun AdvancedProtectionSheet(
                     )
                 }
                 if (backupState.isWorking) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }

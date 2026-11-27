@@ -41,9 +41,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -52,6 +56,7 @@ import androidx.compose.material.icons.rounded.EnhancedEncryption
 import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
@@ -296,43 +301,35 @@ fun VpnGuardContent(
         }
 
         item(key = "vpn_guard_subtabs") {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(VpnGuardSubTab.entries) { tab ->
-                    val selected = state.selectedSubTab == tab
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectSubTab(tab) },
-                        label = {
-                            Text(
-                                text = when (tab) {
-                                    VpnGuardSubTab.PROFILES -> "${tab.label} (${state.profiles.size})"
-                                    VpnGuardSubTab.VPNGATE -> if (state.vpnGateServers.isNotEmpty()) {
-                                        "${tab.label} (${state.vpnGateServers.size})"
-                                    } else {
-                                        tab.label
-                                    }
-                                    VpnGuardSubTab.PROVIDERS -> tab.label
-                                },
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = if (isDark) {
-                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.65f)
-                            } else {
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
-                            },
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.90f),
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        ),
-                        modifier = Modifier.testTag("vpn_guard_tab_${tab.name.lowercase()}")
-                    )
+            val subTabs = VpnGuardSubTab.entries
+            val subTabItems = subTabs.map { tab ->
+                val label = when (tab) {
+                    VpnGuardSubTab.PROFILES -> "${tab.label} (${state.profiles.size})"
+                    VpnGuardSubTab.VPNGATE -> if (state.vpnGateServers.isNotEmpty()) {
+                        "${tab.label} (${state.vpnGateServers.size})"
+                    } else {
+                        tab.label
+                    }
+                    VpnGuardSubTab.PROVIDERS -> tab.label
                 }
+                val (activeIcon, inactiveIcon) = when (tab) {
+                    VpnGuardSubTab.PROFILES -> Icons.Rounded.Shield to Icons.Outlined.Shield
+                    VpnGuardSubTab.VPNGATE -> Icons.Rounded.Public to Icons.Outlined.Public
+                    VpnGuardSubTab.PROVIDERS -> Icons.Rounded.Cloud to Icons.Outlined.Cloud
+                }
+                FrostedSegmentedTabItem(
+                    label = label,
+                    testTag = "vpn_guard_tab_${tab.name.lowercase()}",
+                    activeIcon = activeIcon,
+                    inactiveIcon = inactiveIcon
+                )
             }
+            FrostedSegmentedTabBar(
+                items = subTabItems,
+                selectedIndex = subTabs.indexOf(state.selectedSubTab).coerceAtLeast(0),
+                onSelect = { index -> onSelectSubTab(subTabs[index]) },
+                minScrollableTabWidth = 108.dp
+            )
         }
 
         when (state.selectedSubTab) {

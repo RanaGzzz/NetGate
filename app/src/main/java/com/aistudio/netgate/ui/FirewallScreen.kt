@@ -20,6 +20,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,8 +37,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -48,16 +51,24 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Search
 import android.net.VpnService
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WifiTethering
@@ -73,6 +84,7 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -80,10 +92,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -91,6 +105,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,31 +116,42 @@ import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.AppDestination
 import com.aistudio.netgate.data.model.AppFilterMode
+import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.NetGateThemeStyle
+import com.aistudio.netgate.data.model.UpstreamDnsServer
 import com.aistudio.netgate.data.model.VpnDpiLogCategory
+import com.aistudio.netgate.data.model.WebsiteFilterMode
+import com.aistudio.netgate.data.model.WebsiteTabSection
+import com.aistudio.netgate.ui.components.AdvancedProtectionSheet
 import com.aistudio.netgate.ui.components.AppChangelogSheet
 import com.aistudio.netgate.ui.components.AppDetailBottomSheet
 import com.aistudio.netgate.ui.components.AppRuleRow
 import com.aistudio.netgate.ui.components.BackgroundAnimationSheet
+import com.aistudio.netgate.ui.components.BackupAndRestoreRulesDialog
 import com.aistudio.netgate.ui.components.BatchSelectionBar
 import com.aistudio.netgate.ui.components.ConnectionInfoSheet
 import com.aistudio.netgate.ui.components.DnsProtectionContent
+import com.aistudio.netgate.ui.components.ExportRulesDialog
 import com.aistudio.netgate.ui.components.FirewallHeaderCard
 import com.aistudio.netgate.ui.components.FirewallSettingsSheet
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
 import com.aistudio.netgate.ui.components.FrostedBackdrop
+import com.aistudio.netgate.ui.components.FrostedSegmentedTabBar
+import com.aistudio.netgate.ui.components.FrostedSegmentedTabItem
 import com.aistudio.netgate.ui.components.FrostedSurface
 import com.aistudio.netgate.ui.components.GlassToast
 import com.aistudio.netgate.ui.components.HotspotAndWifiContent
+import com.aistudio.netgate.ui.components.ImportRulesDialog
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
-import com.aistudio.netgate.ui.components.AdvancedProtectionSheet
 import com.aistudio.netgate.ui.components.VpnGuardContent
+import com.aistudio.netgate.ui.components.websiteManagementItems
 import com.aistudio.netgate.service.AppLogCollector
 import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineModalDepth
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.LocalOverlayLiquidState
 import com.aistudio.netgate.ui.theme.LocalThemeStyle
 import io.github.fletchmckee.liquid.liquefiable
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,8 +169,57 @@ fun FirewallScreen(
     val context = LocalContext.current
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
     var showAdvancedProtection by rememberSaveable { mutableStateOf(false) }
+    var isSniDpiSelected by rememberSaveable { mutableStateOf(false) }
+    var selectedFirewallTab by rememberSaveable { mutableStateOf(FirewallContentTab.ALL_APPS) }
+    var areAppFiltersExpanded by rememberSaveable { mutableStateOf(false) }
+    var selectedWebsiteSection by rememberSaveable { mutableStateOf(WebsiteTabSection.BLOCKLIST) }
+    var websiteDomainInput by rememberSaveable { mutableStateOf("") }
+    var bypassAppSearchQuery by rememberSaveable { mutableStateOf("") }
+    var isImportRulesDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var isExportRulesDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var isBackupRestoreDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var exportRulesPayload by rememberSaveable { mutableStateOf("") }
+    var exportBackupPayload by rememberSaveable { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+
+    val selectAppDestination: (AppDestination) -> Unit = { dest ->
+        isSniDpiSelected = false
+        viewModel.selectDestination(dest)
+    }
+    val selectSniDpi: () -> Unit = {
+        if (uiState.isSelectionMode) {
+            viewModel.exitSelectionMode()
+        }
+        viewModel.selectDestination(AppDestination.FIREWALL)
+        isSniDpiSelected = true
+    }
+
+    LaunchedEffect(uiState.currentDestination) {
+        if (uiState.currentDestination != AppDestination.FIREWALL) {
+            isSniDpiSelected = false
+        }
+    }
+
     val currentWifiSsid = remember(uiState.connectionDetails, uiState.currentDestination) {
         viewModel.currentWifiSsid()
+    }
+    val filteredBypassApps = remember(
+        uiState.allManagedApps,
+        uiState.websiteBlockerState.bypassPackages,
+        bypassAppSearchQuery
+    ) {
+        val query = bypassAppSearchQuery.trim().lowercase()
+        uiState.allManagedApps
+            .filter { app ->
+                query.isEmpty() ||
+                    app.appName.lowercase().contains(query) ||
+                    app.packageName.lowercase().contains(query)
+            }
+            .sortedWith(
+                compareByDescending<ManagedApp> {
+                    it.packageName in uiState.websiteBlockerState.bypassPackages
+                }.thenBy { it.appName.lowercase() }
+            )
     }
 
     LaunchedEffect(viewModel) {
@@ -157,10 +232,25 @@ fun FirewallScreen(
         viewModel.exitSelectionMode()
     }
 
+    BackHandler(enabled = !uiState.isSelectionMode && isSniDpiSelected) {
+        isSniDpiSelected = false
+    }
+
     BackHandler(
-        enabled = !uiState.isSelectionMode && uiState.currentDestination != AppDestination.FIREWALL
+        enabled = !uiState.isSelectionMode &&
+            !isSniDpiSelected &&
+            uiState.currentDestination == AppDestination.FIREWALL &&
+            selectedFirewallTab == FirewallContentTab.WEBSITES
     ) {
-        viewModel.selectDestination(AppDestination.FIREWALL)
+        selectedFirewallTab = FirewallContentTab.ALL_APPS
+    }
+
+    BackHandler(
+        enabled = !uiState.isSelectionMode &&
+            !isSniDpiSelected &&
+            uiState.currentDestination != AppDestination.FIREWALL
+    ) {
+        selectAppDestination(AppDestination.FIREWALL)
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -223,7 +313,7 @@ fun FirewallScreen(
                                             AppDestination.DNS -> stringResource(R.string.dns_title)
                                             AppDestination.HOTSPOT -> stringResource(R.string.hotspot_title)
                                             AppDestination.VPN_GUARD -> stringResource(R.string.vpn_guard_title)
-                                            AppDestination.FIREWALL -> stringResource(R.string.app_name)
+                                            AppDestination.FIREWALL -> stringResource(R.string.firewall_top_title)
                                         },
                                         style = MaterialTheme.typography.headlineSmall,
                                         maxLines = 1,
@@ -236,7 +326,7 @@ fun FirewallScreen(
                                             AppDestination.DNS -> stringResource(R.string.dns_subtitle)
                                             AppDestination.HOTSPOT -> stringResource(R.string.hotspot_subtitle)
                                             AppDestination.VPN_GUARD -> stringResource(R.string.vpn_guard_subtitle)
-                                            AppDestination.FIREWALL -> "Wi-Fi & Data Controller"
+                                            AppDestination.FIREWALL -> stringResource(R.string.firewall_top_subtitle)
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -283,8 +373,8 @@ fun FirewallScreen(
                         ) {
                             Spacer(modifier = Modifier.height(12.dp))
                             NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.FIREWALL,
-                                onClick = { viewModel.selectDestination(AppDestination.FIREWALL) },
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.FIREWALL,
+                                onClick = { selectAppDestination(AppDestination.FIREWALL) },
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Rounded.Shield,
@@ -295,8 +385,8 @@ fun FirewallScreen(
                                 modifier = Modifier.testTag("nav_rail_firewall")
                             )
                             NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.WEBSITES,
-                                onClick = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.WEBSITES,
+                                onClick = { selectAppDestination(AppDestination.WEBSITES) },
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Rounded.Public,
@@ -307,20 +397,32 @@ fun FirewallScreen(
                                 modifier = Modifier.testTag("nav_rail_websites")
                             )
                             NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.DATA_USAGE,
-                                onClick = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                selected = isSniDpiSelected,
+                                onClick = selectSniDpi,
                                 icon = {
                                     Icon(
-                                        imageVector = Icons.Rounded.BarChart,
-                                        contentDescription = stringResource(R.string.nav_data_usage)
+                                        imageVector = Icons.Rounded.Settings,
+                                        contentDescription = "SNI & DPI"
                                     )
                                 },
-                                label = { Text(stringResource(R.string.nav_data_usage)) },
-                                modifier = Modifier.testTag("nav_rail_data_usage")
+                                label = { Text("SNI & DPI") },
+                                modifier = Modifier.testTag("nav_rail_sni_dpi")
                             )
                             NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.DNS,
-                                onClick = { viewModel.selectDestination(AppDestination.DNS) },
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.VPN_GUARD,
+                                onClick = { selectAppDestination(AppDestination.VPN_GUARD) },
+                                icon = {
+                                    Icon(
+                                        imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
+                                        contentDescription = stringResource(R.string.nav_vpn_guard)
+                                    )
+                                },
+                                label = { Text(stringResource(R.string.nav_vpn_guard)) },
+                                modifier = Modifier.testTag("nav_rail_vpn_guard")
+                            )
+                            NavigationRailItem(
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.DNS,
+                                onClick = { selectAppDestination(AppDestination.DNS) },
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Rounded.Dns,
@@ -331,8 +433,8 @@ fun FirewallScreen(
                                 modifier = Modifier.testTag("nav_rail_dns")
                             )
                             NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.HOTSPOT,
-                                onClick = { viewModel.selectDestination(AppDestination.HOTSPOT) },
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.HOTSPOT,
+                                onClick = { selectAppDestination(AppDestination.HOTSPOT) },
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Rounded.WifiTethering,
@@ -343,16 +445,16 @@ fun FirewallScreen(
                                 modifier = Modifier.testTag("nav_rail_hotspot")
                             )
                             NavigationRailItem(
-                                selected = uiState.currentDestination == AppDestination.VPN_GUARD,
-                                onClick = { viewModel.selectDestination(AppDestination.VPN_GUARD) },
+                                selected = !isSniDpiSelected && uiState.currentDestination == AppDestination.DATA_USAGE,
+                                onClick = { selectAppDestination(AppDestination.DATA_USAGE) },
                                 icon = {
                                     Icon(
-                                        imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
-                                        contentDescription = stringResource(R.string.nav_vpn_guard)
+                                        imageVector = Icons.Rounded.BarChart,
+                                        contentDescription = stringResource(R.string.nav_data_usage)
                                     )
                                 },
-                                label = { Text(stringResource(R.string.nav_vpn_guard)) },
-                                modifier = Modifier.testTag("nav_rail_vpn_guard")
+                                label = { Text(stringResource(R.string.nav_data_usage)) },
+                                modifier = Modifier.testTag("nav_rail_data_usage")
                             )
                         }
                     }
@@ -360,11 +462,11 @@ fun FirewallScreen(
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                         val activeStyle = LocalThemeStyle.current
                         val overlayLiquidState = LocalOverlayLiquidState.current
+                        val activeScreenKey = Pair(uiState.currentDestination, isSniDpiSelected)
                         AnimatedContent(
-                            targetState = uiState.currentDestination,
+                            targetState = activeScreenKey,
                             transitionSpec = {
-                                val forward = AppDestination.entries.indexOf(targetState) >=
-                                    AppDestination.entries.indexOf(initialState)
+                                val forward = navOrderIndex(targetState) >= navOrderIndex(initialState)
                                 when (activeStyle) {
                                     NetGateThemeStyle.MATERIAL_YOU_LITE -> {
                                         (fadeIn(tween(150)) togetherWith fadeOut(tween(110)))
@@ -433,8 +535,34 @@ fun FirewallScreen(
                                         Modifier
                                     }
                                 )
-                        ) { destination ->
-                            when (destination) {
+                        ) { (destination, sniDpiActive) ->
+                            if (sniDpiActive) {
+                                SniDpiContent(
+                                    state = uiState.websiteBlockerState,
+                                    isFirewallActive = isFirewallActive,
+                                    onToggleHttpsProxy = viewModel::setHttpsProxyEnabled,
+                                    onSelectProxyPort = viewModel::setHttpsProxyPort,
+                                    onToggleProxyStripTracking = viewModel::setProxyStripTrackingParams,
+                                    onSelectSniPreset = viewModel::selectSniProxyPreset,
+                                    onSaveCustomSniProxy = viewModel::saveCustomSniProxy,
+                                    onSelectDpiMode = viewModel::setDpiBypassMode,
+                                    onSelectDpiChunkSize = viewModel::setDpiFragmentChunkSize,
+                                    onToggleDpiIdleKeepAlive = viewModel::setDpiIdleKeepAliveEnabled,
+                                    onToggleBlockQuic = viewModel::setBlockQuicForDpiBypass,
+                                    onToggleAntiDnsPoison = viewModel::setAntiDnsPoisonEnabled,
+                                    onSelectDnsTransportMode = viewModel::setDnsTransportMode,
+                                    onFlushDpiCache = viewModel::flushDnsAndAutopilotCache,
+                                    onCopiedProxyEndpoint = viewModel::notifyCopiedDnsHostname,
+                                    onClearDnsLogs = viewModel::clearDnsLogs,
+                                    onRequestEnableFirewall = onRequestEnableFirewall,
+                                    onOpenDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.DPI_BYPASS) },
+                                    onAllowDomainTemporarily = viewModel::allowDomainTemporarily,
+                                    onAllowDomainPermanently = viewModel::allowDomainPermanently,
+                                    onBlockDomainPermanently = viewModel::blockDomainPermanently,
+                                    onReportFalsePositive = viewModel::reportFalsePositive,
+                                    onNotifyCopied = viewModel::notifyFilterLogAction
+                                )
+                            } else when (destination) {
                                 AppDestination.DATA_USAGE -> {
                                     val activeNetLabel = when (uiState.effectiveNetworkType) {
                                         ActiveNetworkType.WIFI -> "Wi-Fi"
@@ -662,6 +790,37 @@ fun FirewallScreen(
                                 }
 
                                 AppDestination.FIREWALL -> {
+                                    val websiteState = uiState.websiteBlockerState
+                                    val activeBlocklistCount = websiteState.blocklistRules.count { it.isEnabled }
+                                    val activeWhitelistCount = websiteState.whitelistRules.count { it.isEnabled }
+                                    val websiteRulesCount = when {
+                                        websiteState.filterMode == WebsiteFilterMode.WHITELIST_ONLY -> activeWhitelistCount
+                                        activeBlocklistCount > 0 -> activeBlocklistCount
+                                        activeWhitelistCount > 0 -> activeWhitelistCount
+                                        else -> 0
+                                    }
+                                    val websiteRulesBadge = when {
+                                        websiteState.filterMode == WebsiteFilterMode.WHITELIST_ONLY ->
+                                            "$activeWhitelistCount Allowed"
+                                        activeBlocklistCount == 0 && activeWhitelistCount > 0 ->
+                                            "$activeWhitelistCount Allowed"
+                                        else ->
+                                            "$activeBlocklistCount Blocked"
+                                    }
+                                    val dnsSummary = if (
+                                        uiState.preferences.selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS
+                                    ) {
+                                        uiState.preferences.customUdpDnsIp.ifBlank { "Custom DNS" }
+                                    } else {
+                                        uiState.preferences.selectedUpstreamDns.primaryUdpIp
+                                    }
+                                    val openWebsitesTab: () -> Unit = {
+                                        if (uiState.isSelectionMode) {
+                                            viewModel.exitSelectionMode()
+                                        }
+                                        selectedFirewallTab = FirewallContentTab.WEBSITES
+                                    }
+
                                     if (isWideLayout) {
                                         Row(
                                             modifier = Modifier
@@ -671,9 +830,12 @@ fun FirewallScreen(
                                         ) {
                                             Column(
                                                 modifier = Modifier
-                                                    .width(340.dp)
+                                                    .width(360.dp)
                                                     .fillMaxHeight()
+                                                    .verticalScroll(rememberScrollState())
                                             ) {
+                                                FirewallSectionHeading()
+                                                Spacer(modifier = Modifier.height(10.dp))
                                                 FirewallHeaderCard(
                                                     isFirewallActive = isFirewallActive,
                                                     connectionDetails = uiState.connectionDetails,
@@ -688,6 +850,9 @@ fun FirewallScreen(
                                                     isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
                                                     isVpnGuardActive = uiState.vpnGuardState.runtimeState.isConnectedOrConnecting,
                                                     vpnGuardProfileLabel = uiState.vpnGuardState.runtimeState.activeProfileName,
+                                                    blockedWebsitesCount = websiteRulesCount,
+                                                    websiteRulesBadgeText = websiteRulesBadge,
+                                                    dnsSummaryLabel = dnsSummary,
                                                     onToggleFirewall = { enable ->
                                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                                     },
@@ -695,25 +860,91 @@ fun FirewallScreen(
                                                     onOpenDnsProtection = viewModel::openDnsProtection,
                                                     onOpenSpeedTest = viewModel::openSpeedTest,
                                                     onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                                    onOpenWebsitesTab = openWebsitesTab,
                                                     onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
                                                     onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) },
                                                     onOpenVpnGuard = { viewModel.selectDestination(AppDestination.VPN_GUARD) }
                                                 )
-                                                Spacer(modifier = Modifier.height(14.dp))
-                                                SearchAndFiltersBlock(
-                                                    uiState = uiState,
-                                                    onSearchQueryChange = viewModel::onSearchQueryChange,
-                                                    onFilterModeChange = viewModel::onFilterModeChange
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                FirewallSegmentedTabToggle(
+                                                    selectedTab = selectedFirewallTab,
+                                                    totalAppsCount = uiState.allManagedApps.size,
+                                                    onSelectTab = { tab ->
+                                                        if (tab == FirewallContentTab.WEBSITES && uiState.isSelectionMode) {
+                                                            viewModel.exitSelectionMode()
+                                                        }
+                                                        selectedFirewallTab = tab
+                                                    }
                                                 )
+                                                if (selectedFirewallTab == FirewallContentTab.ALL_APPS) {
+                                                    Spacer(modifier = Modifier.height(12.dp))
+                                                    SearchAndFiltersBlock(
+                                                        uiState = uiState,
+                                                        filtersExpanded = areAppFiltersExpanded,
+                                                        onToggleFiltersExpanded = {
+                                                            areAppFiltersExpanded = !areAppFiltersExpanded
+                                                        },
+                                                        onSearchQueryChange = viewModel::onSearchQueryChange,
+                                                        onFilterModeChange = viewModel::onFilterModeChange
+                                                    )
+                                                }
                                             }
 
                                             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                                AppsCollectionContent(
-                                                    uiState = uiState,
-                                                    isGrid = true,
-                                                    viewModel = viewModel,
-                                                    bottomPadding = if (uiState.isSelectionMode) 168.dp else 24.dp
-                                                )
+                                                if (selectedFirewallTab == FirewallContentTab.ALL_APPS) {
+                                                    AppsCollectionContent(
+                                                        uiState = uiState,
+                                                        isGrid = true,
+                                                        viewModel = viewModel,
+                                                        bottomPadding = if (uiState.isSelectionMode) 168.dp else 24.dp
+                                                    )
+                                                } else {
+                                                    LazyColumn(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .testTag("firewall_websites_list"),
+                                                        contentPadding = PaddingValues(bottom = 24.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        websiteManagementItems(
+                                                            state = websiteState,
+                                                            isFirewallActive = isFirewallActive,
+                                                            connectionDetails = uiState.connectionDetails,
+                                                            domainInput = websiteDomainInput,
+                                                            selectedSection = selectedWebsiteSection,
+                                                            filteredBypassApps = filteredBypassApps,
+                                                            appSearchQuery = bypassAppSearchQuery,
+                                                            loadIcon = viewModel::getAppIconBitmap,
+                                                            onDomainInputChange = { websiteDomainInput = it },
+                                                            onSelectFilterMode = viewModel::setWebsiteFilterMode,
+                                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                                            onOpenDnsProtection = viewModel::openDnsProtection,
+                                                            onAllowDomainPermanently = viewModel::allowDomainPermanently,
+                                                            onBlockDomainPermanently = viewModel::blockDomainPermanently,
+                                                            onAllowDomainTemporarily = viewModel::allowDomainTemporarily,
+                                                            onSelectSection = { selectedWebsiteSection = it },
+                                                            onClearWebsiteRules = viewModel::clearWebsiteRules,
+                                                            onClearBypassApps = viewModel::clearWebsiteBypassApps,
+                                                            onOpenImport = { isImportRulesDialogOpen = true },
+                                                            onOpenExport = {
+                                                                coroutineScope.launch {
+                                                                    exportRulesPayload = viewModel.exportWebsiteRulesText()
+                                                                    isExportRulesDialogOpen = true
+                                                                }
+                                                            },
+                                                            onOpenBackupRestore = {
+                                                                coroutineScope.launch {
+                                                                    exportBackupPayload = viewModel.exportAdBlockBackupJson()
+                                                                    isBackupRestoreDialogOpen = true
+                                                                }
+                                                            },
+                                                            onAppSearchQueryChange = { bypassAppSearchQuery = it },
+                                                            onToggleWebsiteRuleEnabled = viewModel::toggleWebsiteRuleEnabled,
+                                                            onDeleteWebsiteRule = viewModel::deleteWebsiteRule,
+                                                            onToggleBypassApp = viewModel::toggleWebsiteBypassApp
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     } else {
@@ -724,51 +955,138 @@ fun FirewallScreen(
                                                     .widthIn(max = 680.dp)
                                                     .align(Alignment.TopCenter)
                                             ) {
-                                                AppsCollectionContent(
-                                                    uiState = uiState,
-                                                    isGrid = false,
-                                                    viewModel = viewModel,
-                                                    bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 120.dp,
-                                                    headerContent = {
-                                                        Column(
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(bottom = 8.dp)
-                                                        ) {
-                                                            FirewallHeaderCard(
-                                                                isFirewallActive = isFirewallActive,
-                                                                connectionDetails = uiState.connectionDetails,
-                                                                totalAppsCount = uiState.allManagedApps.size,
-                                                                wifiBlockedCount = uiState.wifiBlockedCount,
-                                                                dataBlockedCount = uiState.dataBlockedCount,
-                                                                activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
-                                                                isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
-                                                                blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
-                                                                liveTelemetry = uiState.liveTelemetry,
-                                                                isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
-                                                                isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
-                                                                isVpnGuardActive = uiState.vpnGuardState.runtimeState.isConnectedOrConnecting,
-                                                                vpnGuardProfileLabel = uiState.vpnGuardState.runtimeState.activeProfileName,
-                                                                onToggleFirewall = { enable ->
-                                                                    if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
-                                                                },
-                                                                onOpenConnectionInfo = viewModel::openConnectionInfo,
-                                                                onOpenDnsProtection = viewModel::openDnsProtection,
-                                                                onOpenSpeedTest = viewModel::openSpeedTest,
-                                                                onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
-                                                                onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
-                                                                onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) },
-                                                                onOpenVpnGuard = { viewModel.selectDestination(AppDestination.VPN_GUARD) }
-                                                            )
-                                                            Spacer(modifier = Modifier.height(14.dp))
-                                                            SearchAndFiltersBlock(
-                                                                uiState = uiState,
-                                                                onSearchQueryChange = viewModel::onSearchQueryChange,
-                                                                onFilterModeChange = viewModel::onFilterModeChange
-                                                            )
-                                                        }
+                                                val firewallHeaderBlock: @Composable () -> Unit = {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(bottom = 4.dp)
+                                                    ) {
+                                                        FirewallSectionHeading()
+                                                        Spacer(modifier = Modifier.height(10.dp))
+                                                        FirewallHeaderCard(
+                                                            isFirewallActive = isFirewallActive,
+                                                            connectionDetails = uiState.connectionDetails,
+                                                            totalAppsCount = uiState.allManagedApps.size,
+                                                            wifiBlockedCount = uiState.wifiBlockedCount,
+                                                            dataBlockedCount = uiState.dataBlockedCount,
+                                                            activeBlockedNowCount = uiState.vpnRuntimeState.blockedActivePackagesCount,
+                                                            isAdBlockerEnabled = uiState.preferences.isAdBlockerEnabled,
+                                                            blockedAdsCount = uiState.vpnRuntimeState.blockedAdsCount,
+                                                            liveTelemetry = uiState.liveTelemetry,
+                                                            isGlobalWifiBlocked = uiState.preferences.globalWifiBlocked,
+                                                            isHotspotProxyActive = uiState.hotspotProxyState.isProxyRunning,
+                                                            isVpnGuardActive = uiState.vpnGuardState.runtimeState.isConnectedOrConnecting,
+                                                            vpnGuardProfileLabel = uiState.vpnGuardState.runtimeState.activeProfileName,
+                                                            blockedWebsitesCount = websiteRulesCount,
+                                                            websiteRulesBadgeText = websiteRulesBadge,
+                                                            dnsSummaryLabel = dnsSummary,
+                                                            onToggleFirewall = { enable ->
+                                                                if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
+                                                            },
+                                                            onOpenConnectionInfo = viewModel::openConnectionInfo,
+                                                            onOpenDnsProtection = viewModel::openDnsProtection,
+                                                            onOpenSpeedTest = viewModel::openSpeedTest,
+                                                            onOpenAdBlocker = { viewModel.selectDestination(AppDestination.WEBSITES) },
+                                                            onOpenWebsitesTab = openWebsitesTab,
+                                                            onOpenNetworkMonitor = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
+                                                            onOpenHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) },
+                                                            onOpenVpnGuard = { viewModel.selectDestination(AppDestination.VPN_GUARD) }
+                                                        )
+                                                        Spacer(modifier = Modifier.height(14.dp))
+                                                        FirewallSegmentedTabToggle(
+                                                            selectedTab = selectedFirewallTab,
+                                                            totalAppsCount = uiState.allManagedApps.size,
+                                                            onSelectTab = { tab ->
+                                                                if (tab == FirewallContentTab.WEBSITES && uiState.isSelectionMode) {
+                                                                    viewModel.exitSelectionMode()
+                                                                }
+                                                                selectedFirewallTab = tab
+                                                            }
+                                                        )
                                                     }
-                                                )
+                                                }
+
+                                                if (selectedFirewallTab == FirewallContentTab.ALL_APPS) {
+                                                    AppsCollectionContent(
+                                                        uiState = uiState,
+                                                        isGrid = false,
+                                                        viewModel = viewModel,
+                                                        bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 120.dp,
+                                                        headerContent = {
+                                                            Column(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .padding(bottom = 4.dp)
+                                                            ) {
+                                                                firewallHeaderBlock()
+                                                                Spacer(modifier = Modifier.height(10.dp))
+                                                                SearchAndFiltersBlock(
+                                                                    uiState = uiState,
+                                                                    filtersExpanded = areAppFiltersExpanded,
+                                                                    onToggleFiltersExpanded = {
+                                                                        areAppFiltersExpanded = !areAppFiltersExpanded
+                                                                    },
+                                                                    onSearchQueryChange = viewModel::onSearchQueryChange,
+                                                                    onFilterModeChange = viewModel::onFilterModeChange
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                } else {
+                                                    LazyColumn(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .testTag("firewall_websites_list"),
+                                                        contentPadding = PaddingValues(
+                                                            start = 16.dp,
+                                                            end = 16.dp,
+                                                            top = 8.dp,
+                                                            bottom = navBarBottomInset + 120.dp
+                                                        ),
+                                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        item(key = "firewall_websites_header") {
+                                                            firewallHeaderBlock()
+                                                        }
+                                                        websiteManagementItems(
+                                                            state = websiteState,
+                                                            isFirewallActive = isFirewallActive,
+                                                            connectionDetails = uiState.connectionDetails,
+                                                            domainInput = websiteDomainInput,
+                                                            selectedSection = selectedWebsiteSection,
+                                                            filteredBypassApps = filteredBypassApps,
+                                                            appSearchQuery = bypassAppSearchQuery,
+                                                            loadIcon = viewModel::getAppIconBitmap,
+                                                            onDomainInputChange = { websiteDomainInput = it },
+                                                            onSelectFilterMode = viewModel::setWebsiteFilterMode,
+                                                            onRequestEnableFirewall = onRequestEnableFirewall,
+                                                            onOpenDnsProtection = viewModel::openDnsProtection,
+                                                            onAllowDomainPermanently = viewModel::allowDomainPermanently,
+                                                            onBlockDomainPermanently = viewModel::blockDomainPermanently,
+                                                            onAllowDomainTemporarily = viewModel::allowDomainTemporarily,
+                                                            onSelectSection = { selectedWebsiteSection = it },
+                                                            onClearWebsiteRules = viewModel::clearWebsiteRules,
+                                                            onClearBypassApps = viewModel::clearWebsiteBypassApps,
+                                                            onOpenImport = { isImportRulesDialogOpen = true },
+                                                            onOpenExport = {
+                                                                coroutineScope.launch {
+                                                                    exportRulesPayload = viewModel.exportWebsiteRulesText()
+                                                                    isExportRulesDialogOpen = true
+                                                                }
+                                                            },
+                                                            onOpenBackupRestore = {
+                                                                coroutineScope.launch {
+                                                                    exportBackupPayload = viewModel.exportAdBlockBackupJson()
+                                                                    isBackupRestoreDialogOpen = true
+                                                                }
+                                                            },
+                                                            onAppSearchQueryChange = { bypassAppSearchQuery = it },
+                                                            onToggleWebsiteRuleEnabled = viewModel::toggleWebsiteRuleEnabled,
+                                                            onDeleteWebsiteRule = viewModel::deleteWebsiteRule,
+                                                            onToggleBypassApp = viewModel::toggleWebsiteBypassApp
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -785,17 +1103,21 @@ fun FirewallScreen(
                         FloatingFrostedNavBar(
                             currentDestination = uiState.currentDestination,
                             isConnectionInfoOpen = uiState.isConnectionInfoOpen,
-                            onSelectFirewall = { viewModel.selectDestination(AppDestination.FIREWALL) },
-                            onSelectWebsites = { viewModel.selectDestination(AppDestination.WEBSITES) },
-                            onSelectDataUsage = { viewModel.selectDestination(AppDestination.DATA_USAGE) },
-                            onSelectDnsProtection = { viewModel.selectDestination(AppDestination.DNS) },
-                            onSelectHotspot = { viewModel.selectDestination(AppDestination.HOTSPOT) },
-                            onSelectVpnGuard = { viewModel.selectDestination(AppDestination.VPN_GUARD) }
+                            onSelectFirewall = { selectAppDestination(AppDestination.FIREWALL) },
+                            onSelectWebsites = { selectAppDestination(AppDestination.WEBSITES) },
+                            onSelectDataUsage = { selectAppDestination(AppDestination.DATA_USAGE) },
+                            onSelectDnsProtection = { selectAppDestination(AppDestination.DNS) },
+                            onSelectHotspot = { selectAppDestination(AppDestination.HOTSPOT) },
+                            onSelectVpnGuard = { selectAppDestination(AppDestination.VPN_GUARD) },
+                            isSniDpiSelected = isSniDpiSelected,
+                            onSelectSniDpi = selectSniDpi
                         )
                     }
 
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = uiState.isSelectionMode && uiState.currentDestination == AppDestination.FIREWALL,
+                        visible = uiState.isSelectionMode &&
+                            uiState.currentDestination == AppDestination.FIREWALL &&
+                            !isSniDpiSelected,
                         enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                         exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                         modifier = Modifier.align(Alignment.BottomCenter)
@@ -956,15 +1278,112 @@ fun FirewallScreen(
             onDismiss = { showBackgroundSheet = false }
         )
     }
+
+    if (isImportRulesDialogOpen) {
+        ImportRulesDialog(
+            onDismiss = { isImportRulesDialogOpen = false },
+            onImport = viewModel::importWebsiteRules
+        )
+    }
+
+    if (isExportRulesDialogOpen) {
+        ExportRulesDialog(
+            exportedText = exportRulesPayload,
+            onDismiss = { isExportRulesDialogOpen = false },
+            onNotifyCopied = viewModel::notifyFilterLogAction
+        )
+    }
+
+    if (isBackupRestoreDialogOpen) {
+        BackupAndRestoreRulesDialog(
+            backupJson = exportBackupPayload,
+            onDismiss = { isBackupRestoreDialogOpen = false },
+            onRestore = viewModel::restoreAdBlockBackupJson,
+            onNotifyCopied = viewModel::notifyFilterLogAction
+        )
+    }
+}
+
+private fun navOrderIndex(key: Pair<AppDestination, Boolean>): Int =
+    if (key.second) {
+        2
+    } else {
+        when (key.first) {
+            AppDestination.FIREWALL -> 0
+            AppDestination.WEBSITES -> 1
+            AppDestination.VPN_GUARD -> 3
+            AppDestination.DNS -> 4
+            AppDestination.HOTSPOT -> 5
+            AppDestination.DATA_USAGE -> 6
+        }
+    }
+
+private enum class FirewallContentTab {
+    ALL_APPS,
+    WEBSITES
+}
+
+@Composable
+private fun FirewallSectionHeading() {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "App Firewall & Rules",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = "Manage app network access, Wi-Fi, and website rules.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun FirewallSegmentedTabToggle(
+    selectedTab: FirewallContentTab,
+    totalAppsCount: Int,
+    onSelectTab: (FirewallContentTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val tabs = FirewallContentTab.entries
+    val tabItems = tabs.map { tab ->
+        when (tab) {
+            FirewallContentTab.ALL_APPS -> FrostedSegmentedTabItem(
+                label = "All Apps ($totalAppsCount)",
+                testTag = "firewall_tab_all_apps",
+                activeIcon = Icons.Rounded.Apps,
+                inactiveIcon = Icons.Outlined.Apps
+            )
+            FirewallContentTab.WEBSITES -> FrostedSegmentedTabItem(
+                label = "Websites",
+                testTag = "firewall_tab_websites",
+                activeIcon = Icons.Rounded.Public,
+                inactiveIcon = Icons.Outlined.Public
+            )
+        }
+    }
+    FrostedSegmentedTabBar(
+        items = tabItems,
+        selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
+        onSelect = { index -> onSelectTab(tabs[index]) },
+        modifier = modifier.testTag("firewall_segmented_tabs")
+    )
 }
 
 @Composable
 private fun SearchAndFiltersBlock(
     uiState: FirewallUiState,
+    filtersExpanded: Boolean,
+    onToggleFiltersExpanded: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onFilterModeChange: (AppFilterMode) -> Unit
 ) {
     val isDark = LocalIsDarkTheme.current
+    val hasActiveFilter = uiState.filterMode != AppFilterMode.ALL
+    val showFilters = filtersExpanded || hasActiveFilter || uiState.isSelectionMode
+
     Column(modifier = Modifier.fillMaxWidth()) {
         FrostedSurface(
             shape = RoundedCornerShape(18.dp),
@@ -973,7 +1392,7 @@ private fun SearchAndFiltersBlock(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -1008,7 +1427,7 @@ private fun SearchAndFiltersBlock(
                     IconButton(
                         onClick = { onSearchQueryChange("") },
                         modifier = Modifier
-                            .size(28.dp)
+                            .size(36.dp)
                             .testTag("clear_search_button")
                     ) {
                         Icon(
@@ -1018,70 +1437,102 @@ private fun SearchAndFiltersBlock(
                         )
                     }
                 }
+                IconButton(
+                    onClick = onToggleFiltersExpanded,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("toggle_app_filters_button")
+                ) {
+                    Box {
+                        Icon(
+                            imageVector = Icons.Rounded.FilterList,
+                            contentDescription = "Toggle app filters",
+                            tint = if (showFilters) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp)
+                        )
+                        if (hasActiveFilter) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .align(Alignment.TopEnd)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        AnimatedVisibility(visible = showFilters) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(modifier = Modifier.height(10.dp))
 
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(AppFilterMode.entries) { mode ->
-                val count = when (mode) {
-                    AppFilterMode.ALL -> uiState.allManagedApps.size
-                    AppFilterMode.BLOCKED -> uiState.anyRestrictedCount
-                    AppFilterMode.WIFI_BLOCKED -> uiState.wifiBlockedCount
-                    AppFilterMode.DATA_BLOCKED -> uiState.dataBlockedCount
-                    AppFilterMode.ALLOWED -> uiState.allManagedApps.size - uiState.anyRestrictedCount
-                    AppFilterMode.TIMERS -> uiState.activeTimersCount
-                }
-                val selected = uiState.filterMode == mode
-                FilterChip(
-                    selected = selected,
-                    onClick = { onFilterModeChange(mode) },
-                    label = {
-                        Text(
-                            text = "${mode.label} ($count)",
-                            style = MaterialTheme.typography.labelMedium
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(AppFilterMode.entries) { mode ->
+                        val count = when (mode) {
+                            AppFilterMode.ALL -> uiState.allManagedApps.size
+                            AppFilterMode.BLOCKED -> uiState.anyRestrictedCount
+                            AppFilterMode.WIFI_BLOCKED -> uiState.wifiBlockedCount
+                            AppFilterMode.DATA_BLOCKED -> uiState.dataBlockedCount
+                            AppFilterMode.ALLOWED -> uiState.allManagedApps.size - uiState.anyRestrictedCount
+                            AppFilterMode.TIMERS -> uiState.activeTimersCount
+                        }
+                        val selected = uiState.filterMode == mode
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onFilterModeChange(mode) },
+                            label = {
+                                Text(
+                                    text = "${mode.label} ($count)",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = if (isDark) {
+                                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
+                                } else {
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+                                },
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = selected,
+                                borderColor = if (isDark) {
+                                    Color.White.copy(alpha = 0.18f)
+                                } else {
+                                    Color.White.copy(alpha = 0.90f)
+                                },
+                                selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                            ),
+                            modifier = Modifier.testTag("filter_chip_${mode.name.lowercase()}")
                         )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = if (uiState.isSelectionMode) {
+                        "Tap apps to select, then apply Wi-Fi or Data rules below."
+                    } else {
+                        "Tap an app for Timer, long-press to select, or toggle Wi-Fi / Data."
                     },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isDark) {
-                            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
-                        } else {
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
-                        },
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = selected,
-                        borderColor = if (isDark) {
-                            Color.White.copy(alpha = 0.18f)
-                        } else {
-                            Color.White.copy(alpha = 0.90f)
-                        },
-                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-                    ),
-                    modifier = Modifier.testTag("filter_chip_${mode.name.lowercase()}")
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = if (uiState.isSelectionMode) {
-                "Tap apps to select, then apply Wi-Fi or Data rules below."
-            } else {
-                "Tap an app for Timer, long-press to select, or toggle Wi-Fi / Data."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 

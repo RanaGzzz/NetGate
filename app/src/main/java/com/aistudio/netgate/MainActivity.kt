@@ -129,7 +129,11 @@ class MainActivity : ComponentActivity() {
                     contract = ActivityResultContracts.RequestPermission()
                 ) { granted ->
                     if (granted) {
+                        NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                         viewModel.setStatusBarSpeedEnabled(true)
+                        if (!SystemNetworkMonitor.isServiceActive) {
+                            NetworkMonitorService.start(this@MainActivity)
+                        }
                     } else {
                         viewModel.onStatusBarSpeedPermissionDenied()
                     }
@@ -169,10 +173,18 @@ class MainActivity : ComponentActivity() {
                         if (!granted) {
                             statusBarNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         } else {
+                            NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                             viewModel.setStatusBarSpeedEnabled(true)
+                            if (!SystemNetworkMonitor.isServiceActive) {
+                                NetworkMonitorService.start(this@MainActivity)
+                            }
                         }
                     } else {
+                        NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                         viewModel.setStatusBarSpeedEnabled(true)
+                        if (!SystemNetworkMonitor.isServiceActive) {
+                            NetworkMonitorService.start(this@MainActivity)
+                        }
                     }
                 }
 
@@ -193,6 +205,21 @@ class MainActivity : ComponentActivity() {
                                 Manifest.permission.POST_NOTIFICATIONS
                             ) == PackageManager.PERMISSION_GRANTED
                         if (canNotify) {
+                            NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
+                            NetworkMonitorService.start(this@MainActivity)
+                        }
+                    }
+                }
+
+                androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    if (uiState.preferences.isStatusBarSpeedEnabled && !SystemNetworkMonitor.isServiceActive) {
+                        val canNotify = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                            ContextCompat.checkSelfPermission(
+                                this@MainActivity,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) == PackageManager.PERMISSION_GRANTED
+                        if (canNotify && !NetworkMonitorService.areNotificationsBlocked(this@MainActivity)) {
+                            NetworkMonitorService.ensureNotificationChannel(this@MainActivity)
                             NetworkMonitorService.start(this@MainActivity)
                         }
                     }

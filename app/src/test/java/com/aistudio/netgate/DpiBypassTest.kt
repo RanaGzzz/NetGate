@@ -28,6 +28,7 @@ import com.aistudio.netgate.service.FirewallTunnelMode
 import com.aistudio.netgate.service.LocalFilteringProxyServer
 import com.aistudio.netgate.service.PerAppFirewallEngine
 import com.aistudio.netgate.service.ProxyFilterDecision
+import com.aistudio.netgate.ui.SniDpiContent
 import com.aistudio.netgate.ui.WebsiteBlockerContent
 import com.aistudio.netgate.ui.WebsiteBlockerUiState
 import com.aistudio.netgate.ui.components.DpiBypassShieldCard
@@ -365,37 +366,117 @@ class DpiBypassTest {
             }
         }
 
-        // Default tab (Ad Blocker) isolates Ad Blocker UI cleanly
+        // Default tab (Dashboard) combines Content & Safety Blocker, SafeSearch & YouTube Guard,
+        // DoH/Passthrough, Smart Protection Profiles, and Blocked Activity
+        composeRule.onNodeWithTag("ad_blocker_tab_dashboard").assertIsDisplayed()
         composeRule.onNodeWithTag("ad_blocker_hero_card").assertIsDisplayed()
-        composeRule.onNodeWithTag("safesearch_youtube_card").assertDoesNotExist()
+        composeRule.onNodeWithTag("ad_blocker_dashboard_list")
+            .performScrollToNode(hasTestTag("safesearch_youtube_card"))
+        composeRule.onNodeWithTag("safesearch_youtube_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("ad_blocker_dashboard_list")
+            .performScrollToNode(hasTestTag("ad_upstream_passthrough_card"))
+        composeRule.onNodeWithTag("ad_upstream_passthrough_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("ad_blocker_dashboard_list")
+            .performScrollToNode(hasTestTag("smart_protection_profile_card"))
+        composeRule.onNodeWithTag("smart_protection_profile_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("ad_blocker_dashboard_list")
+            .performScrollToNode(hasTestTag("ad_analytics_dashboard_card"))
+        composeRule.onNodeWithTag("ad_analytics_dashboard_card").assertIsDisplayed()
+
+        // Websites & SNI/DPI moved out of Ad & Network Guard
+        composeRule.onNodeWithTag("website_mode_control_card").assertDoesNotExist()
         composeRule.onNodeWithTag("dpi_bypass_card").assertDoesNotExist()
 
-        // Websites tab
-        composeRule.onNodeWithTag("website_main_tab_bar")
-            .performScrollToNode(hasTestTag("website_main_tab_websites"))
-        composeRule.onNodeWithTag("website_main_tab_websites").performClick()
-        composeRule.onNodeWithTag("website_mode_control_card").assertIsDisplayed()
-        composeRule.onNodeWithTag("ad_blocker_hero_card").assertDoesNotExist()
+        // Advanced tab renders Filter Lists
+        composeRule.onNodeWithTag("ad_blocker_tab_advanced").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ad_blocker_advanced_list").assertIsDisplayed()
+        composeRule.onNodeWithTag("open_add_custom_filter_button").assertIsDisplayed()
+    }
 
-        // Safe & Kids tab
-        composeRule.onNodeWithTag("website_main_tab_bar")
-            .performScrollToNode(hasTestTag("website_main_tab_safe_search"))
-        composeRule.onNodeWithTag("website_main_tab_safe_search").performClick()
-        composeRule.onNodeWithTag("safesearch_youtube_card").assertIsDisplayed()
+    @Test
+    fun `sni dpi screen renders collapsible accordions standalone guards and live logs tab`() {
+        composeRule.setContent {
+            NetGateTheme {
+                SniDpiContent(
+                    state = WebsiteBlockerUiState(dpiBypassMode = DpiBypassMode.AUTOPILOT),
+                    isFirewallActive = true,
+                    onToggleHttpsProxy = {},
+                    onSelectProxyPort = {},
+                    onToggleProxyStripTracking = {},
+                    onSelectSniPreset = {},
+                    onSaveCustomSniProxy = { _, _ -> },
+                    onSelectDpiMode = {},
+                    onSelectDpiChunkSize = {},
+                    onToggleDpiIdleKeepAlive = {},
+                    onToggleBlockQuic = {},
+                    onToggleAntiDnsPoison = {},
+                    onSelectDnsTransportMode = {},
+                    onFlushDpiCache = {},
+                    onCopiedProxyEndpoint = {},
+                    onClearDnsLogs = {},
+                    onRequestEnableFirewall = {},
+                    onOpenDpiLogs = {},
+                    onAllowDomainTemporarily = { _, _ -> },
+                    onAllowDomainPermanently = {},
+                    onBlockDomainPermanently = {},
+                    onReportFalsePositive = {},
+                    onNotifyCopied = {}
+                )
+            }
+        }
 
-        // SNI & DPI tab
-        composeRule.onNodeWithTag("website_main_tab_bar")
-            .performScrollToNode(hasTestTag("website_main_tab_proxy_dpi"))
-        composeRule.onNodeWithTag("website_main_tab_proxy_dpi").performClick()
+        composeRule.onNodeWithTag("sni_dpi_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("https_filtering_proxy_card").assertIsDisplayed()
-        composeRule.onNodeWithTag("website_proxy_dpi_list")
+
+        // Expand SNI Presets, Ports & Tracking accordion and verify all controls exist
+        composeRule.onNodeWithTag("sni_presets_accordion_toggle").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("sni_preset_standard_direct"))
+        composeRule.onNodeWithTag("sni_preset_standard_direct").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("proxy_port_chip_8899"))
+        composeRule.onNodeWithTag("proxy_port_chip_8899").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("proxy_strip_tracking_switch"))
+        composeRule.onNodeWithTag("proxy_strip_tracking_switch").assertIsDisplayed()
+
+        // Scroll to DPI Bypass Strategy card and expand Bypass Tuning & Chunk Size accordion
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
             .performScrollToNode(hasTestTag("dpi_bypass_card"))
         composeRule.onNodeWithTag("dpi_bypass_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("dpi_tuning_accordion_toggle"))
+        composeRule.onNodeWithTag("dpi_tuning_accordion_toggle").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("dpi_mode_autopilot"))
+        composeRule.onNodeWithTag("dpi_mode_autopilot").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("dpi_chunk_4"))
+        composeRule.onNodeWithTag("dpi_chunk_4").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("dns_transport_doh_with_fallback"))
+        composeRule.onNodeWithTag("dns_transport_doh_with_fallback").assertIsDisplayed()
 
-        // DNS Logs tab
-        composeRule.onNodeWithTag("website_main_tab_bar")
-            .performScrollToNode(hasTestTag("website_main_tab_dns_logs"))
-        composeRule.onNodeWithTag("website_main_tab_dns_logs").performClick()
+        // Standalone Network Guards card
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("dpi_network_guards_card"))
+        composeRule.onNodeWithTag("dpi_network_guards_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("block_quic_switch"))
+        composeRule.onNodeWithTag("block_quic_switch").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("anti_dns_poison_switch"))
+        composeRule.onNodeWithTag("anti_dns_poison_switch").assertIsDisplayed()
+        composeRule.onNodeWithTag("sni_dpi_settings_list")
+            .performScrollToNode(hasTestTag("flush_dpi_cache_button"))
+        composeRule.onNodeWithTag("flush_dpi_cache_button").assertIsDisplayed()
+
+        // Switch to Live Logs tab
+        composeRule.onNodeWithTag("sni_dpi_tab_live_logs").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("dns_log_search_input").assertIsDisplayed()
     }
 

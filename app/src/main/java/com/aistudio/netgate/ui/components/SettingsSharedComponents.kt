@@ -56,9 +56,6 @@ import java.util.Locale
 
 private val SettingsCardCorner = 18.dp
 
-/** Fixed slot for the badge + chevron so they line up on every card regardless of title length. */
-private val SettingsTrailingSlotWidth = 116.dp
-
 @Composable
 internal fun SettingsSectionHeader(
     title: String,
@@ -127,8 +124,9 @@ internal fun SettingsStatusPill(
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
             color = accent,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
         )
     }
 }
@@ -161,7 +159,7 @@ internal fun SettingsNavigationCard(
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
                 .heightIn(min = 66.dp)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -170,13 +168,13 @@ internal fun SettingsNavigationCard(
                 modifier = Modifier.weight(1f)
             ) {
                 SettingsIconBadge(icon = icon, accent = iconAccent)
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -184,14 +182,13 @@ internal fun SettingsNavigationCard(
                         text = summary,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
             Spacer(modifier = Modifier.width(8.dp))
             Row(
-                modifier = Modifier.width(SettingsTrailingSlotWidth),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End
             ) {
@@ -247,7 +244,7 @@ internal fun SettingsAccordionCard(
                     .fillMaxWidth()
                     .clickable(onClick = onToggleExpand)
                     .heightIn(min = 66.dp)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -256,13 +253,13 @@ internal fun SettingsAccordionCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     SettingsIconBadge(icon = icon, accent = iconAccent)
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = title,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(2.dp))
@@ -270,7 +267,7 @@ internal fun SettingsAccordionCard(
                             text = summary,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = summaryModifier
                         )
@@ -278,7 +275,6 @@ internal fun SettingsAccordionCard(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Row(
-                    modifier = Modifier.width(SettingsTrailingSlotWidth),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End
                 ) {
@@ -332,7 +328,7 @@ internal fun CompactSwitchRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 58.dp)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -356,7 +352,7 @@ internal fun CompactSwitchRow(
                         text = title,
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(

@@ -3,7 +3,16 @@ package com.aistudio.netgate.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +41,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FamilyRestroom
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GppGood
@@ -44,6 +55,7 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,9 +72,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -110,13 +125,18 @@ fun AdBlockerHeroCard(
     compressedCacheBytes: Long = state.compressedCacheBytes,
     avgLookupLatencyMicros: Long = state.avgLookupLatencyMicros,
     skippedFilterListCount: Int = state.skippedFilterListCount,
+    showUpstreamAndPassthroughInHero: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val activeAccent = if (state.isAdBlockerEnabled) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val activeAccent = if (state.isAdBlockerEnabled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     FrostedSurface(
         shape = RoundedCornerShape(22.dp),
-        borderAccent = if (state.isAdBlockerEnabled) EmeraldPrimary.copy(alpha = 0.55f) else null,
+        borderAccent = if (state.isAdBlockerEnabled) activeAccent.copy(alpha = 0.50f) else null,
         modifier = modifier
             .fillMaxWidth()
             .testTag("ad_blocker_hero_card")
@@ -152,14 +172,15 @@ fun AdBlockerHeroCard(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Ad & Tracker Blocker",
+                            text = "Content & Safety Blocker",
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = when {
-                                !state.isAdBlockerEnabled -> "Off • Block ads, trackers & malware system-wide"
-                                isFirewallActive -> "Active • Blocking ads across all apps & browsers"
+                                !state.isAdBlockerEnabled -> "Off • Block ads, trackers & safety threats"
+                                isFirewallActive -> "Active • Blocking ads & enforcing safety"
                                 else -> "Ready • Enable NetGate Firewall to start filtering"
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -184,7 +205,7 @@ fun AdBlockerHeroCard(
                     },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = EmeraldPrimary
+                        checkedTrackColor = activeAccent
                     ),
                     modifier = Modifier.testTag("ad_blocker_master_switch")
                 )
@@ -211,7 +232,7 @@ fun AdBlockerHeroCard(
                 AdStatPill(
                     label = "Domains",
                     value = formatCompactNumber(state.loadedAdDomainsCount.toLong()),
-                    accent = EmeraldPrimary,
+                    accent = activeAccent,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -220,8 +241,6 @@ fun AdBlockerHeroCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Analytics live in this same card so the blocker and its interception metrics read as
-            // one dashboard instead of two separate cards.
             AdAnalyticsMetricsSection(
                 analytics = analytics,
                 duplicatesRemovedCount = duplicatesRemovedCount,
@@ -237,7 +256,7 @@ fun AdBlockerHeroCard(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
+                        .height(48.dp)
                         .testTag("ad_blocker_enable_firewall_button")
                 ) {
                     Icon(
@@ -258,7 +277,7 @@ fun AdBlockerHeroCard(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .height(46.dp)
                     .testTag("sync_ad_lists_button")
             ) {
                 Icon(
@@ -281,22 +300,64 @@ fun AdBlockerHeroCard(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            if (showUpstreamAndPassthroughInHero) {
+                Spacer(modifier = Modifier.height(10.dp))
 
+                AdOptionToggleRow(
+                    title = "${state.selectedUpstreamDns.title} DoH Upstream",
+                    subtitle = "Encrypt allowed DNS lookups via HTTPS (automatic UDP/53 fallback)",
+                    checked = state.useDohUpstream,
+                    onCheckedChange = onToggleUseDohUpstream,
+                    testTag = "ad_doh_upstream_switch"
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                AdOptionToggleRow(
+                    title = "Essential OS & Push Passthrough",
+                    subtitle = "Always allow connectivity checks, payment gateways & FCM push services",
+                    checked = state.isEssentialPassthroughEnabled,
+                    onCheckedChange = onToggleEssentialPassthrough,
+                    testTag = "ad_essential_passthrough_switch"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AdUpstreamAndPassthroughCard(
+    upstreamTitle: String,
+    useDohUpstream: Boolean,
+    isEssentialPassthroughEnabled: Boolean,
+    onToggleUseDohUpstream: (Boolean) -> Unit,
+    onToggleEssentialPassthrough: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FrostedSurface(
+        shape = RoundedCornerShape(22.dp),
+        borderAccent = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("ad_upstream_passthrough_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             AdOptionToggleRow(
-                title = "${state.selectedUpstreamDns.title} DoH Upstream",
-                subtitle = "Encrypt allowed DNS lookups via HTTPS (automatic UDP/53 fallback)",
-                checked = state.useDohUpstream,
+                title = "$upstreamTitle DoH Upstream",
+                subtitle = "Encrypt allowed DNS lookups via HTTPS",
+                checked = useDohUpstream,
                 onCheckedChange = onToggleUseDohUpstream,
                 testTag = "ad_doh_upstream_switch"
             )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
             AdOptionToggleRow(
                 title = "Essential OS & Push Passthrough",
-                subtitle = "Always allow connectivity checks, payment gateways & FCM push services",
-                checked = state.isEssentialPassthroughEnabled,
+                subtitle = "Always allow connectivity checks & FCM push",
+                checked = isEssentialPassthroughEnabled,
                 onCheckedChange = onToggleEssentialPassthrough,
                 testTag = "ad_essential_passthrough_switch"
             )
@@ -318,15 +379,16 @@ fun SafeSearchAndYoutubeCard(
     val isAnySafetyActive = state.isSafeSearchEnabled ||
         state.youtubeRestrictedMode != YouTubeRestrictedMode.OFF ||
         state.isYoutubeAdBlockEnabled
+    val primaryAccent = MaterialTheme.colorScheme.primary
     val accent = when {
-        isAnySafetyActive && isFirewallActive -> EmeraldPrimary
+        isAnySafetyActive && isFirewallActive -> primaryAccent
         isAnySafetyActive -> WifiAccent
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     FrostedSurface(
         shape = RoundedCornerShape(22.dp),
-        borderAccent = if (isAnySafetyActive) accent.copy(alpha = 0.55f) else null,
+        borderAccent = if (isAnySafetyActive) accent.copy(alpha = 0.45f) else null,
         modifier = modifier
             .fillMaxWidth()
             .testTag("safesearch_youtube_card")
@@ -344,33 +406,36 @@ fun SafeSearchAndYoutubeCard(
                     Surface(
                         shape = CircleShape,
                         color = accent.copy(alpha = 0.16f),
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Rounded.FamilyRestroom,
                                 contentDescription = null,
                                 tint = accent,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = "SafeSearch & YouTube Guard",
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Text(
-                            text = when {
-                                !isAnySafetyActive -> "Search engine SafeSearch, Kids Mode & YT Ad Block"
-                                isFirewallActive -> "Active • ${state.safeRewriteCount} safe DNS rewrites applied"
-                                else -> "Ready — enable NetGate Firewall to enforce"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isAnySafetyActive) accent else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (isAnySafetyActive) {
+                            Text(
+                                text = if (isFirewallActive) {
+                                    "Active • ${state.safeRewriteCount} safe DNS rewrites applied"
+                                } else {
+                                    "Ready — enable NetGate Firewall to enforce"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = accent
+                            )
+                        }
                     }
                 }
             }
@@ -378,8 +443,8 @@ fun SafeSearchAndYoutubeCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             AdOptionToggleRow(
-                title = "SafeSearch (Google, Bing, DDG, Brave)",
-                subtitle = "Enforces strict SafeSearch VIPs across search engines & browsers",
+                title = "SafeSearch (Google, Bing, DDG)",
+                subtitle = "Enforces strict SafeSearch VIPs across browsers",
                 checked = state.isSafeSearchEnabled,
                 onCheckedChange = { enabled ->
                     onToggleSafeSearch(enabled)
@@ -394,7 +459,7 @@ fun SafeSearchAndYoutubeCard(
 
             AdOptionToggleRow(
                 title = "YouTube Ad Blocker",
-                subtitle = "Blocks YouTube ad-break, tracking & doubleclick endpoints cleanly",
+                subtitle = "Blocks YouTube ad-break tracking & doubleclick",
                 checked = state.isYoutubeAdBlockEnabled,
                 onCheckedChange = { enabled ->
                     onToggleYoutubeAdBlock(enabled)
@@ -405,7 +470,7 @@ fun SafeSearchAndYoutubeCard(
                 testTag = "youtube_adblock_switch"
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Text(
                 text = "YouTube Restricted Mode (Kids Safety)",
@@ -418,16 +483,16 @@ fun SafeSearchAndYoutubeCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            FlowRow(
+            Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 YouTubeRestrictedMode.entries.forEach { mode ->
+                    val selected = state.youtubeRestrictedMode == mode
                     FilterChip(
-                        selected = state.youtubeRestrictedMode == mode,
+                        selected = selected,
                         onClick = {
                             onSelectYoutubeMode(mode)
                             if (mode != YouTubeRestrictedMode.OFF && !isFirewallActive) {
@@ -435,13 +500,36 @@ fun SafeSearchAndYoutubeCard(
                             }
                         },
                         label = {
-                            Text(
-                                text = mode.title,
-                                style = MaterialTheme.typography.labelMedium
-                            )
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = mode.title,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         },
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("youtube_mode_${mode.name.lowercase()}")
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selected,
+                            selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            selectedBorderWidth = 1.25.dp
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("youtube_mode_${mode.name.lowercase()}")
                     )
                 }
             }
@@ -461,13 +549,16 @@ fun HttpsFilteringProxyCard(
     onSaveCustomSniProxy: (host: String, port: Int) -> Unit,
     onRequestEnableFirewall: () -> Unit,
     onCopiedEndpoint: (String) -> Unit,
+    collapsibleDetails: Boolean = false,
+    initiallyExpanded: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val endpoint = "127.0.0.1:${state.httpsProxyPort}"
+    val primaryAccent = MaterialTheme.colorScheme.primary
     val activeAccent = when {
         state.isHttpsProxyEnabled && isFirewallActive && state.isHttpsProxyActive -> EmeraldPrimary
-        state.isHttpsProxyEnabled -> WifiAccent
+        state.isHttpsProxyEnabled -> primaryAccent
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     var customHostInput by remember(state.customSniProxyHost) {
@@ -476,10 +567,16 @@ fun HttpsFilteringProxyCard(
     var customPortInput by remember(state.customSniProxyPort) {
         mutableStateOf(state.customSniProxyPort.toString())
     }
+    var detailsExpanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (detailsExpanded) 180f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "sni_presets_chevron"
+    )
 
     FrostedSurface(
         shape = RoundedCornerShape(22.dp),
-        borderAccent = if (state.isHttpsProxyEnabled) activeAccent.copy(alpha = 0.55f) else null,
+        borderAccent = if (state.isHttpsProxyEnabled) activeAccent.copy(alpha = 0.50f) else null,
         modifier = modifier
             .fillMaxWidth()
             .testTag("https_filtering_proxy_card")
@@ -494,25 +591,28 @@ fun HttpsFilteringProxyCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = activeAccent.copy(alpha = 0.16f),
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
-                                contentDescription = null,
-                                tint = activeAccent,
-                                modifier = Modifier.size(22.dp)
-                            )
+                    if (!collapsibleDetails) {
+                        Surface(
+                            shape = CircleShape,
+                            color = activeAccent.copy(alpha = 0.16f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = ImageVector.vectorResource(id = R.drawable.ic_vpn_tunnel_shield),
+                                    contentDescription = null,
+                                    tint = activeAccent,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
+                        Spacer(modifier = Modifier.width(12.dp))
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "SNI Proxy & HTTPS Filter",
+                            text = if (collapsibleDetails) "SNI Proxy & HTTPS" else "SNI Proxy & HTTPS Filter",
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
@@ -542,205 +642,334 @@ fun HttpsFilteringProxyCard(
                     },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = EmeraldPrimary
+                        checkedTrackColor = activeAccent
                     ),
                     modifier = Modifier.testTag("https_proxy_master_switch")
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(IntrinsicSize.Min),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AdStatPill(
-                    label = "Proxy Blocked",
-                    value = state.blockedProxyRequestsCount.toString(),
-                    accent = BlockedRed,
+            if (collapsibleDetails) {
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                )
-                AdStatPill(
-                    label = "Relayed",
-                    value = state.allowedProxyRequestsCount.toString(),
-                    accent = EmeraldPrimary,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                )
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = WifiAccent.copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, WifiAccent.copy(alpha = 0.3f)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
+                    AdStatPill(
+                        label = "PROXY BLOCKED",
+                        value = state.blockedProxyRequestsCount.toString(),
+                        accent = BlockedRed,
+                        centered = true,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                    AdStatPill(
+                        label = "RELAYED",
+                        value = state.allowedProxyRequestsCount.toString(),
+                        accent = EmeraldPrimary,
+                        centered = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AdStatPill(
+                        label = "Proxy Blocked",
+                        value = state.blockedProxyRequestsCount.toString(),
+                        accent = BlockedRed,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                    AdStatPill(
+                        label = "Relayed",
+                        value = state.allowedProxyRequestsCount.toString(),
+                        accent = EmeraldPrimary,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = WifiAccent.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, WifiAccent.copy(alpha = 0.3f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = endpoint,
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                color = WifiAccent,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "SNI Endpoint",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        IconButton(
-                            onClick = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                cm?.setPrimaryClip(ClipData.newPlainText("NetGate Proxy", endpoint))
-                                onCopiedEndpoint(endpoint)
-                            },
+                        Row(
                             modifier = Modifier
-                                .size(28.dp)
-                                .testTag("copy_https_proxy_endpoint")
+                                .fillMaxSize()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ContentCopy,
-                                contentDescription = "Copy $endpoint",
-                                tint = WifiAccent,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = endpoint,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = WifiAccent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "SNI Endpoint",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    cm?.setPrimaryClip(ClipData.newPlainText("NetGate Proxy", endpoint))
+                                    onCopiedEndpoint(endpoint)
+                                },
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .testTag("copy_https_proxy_endpoint")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ContentCopy,
+                                    contentDescription = "Copy $endpoint",
+                                    tint = WifiAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "SNI Proxy Presets",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = state.sniProxyPreset.subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                SniProxyPreset.entries.forEach { preset ->
-                    FilterChip(
-                        selected = state.sniProxyPreset == preset,
-                        onClick = {
-                            onSelectSniPreset(preset)
-                            if (!isFirewallActive) {
-                                onRequestEnableFirewall()
-                            }
-                        },
-                        label = {
-                            Text(
-                                text = preset.title,
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("sni_preset_${preset.name.lowercase()}")
-                    )
-                }
-            }
-
-            if (state.sniProxyPreset == SniProxyPreset.CUSTOM_UPSTREAM_SNI) {
+            if (collapsibleDetails) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = customHostInput,
-                        onValueChange = { customHostInput = it },
-                        label = { Text("Upstream Proxy Host / IP") },
-                        placeholder = { Text("proxy.example.com") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(2f)
-                            .testTag("custom_sni_host_input")
-                    )
-                    OutlinedTextField(
-                        value = customPortInput,
-                        onValueChange = { customPortInput = it.filter { ch -> ch.isDigit() }.take(5) },
-                        label = { Text("Port") },
-                        placeholder = { Text("8080") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("custom_sni_port_input")
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                FilledTonalButton(
-                    onClick = {
-                        val portVal = customPortInput.toIntOrNull() ?: 8080
-                        onSaveCustomSniProxy(customHostInput, portVal)
-                    },
-                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
-                        .testTag("save_custom_sni_proxy_button")
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { detailsExpanded = !detailsExpanded }
+                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                        .testTag("sni_presets_accordion_toggle"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Apply Upstream SNI Proxy")
+                    Text(
+                        text = "SNI Presets, Ports & Tracking",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = primaryAccent,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.ExpandMore,
+                        contentDescription = if (detailsExpanded) "Collapse SNI Presets" else "Expand SNI Presets",
+                        tint = primaryAccent,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .rotate(chevronRotation)
+                    )
                 }
+            } else {
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            val showBody = !collapsibleDetails || detailsExpanded
+            AnimatedVisibility(
+                visible = showBody,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
-                Text(
-                    text = "Local Port:",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                listOf(8899, 8080, 8888).forEach { presetPort ->
-                    FilterChip(
-                        selected = state.httpsProxyPort == presetPort,
-                        onClick = { onSelectProxyPort(presetPort) },
-                        label = { Text(presetPort.toString(), style = MaterialTheme.typography.labelSmall) },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("proxy_port_chip_$presetPort")
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (collapsibleDetails) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    cm?.setPrimaryClip(ClipData.newPlainText("NetGate Proxy", endpoint))
+                                    onCopiedEndpoint(endpoint)
+                                }
+                                .testTag("copy_https_proxy_endpoint")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "SNI Endpoint: $endpoint",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(
+                                    imageVector = Icons.Rounded.ContentCopy,
+                                    contentDescription = "Copy $endpoint",
+                                    tint = primaryAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    Text(
+                        text = "SNI Proxy Presets",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = state.sniProxyPreset.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        SniProxyPreset.entries.forEach { preset ->
+                            val selected = state.sniProxyPreset == preset
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    onSelectSniPreset(preset)
+                                    if (!isFirewallActive) {
+                                        onRequestEnableFirewall()
+                                    }
+                                },
+                                label = {
+                                    Text(
+                                        text = preset.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = selected,
+                                    selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
+                                    selectedBorderWidth = 1.25.dp
+                                ),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("sni_preset_${preset.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    if (state.sniProxyPreset == SniProxyPreset.CUSTOM_UPSTREAM_SNI) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = customHostInput,
+                                onValueChange = { customHostInput = it },
+                                label = { Text("Upstream Proxy Host / IP") },
+                                placeholder = { Text("proxy.example.com") },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(2f)
+                                    .testTag("custom_sni_host_input")
+                            )
+                            OutlinedTextField(
+                                value = customPortInput,
+                                onValueChange = { customPortInput = it.filter { ch -> ch.isDigit() }.take(5) },
+                                label = { Text("Port") },
+                                placeholder = { Text("8080") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("custom_sni_port_input")
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        FilledTonalButton(
+                            onClick = {
+                                val portVal = customPortInput.toIntOrNull() ?: 8080
+                                onSaveCustomSniProxy(customHostInput, portVal)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("save_custom_sni_proxy_button")
+                        ) {
+                            Text("Apply Upstream SNI Proxy")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Local Port:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        listOf(8899, 8080, 8888).forEach { presetPort ->
+                            val selected = state.httpsProxyPort == presetPort
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectProxyPort(presetPort) },
+                                label = { Text(presetPort.toString(), style = MaterialTheme.typography.labelSmall) },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("proxy_port_chip_$presetPort")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    AdOptionToggleRow(
+                        title = "Strip URL Tracking Parameters",
+                        subtitle = "Removes utm_*, fbclid, gclid, igshid & ref params on HTTP requests",
+                        checked = state.isProxyStripTrackingParams,
+                        onCheckedChange = onToggleStripTracking,
+                        testTag = "proxy_strip_tracking_switch"
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            AdOptionToggleRow(
-                title = "Strip URL Tracking Parameters",
-                subtitle = "Removes utm_*, fbclid, gclid, igshid & ref params on HTTP requests",
-                checked = state.isProxyStripTrackingParams,
-                onCheckedChange = onToggleStripTracking,
-                testTag = "proxy_strip_tracking_switch"
-            )
         }
     }
 }
@@ -792,6 +1021,7 @@ private fun AdStatPill(
     label: String,
     value: String,
     accent: Color,
+    centered: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -803,7 +1033,8 @@ private fun AdStatPill(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start
         ) {
             Text(
                 text = value,
