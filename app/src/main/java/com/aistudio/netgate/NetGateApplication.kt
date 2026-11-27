@@ -12,6 +12,9 @@ class NetGateApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Local-only diagnostics: uncaught exceptions land in filesDir/logs/netgate.log and are
+        // then handed to the platform handler, so crash behaviour and reporting are unchanged.
+        AppLog.install(this)
         CrashLogRecorder.install(this)
         AppLogCollector.init(this)
     }

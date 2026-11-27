@@ -39,6 +39,9 @@ class AppTimerReceiver : BroadcastReceiver() {
                         WifiAutomationManager.setGlobalWifiLocked(appContext, locked = false)
                     }
                 }
+            } catch (_: Throwable) {
+                // A failure here must never escape the coroutine and crash the process; the timers
+                // and Wi-Fi automations simply retry on their next alarm.
             } finally {
                 pendingResult.finish()
             }

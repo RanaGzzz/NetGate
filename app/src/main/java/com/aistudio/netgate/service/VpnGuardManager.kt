@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
+import com.aistudio.netgate.AppLog
 import com.aistudio.netgate.data.local.NetGateDatabase
 import com.aistudio.netgate.data.model.VpnGuardConnectionState
 import com.aistudio.netgate.data.model.VpnGuardProfile
@@ -164,7 +165,13 @@ object VpnGuardManager {
             )
         }
         return try {
-            connectInternal(context, profile)
+            connectInternal(context, profile).also { result ->
+                result.exceptionOrNull()?.let { AppLog.error("VpnGuard", "connect failed", it) }
+            }
+        } catch (t: Throwable) {
+            // Same fallback as before: the failure still reaches the caller unchanged.
+            AppLog.error("VpnGuard", "connect failed", t)
+            throw t
         } finally {
             connectRequestGuard.set(false)
         }

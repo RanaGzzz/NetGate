@@ -17,6 +17,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
+import com.aistudio.netgate.AppLog
 import com.aistudio.netgate.MainActivity
 import com.aistudio.netgate.R
 import com.aistudio.netgate.data.local.AdFilterListEntity
@@ -320,6 +321,12 @@ class NetGateVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             ACTION_RELOAD_RULES -> {
+                // The service is started with startForegroundService(), so the foreground
+                // notification must go up before any early return, otherwise Android 26+ kills the
+                // app with ForegroundServiceDidNotStartInTimeException.
+                startForegroundCompat(
+                    buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
+                )
                 if (prepare(this) != null) {
                     AppLogCollector.warn("Service", "Firewall reload aborted", "Missing VpnService consent")
                     serviceScope.launch {
@@ -328,9 +335,6 @@ class NetGateVpnService : VpnService() {
                     }
                     return START_NOT_STICKY
                 }
-                startForegroundCompat(
-                    buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
-                )
                 // Android allows a single VpnService per profile: if the VPN Guard tunnel owns the
                 // slot (or a transition is in flight) this service must not establish a second one.
                 if (!VpnSessionCoordinator.instance.claimLocalFirewall()) {
@@ -346,6 +350,10 @@ class NetGateVpnService : VpnService() {
                 return START_STICKY
             }
             else -> {
+                // See ACTION_RELOAD_RULES: start foreground before the consent/claim early returns.
+                startForegroundCompat(
+                    buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
+                )
                 if (prepare(this) != null) {
                     AppLogCollector.warn("Service", "Firewall start aborted", "Missing VpnService consent")
                     serviceScope.launch {
@@ -354,9 +362,6 @@ class NetGateVpnService : VpnService() {
                     }
                     return START_NOT_STICKY
                 }
-                startForegroundCompat(
-                    buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
-                )
                 if (!VpnSessionCoordinator.instance.claimLocalFirewall()) {
                     AppLogCollector.warn("Service", "Firewall start deferred", "VPN Guard holds the VPN slot")
                     serviceScope.launch {
@@ -778,6 +783,7 @@ class NetGateVpnService : VpnService() {
                 stopProxyServerLocked()
                 val established = buildGlobalWifiLockInterface()
                 if (established == null) {
+                    AppLog.warn("Tunnel", "global Wi-Fi lock interface establish failed")
                     publishRuntimeState(
                         isTunnelActive = false,
                         netType = netType,
@@ -808,6 +814,7 @@ class NetGateVpnService : VpnService() {
                 stopProxyServerLocked()
                 val (established, addedCount) = buildPerAppSinkholeInterface(plan.blockedPackages, netType)
                 if (established == null || addedCount == 0) {
+                    AppLog.warn("Tunnel", "per-app sinkhole interface establish failed")
                     publishRuntimeState(
                         isTunnelActive = false,
                         netType = netType,
@@ -854,6 +861,7 @@ class NetGateVpnService : VpnService() {
                     proxyPort = activeProxyPort
                 )
                 if (established == null) {
+                    AppLog.warn("Tunnel", "hybrid DNS proxy interface establish failed")
                     stopProxyServerLocked()
                     publishRuntimeState(
                         isTunnelActive = false,
@@ -2124,10 +2132,18 @@ class NetGateVpnService : VpnService() {
             val intent = Intent(context, NetGateVpnService::class.java).apply {
                 action = ACTION_START
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            // On Android 12+ a background start can be refused with
+            // ForegroundServiceStartNotAllowedException. Swallow it (and any other start failure)
+            // without touching state: the caller stays alive and the user can retry from the UI.
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (_: Exception) {
+                // ForegroundServiceStartNotAllowedException (API 31+), IllegalStateException,
+                // SecurityException: the service simply does not start this time.
             }
         }
 
@@ -2153,10 +2169,16 @@ class NetGateVpnService : VpnService() {
                 val intent = Intent(context, NetGateVpnService::class.java).apply {
                     action = ACTION_RELOAD_RULES
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
+                // A refused background start (ForegroundServiceStartNotAllowedException on API 31+)
+                // must not propagate: runtime state stays exactly as it was before the request.
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } catch (_: Exception) {
+                    // Reload skipped; the running service keeps its current rules.
                 }
             } else {
                 _runtimeState.value = _runtimeState.value.copy(dpiAutopilotLearnedCount = 0)

@@ -1,5 +1,6 @@
 package com.aistudio.netgate.service
 
+import com.aistudio.netgate.AppLog
 import com.aistudio.netgate.data.model.AdBlockReason
 import com.aistudio.netgate.data.model.DpiBypassMode
 import java.io.BufferedInputStream
@@ -137,7 +138,9 @@ class LocalFilteringProxyServer(
                 }
             }
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Port/bind failures carry no user data; keep the same fallback (stopped, return false).
+            AppLog.error("LocalProxy", "start failed", e)
             running.set(false)
             stop()
             false
