@@ -113,6 +113,7 @@ import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.data.model.formatSpeedBytesPerSec
 import com.aistudio.netgate.service.OpenVpnConfigHelper
 import com.aistudio.netgate.service.WireGuardConfigHelper
+import com.aistudio.netgate.service.security.KeystoreSecretBox
 import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.DataAccent
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
@@ -184,12 +185,18 @@ fun VpnGuardContent(
     }
 
     val connectWithPermissionCheck: (VpnGuardProfile) -> Unit = { profile ->
-        val prepareIntent = VpnService.prepare(context)
-        if (prepareIntent == null) {
-            onConnectProfile(profile)
+        if (KeystoreSecretBox.isUnreadable(profile.rawConfig)) {
+            // A profile whose Keystore key is gone cannot tunnel: say so instead of starting a
+            // connection that is guaranteed to fail with a parser error.
+            onNotifyMessage("${profile.name}: credentials unavailable — re-import the configuration")
         } else {
-            pendingConnectProfile = profile
-            vpnPermissionLauncher.launch(prepareIntent)
+            val prepareIntent = VpnService.prepare(context)
+            if (prepareIntent == null) {
+                onConnectProfile(profile)
+            } else {
+                pendingConnectProfile = profile
+                vpnPermissionLauncher.launch(prepareIntent)
+            }
         }
     }
 
@@ -1070,6 +1077,16 @@ private fun VpnGuardProfileCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    if (KeystoreSecretBox.isUnreadable(profile.rawConfig)) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Credentials unavailable — re-import this profile",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 IconButton(onClick = onDelete) {

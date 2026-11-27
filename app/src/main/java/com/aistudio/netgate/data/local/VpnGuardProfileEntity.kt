@@ -5,6 +5,7 @@ import androidx.room.PrimaryKey
 import com.aistudio.netgate.data.model.VpnGuardProfile
 import com.aistudio.netgate.data.model.VpnGuardProviderType
 import com.aistudio.netgate.data.model.VpnGuardRoutingMode
+import com.aistudio.netgate.service.security.KeystoreSecretBox
 
 @Entity(tableName = "vpn_guard_profiles")
 data class VpnGuardProfileEntity(
@@ -35,7 +36,9 @@ data class VpnGuardProfileEntity(
             id = id,
             name = name,
             providerType = provider,
-            rawConfig = rawConfig,
+            // Profiles hold WireGuard private keys / OpenVPN credentials: open them on read and
+            // seal them again on write, so the database file never contains usable secrets.
+            rawConfig = KeystoreSecretBox.open(rawConfig),
             endpointHost = endpointHost,
             interfaceAddresses = interfaceAddresses,
             dnsServers = dnsServers,
@@ -52,7 +55,7 @@ data class VpnGuardProfileEntity(
             id = model.id,
             name = model.name,
             providerType = model.providerType.name,
-            rawConfig = model.rawConfig,
+            rawConfig = KeystoreSecretBox.seal(model.rawConfig),
             endpointHost = model.endpointHost,
             interfaceAddresses = model.interfaceAddresses,
             dnsServers = model.dnsServers,
