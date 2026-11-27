@@ -339,6 +339,8 @@ class AdBlockUpgradeTest {
             appName = "Chrome"
         )
 
+        // Snapshot publication is coalesced to at most one per second; flush for a deterministic read.
+        AdBlockAnalyticsHub.flushSnapshot()
         val summary = AdBlockAnalyticsHub.summaryFlow.value
         assertEquals(6, summary.totalRequests)
         assertEquals(5, summary.totalBlockedRequests)

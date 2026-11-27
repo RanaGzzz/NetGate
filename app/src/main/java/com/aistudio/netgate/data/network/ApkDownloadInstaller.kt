@@ -4,6 +4,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.core.content.FileProvider
@@ -100,6 +102,12 @@ object ApkDownloadInstaller {
         if (!apkFile.exists() || apkFile.length() <= 0L) {
             throw IllegalArgumentException("Update file is missing")
         }
+        // A checksum from a release page only proves the bytes we expected arrived. The signing
+        // certificate is what actually stops a foreign-signer APK from replacing NetGate, so it is
+        // required here for both the OTA and GitHub download paths.
+        if (!isSignedBySameCertificate(context, apkFile)) {
+            throw IllegalArgumentException("Update signature does not match the installed app")
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val installer = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(
@@ -133,6 +141,50 @@ object ApkDownloadInstaller {
         } else {
             throw err
         }
+    }
+
+    /** True when [apkFile] is signed by the same certificate set as the running app. */
+    internal fun isSignedBySameCertificate(context: Context, apkFile: File): Boolean = runCatching {
+        val pm = context.packageManager
+        val archiveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageArchiveInfo(
+                apkFile.absolutePath,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNATURES)
+        } ?: return false
+        val installedInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+        }
+        val archiveSigners = signerDigests(archiveInfo) ?: return false
+        val installedSigners = signerDigests(installedInfo) ?: return false
+        archiveSigners.isNotEmpty() && archiveSigners == installedSigners
+    }.getOrDefault(false)
+
+    private fun signerDigests(info: PackageInfo): Set<String>? {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = info.signingInfo ?: return null
+            if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures
+        } ?: return null
+        return signatures
+            .map { signature ->
+                MessageDigest.getInstance("SHA-256")
+                    .digest(signature.toByteArray())
+                    .joinToString("") { byte -> "%02x".format(byte) }
+            }
+            .toSet()
     }
 
     private fun launchSystemInstaller(context: Context, apkFile: File) {

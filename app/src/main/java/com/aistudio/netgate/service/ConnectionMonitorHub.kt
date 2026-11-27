@@ -11,6 +11,7 @@ import com.aistudio.netgate.data.model.SiteConnectionRecord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +29,12 @@ object ConnectionMonitorHub {
     private val lock = Any()
     private val liveRecords = ArrayDeque<SiteConnectionRecord>()
     private val appNameCache = HashMap<String, String>()
+
+    private const val FLUSH_INTERVAL_MS = 2_000L
+    private const val MAX_PENDING_EVENTS = 400
+    private val pendingLock = Any()
+    private val pendingEvents = java.util.LinkedHashMap<String, ConnectionEventEntity>()
+    private val flushScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
 
     @Volatile
     private var daoRef: ConnectionHistoryDao? = null
@@ -48,6 +55,12 @@ object ConnectionMonitorHub {
             liveRecords.clear()
             _liveConnectionsFlow.value = emptyList()
         }
+    }
+
+    /** Flushes buffered connection events, e.g. when the tunnel stops. */
+    fun flushNow() {
+        flushScheduled.set(false)
+        scope.launch { flushPendingConnections() }
     }
 
     fun recordConnection(
@@ -110,41 +123,102 @@ object ConnectionMonitorHub {
 
         updateLiveDeque(record)
 
-        scope.launch {
-            runCatching {
-                dao.recordOrMergeConnection(
-                    ConnectionEventEntity(
-                        domain = record.domain,
-                        remoteIp = record.remoteIp,
-                        remotePort = record.remotePort,
-                        protocol = record.protocol,
-                        appPackage = record.appPackage,
-                        appName = record.appName,
-                        countryCode = record.countryCode,
-                        countryName = record.countryName,
-                        regionName = record.regionName,
-                        ispOrOrg = record.ispOrOrg,
-                        bytesSent = record.bytesSent,
-                        bytesReceived = record.bytesReceived,
-                        actionStatus = record.actionStatus,
-                        isAdBlocked = record.isAdBlocked,
-                        dpiBypassed = record.dpiBypassed,
-                        riskLevel = record.riskLevel.name,
-                        riskReason = record.riskReason,
-                        hitCount = 1,
-                        firstSeenAt = now,
-                        lastSeenAt = now
-                    )
-                )
-            }
+        // Persisting used to mean a Room write (plus a trim query) per connection event, on every
+        // proxied request. Events are now merged in memory and flushed in one transaction.
+        enqueueForPersistence(
+            ConnectionEventEntity(
+                domain = record.domain,
+                remoteIp = record.remoteIp,
+                remotePort = record.remotePort,
+                protocol = record.protocol,
+                appPackage = record.appPackage,
+                appName = record.appName,
+                countryCode = record.countryCode,
+                countryName = record.countryName,
+                regionName = record.regionName,
+                ispOrOrg = record.ispOrOrg,
+                bytesSent = record.bytesSent,
+                bytesReceived = record.bytesReceived,
+                actionStatus = record.actionStatus,
+                isAdBlocked = record.isAdBlocked,
+                dpiBypassed = record.dpiBypassed,
+                riskLevel = record.riskLevel.name,
+                riskReason = record.riskReason,
+                hitCount = 1,
+                firstSeenAt = now,
+                lastSeenAt = now
+            )
+        )
 
-            if (GeoIpResolver.shouldFetchOnline(cleanIp)) {
-                val onlineGeo = GeoIpResolver.lookupOnlineBlocking(cleanIp)
-                if (onlineGeo != null) {
-                    applyGeoBackfill(dao, cleanIp, onlineGeo)
+        if (GeoIpResolver.shouldFetchOnline(cleanIp)) {
+            scope.launch {
+                runCatching {
+                    val onlineGeo = GeoIpResolver.lookupOnlineBlocking(cleanIp)
+                    if (onlineGeo != null) {
+                        // Make sure the row exists before the backfill UPDATE runs against it.
+                        flushPendingConnections()
+                        applyGeoBackfill(dao, cleanIp, onlineGeo)
+                    }
                 }
             }
         }
+    }
+
+    private fun eventKey(event: ConnectionEventEntity): String =
+        "${event.domain}|${event.remoteIp}|${event.remotePort}|${event.appPackage}|${event.actionStatus}"
+
+    private fun enqueueForPersistence(event: ConnectionEventEntity) {
+        var forceFlush = false
+        synchronized(pendingLock) {
+            val key = eventKey(event)
+            val existing = pendingEvents[key]
+            pendingEvents[key] = if (existing == null) {
+                event
+            } else {
+                existing.copy(
+                    remotePort = if (event.remotePort > 0) event.remotePort else existing.remotePort,
+                    bytesSent = existing.bytesSent + event.bytesSent,
+                    bytesReceived = existing.bytesReceived + event.bytesReceived,
+                    hitCount = existing.hitCount + event.hitCount,
+                    lastSeenAt = maxOf(existing.lastSeenAt, event.lastSeenAt)
+                )
+            }
+            forceFlush = pendingEvents.size >= MAX_PENDING_EVENTS
+        }
+        if (forceFlush) {
+            scope.launch { flushPendingConnections() }
+        } else {
+            schedulePendingFlush()
+        }
+    }
+
+    private fun schedulePendingFlush() {
+        if (!flushScheduled.compareAndSet(false, true)) return
+        scope.launch {
+            delay(FLUSH_INTERVAL_MS)
+            flushScheduled.set(false)
+            flushPendingConnections()
+        }
+    }
+
+    private suspend fun flushPendingConnections() {
+        val dao = daoRef ?: return
+        val batch = synchronized(pendingLock) {
+            if (pendingEvents.isEmpty()) {
+                emptyList()
+            } else {
+                pendingEvents.values.toList().also { pendingEvents.clear() }
+            }
+        }
+        if (batch.isEmpty()) return
+        runCatching { dao.recordOrMergeConnections(batch) }
+            .onSuccess {
+                synchronized(pendingLock) {
+                    if (pendingEvents.isNotEmpty() && !flushScheduled.get()) {
+                        schedulePendingFlush()
+                    }
+                }
+            }
     }
 
     private fun updateLiveDeque(incoming: SiteConnectionRecord) {

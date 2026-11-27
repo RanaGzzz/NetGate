@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicLong
 object AdBlockAnalyticsHub {
 
     private const val PUBLISH_INTERVAL_MS = 1_000L
+    private const val HIT_MAP_MAX_ENTRIES = 4096
+    private const val HIT_MAP_EVICT_COUNT = 512
 
     private data class DomainCounter(
         val domain: String,
@@ -72,8 +74,8 @@ object AdBlockAnalyticsHub {
         val hitKey = "$cleanDomain|${status.name}"
         val hitCounter = entryHitMap.computeIfAbsent(hitKey) { AtomicLong(0L) }
         val currentHitCount = hitCounter.incrementAndGet().toInt()
-        if (entryHitMap.size > 4096) {
-            entryHitMap.clear()
+        if (entryHitMap.size > HIT_MAP_MAX_ENTRIES) {
+            trimColdestHits()
         }
 
         if (isBlocked) {
@@ -126,7 +128,10 @@ object AdBlockAnalyticsHub {
             appCounter.blockedRequests.incrementAndGet()
         }
 
-        publishSnapshot()
+        // Publishing used to sort every domain and app on every single DNS packet, on the packet
+        // loop's thread. It is now coalesced to at most one snapshot per PUBLISH_INTERVAL_MS with a
+        // trailing flush, so counters still settle as soon as traffic pauses.
+        requestSnapshotPublish()
         return currentHitCount
     }
 
@@ -144,7 +149,24 @@ object AdBlockAnalyticsHub {
         entryHitMap.clear()
         _summaryFlow.value = AdAnalyticsSummary()
         _uiSummaryFlow.value = AdAnalyticsSummary()
-        lastUiPublishAtMs = System.currentTimeMillis()
+        lastSnapshotPublishAtMs = System.currentTimeMillis()
+    }
+
+    /**
+     * Publishes any coalesced snapshot immediately. Call before the tunnel stops so the dashboard
+     * shows final numbers instead of the last tick.
+     */
+    fun flushSnapshot() {
+        snapshotPublishPending.set(false)
+        publishSnapshot()
+    }
+
+    /** Evicts the coldest filter-log entries instead of wiping every hit count at once. */
+    private fun trimColdestHits() {
+        entryHitMap.entries
+            .sortedBy { it.value.get() }
+            .take(HIT_MAP_EVICT_COUNT)
+            .forEach { entryHitMap.remove(it.key, it.value) }
     }
 
     private fun trimLowestDomains() {
@@ -159,46 +181,43 @@ object AdBlockAnalyticsHub {
     /**
      * Coalesced copy of [summaryFlow] for the dashboard.
      *
-     * [summaryFlow] stays exact (it is read synchronously after recording events), but the dashboard
-     * used to collect it directly, so every ad/DNS packet recomposed the whole UI state. The UI now
-     * collects this flow, which is refreshed at most once per [PUBLISH_INTERVAL_MS] with a trailing
-     * flush, so counts still settle accurately when traffic stops.
+     * Both flows are refreshed at most once per [PUBLISH_INTERVAL_MS] (with a trailing flush), so
+     * counts settle accurately when traffic stops without recomposing the whole UI per packet.
      */
     private val _uiSummaryFlow = MutableStateFlow(AdAnalyticsSummary())
     val uiSummaryFlow: StateFlow<AdAnalyticsSummary> = _uiSummaryFlow.asStateFlow()
 
     @Volatile
-    private var lastUiPublishAtMs = 0L
+    private var lastSnapshotPublishAtMs = 0L
 
-    private val uiPublishPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val snapshotPublishPending = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val uiPublishExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ad-analytics-ui-publisher").apply { isDaemon = true }
     }
 
-    private fun publishUiSnapshot(summary: AdAnalyticsSummary) {
+    private fun requestSnapshotPublish() {
         val now = System.currentTimeMillis()
-        if (now - lastUiPublishAtMs >= PUBLISH_INTERVAL_MS) {
-            lastUiPublishAtMs = now
-            _uiSummaryFlow.value = summary
+        val elapsed = now - lastSnapshotPublishAtMs
+        if (elapsed >= PUBLISH_INTERVAL_MS) {
+            publishSnapshot(now)
             return
         }
-        if (!uiPublishPending.compareAndSet(false, true)) return
-        val delayMs = (PUBLISH_INTERVAL_MS - (now - lastUiPublishAtMs)).coerceAtLeast(16L)
+        if (!snapshotPublishPending.compareAndSet(false, true)) return
         runCatching {
             uiPublishExecutor.schedule(
                 {
-                    uiPublishPending.set(false)
-                    lastUiPublishAtMs = System.currentTimeMillis()
-                    _uiSummaryFlow.value = _summaryFlow.value
+                    snapshotPublishPending.set(false)
+                    publishSnapshot(System.currentTimeMillis())
                 },
-                delayMs,
+                (PUBLISH_INTERVAL_MS - elapsed).coerceAtLeast(16L),
                 java.util.concurrent.TimeUnit.MILLISECONDS
             )
         }
     }
 
-    private fun publishSnapshot() {
+    private fun publishSnapshot(nowMs: Long = System.currentTimeMillis()) {
+        lastSnapshotPublishAtMs = nowMs
         val topDomains = blockedDomainMap.values
             .map {
                 TopDomainStat(
@@ -236,6 +255,6 @@ object AdBlockAnalyticsHub {
             topApps = topApps
         )
         _summaryFlow.value = summary
-        publishUiSnapshot(summary)
+        _uiSummaryFlow.value = summary
     }
 }

@@ -104,9 +104,10 @@ object AppLogCollector {
         if (!logcatStarted.compareAndSet(false, true)) return
 
         scope.launch {
+            var process: java.lang.Process? = null
             runCatching {
                 val pid = Process.myPid().toString()
-                val process = ProcessBuilder(
+                process = ProcessBuilder(
                     "logcat",
                     "-v",
                     "threadtime",
@@ -139,8 +140,11 @@ object AppLogCollector {
                         }
                     }
                 }
-                runCatching { process.destroy() }
+            }.onFailure {
+                logcatStarted.set(false)
             }
+            // Always reap the child, even when the read loop throws or the scope is cancelled.
+            process?.let { runCatching { it.destroy() } }
         }
     }
 

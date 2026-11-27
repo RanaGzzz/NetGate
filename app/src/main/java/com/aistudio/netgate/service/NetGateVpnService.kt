@@ -75,6 +75,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 data class VpnRuntimeState(
@@ -114,7 +115,6 @@ class NetGateVpnService : VpnService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val tunnelMutex = Mutex()
-    private val tunWriteLock = Any()
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var drainJob: Job? = null
@@ -1195,7 +1195,7 @@ class NetGateVpnService : VpnService() {
         blockedPackages: List<String>
     ) {
         val buffer = ByteArray(32767)
-        val output = FileOutputStream(pfd.fileDescriptor)
+        val output = TunOutput(FileOutputStream(pfd.fileDescriptor))
         try {
             FileInputStream(pfd.fileDescriptor).use { input ->
                 while (serviceScope.isActive) {
@@ -1213,7 +1213,7 @@ class NetGateVpnService : VpnService() {
                         BlockedPacketAction.REJECT_DNS_NXDOMAIN -> {
                             val dnsQuery = DnsPacketFilter.parseUdpDnsQuery(buffer, bytesRead)
                             if (dnsQuery != null) {
-                                writeToTun(dnsEngine.buildBlockedResponse(dnsQuery), output)
+                                output.write(dnsEngine.buildBlockedResponse(dnsQuery))
                                 recordInterceptedAppPacket(
                                     parsed = parsed,
                                     domainOrHost = dnsQuery.domain,
@@ -1223,9 +1223,7 @@ class NetGateVpnService : VpnService() {
                             }
                             val icmpPacket = DnsPacketFilter.buildIcmpUnreachablePacket(buffer, bytesRead)
                             if (icmpPacket != null) {
-                                synchronized(tunWriteLock) {
-                                    runCatching { output.write(icmpPacket) }
-                                }
+                                output.write(icmpPacket)
                             }
                         }
 
@@ -1233,18 +1231,14 @@ class NetGateVpnService : VpnService() {
                             // Reset both new SYN handshakes and already-open sockets immediately.
                             val rstPacket = DnsPacketFilter.buildTcpResetPacket(buffer, bytesRead)
                             if (rstPacket != null) {
-                                synchronized(tunWriteLock) {
-                                    runCatching { output.write(rstPacket) }
-                                }
+                                output.write(rstPacket)
                             }
                         }
 
                         BlockedPacketAction.REJECT_ICMP_UNREACHABLE -> {
                             val icmpPacket = DnsPacketFilter.buildIcmpUnreachablePacket(buffer, bytesRead)
                             if (icmpPacket != null) {
-                                synchronized(tunWriteLock) {
-                                    runCatching { output.write(icmpPacket) }
-                                }
+                                output.write(icmpPacket)
                             }
                         }
 
@@ -1264,6 +1258,10 @@ class NetGateVpnService : VpnService() {
             runCatching { output.close() }
         }
     }
+
+    private val dnsQueryDispatcher = Dispatchers.IO.limitedParallelism(DNS_QUERY_CONCURRENCY)
+    private val dnsInFlight = AtomicInteger(0)
+    private val droppedDnsQueries = AtomicLong(0L)
 
     private fun recordInterceptedAppPacket(
         parsed: ParsedIpPacket,
@@ -1368,7 +1366,7 @@ class NetGateVpnService : VpnService() {
 
     private fun runDnsProxyLoop(pfd: ParcelFileDescriptor) {
         val buffer = ByteArray(32767)
-        val output = FileOutputStream(pfd.fileDescriptor)
+        val output = TunOutput(FileOutputStream(pfd.fileDescriptor))
         try {
             FileInputStream(pfd.fileDescriptor).use { input ->
                 while (serviceScope.isActive) {
@@ -1379,17 +1377,13 @@ class NetGateVpnService : VpnService() {
                     val packetCopy = buffer.copyOf(bytesRead)
                     val query = DnsPacketFilter.parseUdpDnsQuery(packetCopy, bytesRead)
                     if (query != null) {
-                        serviceScope.launch(Dispatchers.IO) {
-                            handleDnsQuery(query, output)
-                        }
+                        dispatchDnsQuery(query, output)
                     } else {
                         // Send immediate TCP RST to DoH (443) / DoT (853) connections on routed resolver IPs
                         // so Chrome & Firefox instantly fall back to NetGate's filtered DNS.
                         val tcpReset = DnsPacketFilter.buildTcpResetPacket(packetCopy, bytesRead)
                         if (tcpReset != null) {
-                            synchronized(tunWriteLock) {
-                                runCatching { output.write(tcpReset) }
-                            }
+                            output.write(tcpReset)
                         }
                     }
                 }
@@ -1401,7 +1395,27 @@ class NetGateVpnService : VpnService() {
         }
     }
 
-    private fun handleDnsQuery(query: ParsedDnsQuery, output: FileOutputStream) {
+    /**
+     * Bounds how many DNS lookups can be resolving at once. Every packet used to get its own
+     * unbounded `Dispatchers.IO` coroutine, so a stalled upstream could spawn hundreds of them and
+     * exhaust the shared IO pool used by the rest of the app.
+     */
+    private fun dispatchDnsQuery(query: ParsedDnsQuery, output: TunOutput) {
+        if (dnsInFlight.get() >= MAX_IN_FLIGHT_DNS_QUERIES) {
+            droppedDnsQueries.incrementAndGet()
+            return
+        }
+        dnsInFlight.incrementAndGet()
+        serviceScope.launch(dnsQueryDispatcher) {
+            try {
+                if (output.isUsable) handleDnsQuery(query, output)
+            } finally {
+                dnsInFlight.decrementAndGet()
+            }
+        }
+    }
+
+    private fun handleDnsQuery(query: ParsedDnsQuery, output: TunOutput) {
         val policy = policyRef.get()
         val isCanary = DnsPacketFilter.isInternalBypassCanary(query.domain)
         val owner = if (!isCanary) resolveDnsQueryOwner(query) else null
@@ -1636,9 +1650,41 @@ class NetGateVpnService : VpnService() {
         )
     }
 
-    private fun writeToTun(packet: ByteArray, output: FileOutputStream) {
-        synchronized(tunWriteLock) {
-            runCatching { output.write(packet) }
+    private fun writeToTun(packet: ByteArray, output: TunOutput) {
+        output.write(packet)
+    }
+
+    /**
+     * Write side of the TUN descriptor with a closed latch.
+     *
+     * Interface rebuilds close the old [ParcelFileDescriptor] while DNS coroutines may still be
+     * resolving, and every write used to rely on a swallowed exception instead of stopping. The
+     * latch makes those writes no-ops and lets in-flight work bail out instead of logging forever.
+     */
+    private class TunOutput(private val stream: FileOutputStream) {
+        @Volatile
+        private var closed = false
+
+        val isUsable: Boolean get() = !closed
+
+        fun write(packet: ByteArray): Boolean {
+            synchronized(this) {
+                if (closed) return false
+                return try {
+                    stream.write(packet)
+                    true
+                } catch (_: IOException) {
+                    false
+                }
+            }
+        }
+
+        fun close() {
+            synchronized(this) {
+                if (closed) return
+                closed = true
+                runCatching { stream.close() }
+            }
         }
     }
 
@@ -2054,6 +2100,8 @@ class NetGateVpnService : VpnService() {
         )
         private const val MAX_RECENT_BLOCKED_DOMAINS = 8
         private const val MAX_DNS_LOGS = 120
+        private const val MAX_IN_FLIGHT_DNS_QUERIES = 64
+        private const val DNS_QUERY_CONCURRENCY = 16
 
         private const val CHANNEL_ID = "netgate_firewall_channel"
         private const val NOTIFICATION_ID = 4041

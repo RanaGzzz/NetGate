@@ -57,6 +57,14 @@ interface ConnectionHistoryDao {
     @Query("DELETE FROM connection_events")
     suspend fun clearAll()
 
+    /** Merges a coalesced batch in a single transaction instead of one write per connection. */
+    @Transaction
+    suspend fun recordOrMergeConnections(events: List<ConnectionEventEntity>) {
+        for (event in events) {
+            recordOrMergeConnection(event)
+        }
+    }
+
     @Transaction
     suspend fun recordOrMergeConnection(event: ConnectionEventEntity) {
         val existing = findMatchingEvent(

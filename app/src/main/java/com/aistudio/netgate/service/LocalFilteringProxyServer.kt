@@ -856,7 +856,16 @@ class LocalFilteringProxyServer(
         }
         if (enforceClientQuotaOrBan()) return
 
-        workerExecutor?.execute {
+        // The worker pool is nulled when the proxy stops. Handing the relay to a null executor used
+        // to leave both sockets open forever, so fail closed and release them here.
+        val executor = workerExecutor
+        if (executor == null) {
+            runCatching { client.close() }
+            runCatching { upstream.close() }
+            return
+        }
+
+        executor.execute {
             try {
                 copyStreamWithProgress(clientIn, upstreamOut, abortedByPolicy, throttleBytesPerSec) { chunkBytes ->
                     val pending = sentCounter.addAndGet(chunkBytes)
@@ -877,7 +886,7 @@ class LocalFilteringProxyServer(
             }
         }
 
-        workerExecutor?.execute {
+        executor.execute {
             try {
                 copyStreamWithProgress(upstreamIn, clientOut, abortedByPolicy, throttleBytesPerSec) { chunkBytes ->
                     val pending = recvCounter.addAndGet(chunkBytes)
@@ -898,7 +907,7 @@ class LocalFilteringProxyServer(
             }
         }
 
-        workerExecutor?.execute {
+        executor.execute {
             try {
                 relayDoneLatch.await()
             } catch (_: InterruptedException) {
