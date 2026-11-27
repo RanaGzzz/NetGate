@@ -1,5 +1,7 @@
 package com.aistudio.netgate.service
 
+import com.aistudio.netgate.data.network.LocalNetworkPermission
+
 import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.content.Context
@@ -151,6 +153,15 @@ object HotspotProxyManager {
     }
 
     fun startOrUpdate(context: Context, prefs: FirewallPreferencesState): Boolean {
+        // Android 17+ needs an explicit grant before anything may reach LAN clients.
+        if (!LocalNetworkPermission.isGranted(context)) {
+            _runtimeState.value = _runtimeState.value.copy(
+                isProxyRunning = false,
+                errorMessage = LocalNetworkPermission.DENIED_MESSAGE
+            )
+            updatePreferencesOnly(prefs)
+            return false
+        }
         updatePreferencesOnly(prefs)
         val configuration = ProxyConfiguration.hotspot(
             port = prefs.hotspotProxyPort,
