@@ -50,6 +50,21 @@ object AppLogCollector {
 
     const val MAX_ENTRIES = 500
 
+    private val ALLOWED_TAGS = setOf(
+        "AdBlockFilterEngine",
+        "AndroidRuntime",
+        "FirewallViewModel",
+        "KeystoreSecretBox",
+        "NetworkMonitorService",
+        "WifiConnector"
+    )
+    private val EXCLUDED_TAGS = setOf(
+        "IJankManager",
+        "OplusBracketLog",
+        "AssetManager2",
+        "WindowOnBackDispatcher"
+    )
+
     private val nextId = AtomicLong(1L)
     private val initialized = AtomicBoolean(false)
     private val logcatStarted = AtomicBoolean(false)
@@ -120,14 +135,11 @@ object AppLogCollector {
                     while (isActive) {
                         val line = reader.readLine() ?: break
                         parseThreadtimeLine(line, targetPid = pid)?.let { (level, tag, msg) ->
-                            // Strictly NetGate's own events & errors; skip generic framework chatter
-                            val isNetGateTag = tag.contains("NetGate", ignoreCase = true) ||
-                                tag.contains("Firewall", ignoreCase = true) ||
-                                tag.contains("Vpn", ignoreCase = true) ||
-                                tag.contains("Dns", ignoreCase = true) ||
-                                tag.contains("Dpi", ignoreCase = true) ||
-                                tag.contains("AndroidRuntime", ignoreCase = true)
-                            if (isNetGateTag || level == AppLogLevel.ERROR) {
+                            if (
+                                tag in ALLOWED_TAGS &&
+                                tag != BuildConfig.APPLICATION_ID.takeLast(15) &&
+                                tag !in EXCLUDED_TAGS
+                            ) {
                                 append(
                                     level = level,
                                     tag = tag.ifBlank { "Logcat" },
@@ -291,7 +303,7 @@ object AppLogCollector {
     fun sanitizeBrowsingHostnames(text: String): String {
         if (text.isEmpty()) return text
         val domainPattern = Regex(
-            """(?<![a-zA-Z0-9_])(?!(?:com\.aistudio|android|androidx|kotlinx|java|javax)\b)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|org|net|io|edu|gov|co|app|dev|me|info|biz|uk|de|jp|fr|ru|br|it|nl|ca|in|xyz|top|live|site|online|tech|store|news|club|space|pro|tv|cc|ly|to|ai|is|gg|[a-zA-Z]{2,6})(?![a-zA-Z0-9_])""",
+            """(?<![a-zA-Z0-9_.])(?!(?:com\.aistudio|android|androidx|kotlinx|java|javax)\b)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|org|net|io|edu|gov|co|app|dev|me|info|biz|uk|de|jp|fr|ru|br|it|nl|ca|in|xyz|top|live|site|online|tech|store|news|club|space|pro|tv|cc|ly|to|ai|is|gg|[a-z]{2})(?![a-zA-Z0-9_])""",
             RegexOption.IGNORE_CASE
         )
         return domainPattern.replace(text) { matchResult ->
