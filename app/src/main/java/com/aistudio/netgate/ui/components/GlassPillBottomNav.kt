@@ -61,7 +61,6 @@ import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineBackdrop
 import com.aistudio.netgate.ui.theme.BlurEngine.frostedChromaticEdge
 import com.aistudio.netgate.ui.theme.BlurEngine.liquidGlassRefractionEdge
-import com.aistudio.netgate.ui.theme.EmeraldBright
 import com.aistudio.netgate.ui.theme.LiquidGlassAqua
 import com.aistudio.netgate.ui.theme.LiquidGlassCyan
 import com.aistudio.netgate.ui.theme.LiquidGlassPrismStops
@@ -561,11 +560,7 @@ private fun GlassPillTab(
     val selectedTint = when (themeStyle) {
         NetGateThemeStyle.MATERIAL_3_EXPRESSIVE,
         NetGateThemeStyle.MATERIAL_YOU_LITE -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> if (useDynamicColor) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            EmeraldBright
-        }
+        else -> MaterialTheme.colorScheme.primary
     }
 
     val contentTint by animateColorAsState(
