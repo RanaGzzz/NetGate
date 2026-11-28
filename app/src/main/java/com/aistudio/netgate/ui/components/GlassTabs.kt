@@ -55,6 +55,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -613,29 +617,31 @@ private fun GlassBottomNavTabs(
             ) {
                 val isDenseBar = visibleCount >= 7
                 val gap = if (isDenseBar) 1.dp else 2.dp
+                // Small inset at both ends of the scrolling strip so the first icon is not flush
+                // against the rounded edge; the next tab still peeks in as a sliver on the right.
+                val edgePad = if (needsScroll) 6.dp else 0.dp
                 val tabWidth = if (needsScroll) {
-                    // visibleCount full tabs + a 0.4 tab sliver of the next one
-                    ((maxWidth - gap * visibleCount) / (visibleCount + 0.4f)).coerceAtLeast(30.dp)
+                    // edgePad + visibleCount full tabs + a 0.4 tab sliver of the next one
+                    ((maxWidth - edgePad - gap * visibleCount) / (visibleCount + 0.4f)).coerceAtLeast(30.dp)
                 } else {
                     ((maxWidth - gap * (items.size - 1)) / items.size).coerceAtMost(72.dp)
                 }
                 val tabsTotalWidth = tabWidth * items.size + gap * (items.size - 1)
-                val contentWidth = if (needsScroll) tabsTotalWidth else maxWidth
-                // When there is no scrolling and the tabs don't fill the bar, centre them.
-                val startPad = if (needsScroll) 0.dp else ((maxWidth - tabsTotalWidth) / 2).coerceAtLeast(0.dp)
+                val contentWidth = if (needsScroll) tabsTotalWidth + edgePad * 2 else maxWidth
+                // Scrolling: inset by edgePad. Not scrolling and tabs don't fill the bar: centre them.
+                val startPad = if (needsScroll) edgePad else ((maxWidth - tabsTotalWidth) / 2).coerceAtLeast(0.dp)
                 val targetIndicatorOffset = startPad + (tabWidth + gap) * clampedSelected
-                val fadeColor = blur.containerColor
-                    .compositeOver(MaterialTheme.colorScheme.background)
-                    .copy(alpha = 0.92f)
-                val fadeLeftAlpha by animateFloatAsState(
+                // Edge fades are a transparency mask on the scrolling strip (no painted overlay), so
+                // the frosted glass behind the bar is never tinted or darkened.
+                val fadeStartAlpha = animateFloatAsState(
                     targetValue = if (needsScroll && canScrollBack) 1f else 0f,
                     animationSpec = if (blur.isReducedMotion) snap<Float>() else tween<Float>(180),
-                    label = "glassBottomNavFadeLeft"
+                    label = "glassBottomNavFadeStart"
                 )
-                val fadeRightAlpha by animateFloatAsState(
+                val fadeEndAlpha = animateFloatAsState(
                     targetValue = if (needsScroll && canScrollForward) 1f else 0f,
                     animationSpec = if (blur.isReducedMotion) snap<Float>() else tween<Float>(180),
-                    label = "glassBottomNavFadeRight"
+                    label = "glassBottomNavFadeEnd"
                 )
 
                 val indicatorOffset by animateDpAsState(
@@ -656,7 +662,7 @@ private fun GlassBottomNavTabs(
                 LaunchedEffect(clampedSelected, hasSelection, needsScroll, contentWidth) {
                     if (hasSelection && needsScroll && scrollState.maxValue > 0) {
                         val targetPx = with(density) {
-                            ((tabWidth + gap) * clampedSelected - maxWidth / 2 + tabWidth / 2).toPx()
+                            (edgePad + (tabWidth + gap) * clampedSelected - maxWidth / 2 + tabWidth / 2).toPx()
                         }
                         scrollState.animateScrollTo(targetPx.toInt().coerceIn(0, scrollState.maxValue))
                     }
@@ -664,7 +670,39 @@ private fun GlassBottomNavTabs(
 
                 Box(
                     modifier = if (needsScroll) {
-                        Modifier.horizontalScroll(scrollState)
+                        Modifier
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                val fadePx = 18.dp.toPx()
+                                val startA = fadeStartAlpha.value
+                                val endA = fadeEndAlpha.value
+                                if (startA > 0.01f) {
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(Color.Black.copy(alpha = startA), Color.Transparent),
+                                            startX = 0f,
+                                            endX = fadePx
+                                        ),
+                                        topLeft = Offset.Zero,
+                                        size = Size(fadePx, size.height),
+                                        blendMode = BlendMode.DstOut
+                                    )
+                                }
+                                if (endA > 0.01f) {
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = endA)),
+                                            startX = size.width - fadePx,
+                                            endX = size.width
+                                        ),
+                                        topLeft = Offset(size.width - fadePx, 0f),
+                                        size = Size(fadePx, size.height),
+                                        blendMode = BlendMode.DstOut
+                                    )
+                                }
+                            }
+                            .horizontalScroll(scrollState)
                     } else {
                         Modifier.fillMaxWidth()
                     }
@@ -790,30 +828,6 @@ private fun GlassBottomNavTabs(
                             }
                         }
                     }
-                }
-
-                // Edge fades hint that more tabs are hidden on that side.
-                if (fadeLeftAlpha > 0.01f) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .width(20.dp)
-                            .height(barHeight + 8.dp)
-                            .graphicsLayer { alpha = fadeLeftAlpha }
-                            .background(Brush.horizontalGradient(listOf(fadeColor, Color.Transparent)))
-                            .testTag("glass_nav_fade_start")
-                    )
-                }
-                if (fadeRightAlpha > 0.01f) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(20.dp)
-                            .height(barHeight + 8.dp)
-                            .graphicsLayer { alpha = fadeRightAlpha }
-                            .background(Brush.horizontalGradient(listOf(Color.Transparent, fadeColor)))
-                            .testTag("glass_nav_fade_end")
-                    )
                 }
             }
         }
