@@ -386,6 +386,8 @@ class NetGateVpnService : VpnService() {
                 return START_STICKY
             }
             else -> {
+                // A fresh firewall start supersedes any in-flight stop of a reused service instance.
+                stopping = false
                 // See ACTION_RELOAD_RULES: start foreground before the consent/claim early returns.
                 startForegroundCompat(
                     buildNotification(0, currentNetworkType, latestWebsiteFilterMode)
