@@ -18,10 +18,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -336,13 +336,26 @@ private fun animateColorSchemeCrossFade(
     val secondaryContainer by animateColorAsState(target.secondaryContainer, colorSpring, label = "themeSecondaryContainer")
     val onSecondaryContainer by animateColorAsState(target.onSecondaryContainer, colorSpring, label = "themeOnSecondaryContainer")
     val tertiary by animateColorAsState(target.tertiary, colorSpring, label = "themeTertiary")
+    val onTertiary by animateColorAsState(target.onTertiary, colorSpring, label = "themeOnTertiary")
     val tertiaryContainer by animateColorAsState(target.tertiaryContainer, colorSpring, label = "themeTertiaryContainer")
+    val onTertiaryContainer by animateColorAsState(target.onTertiaryContainer, colorSpring, label = "themeOnTertiaryContainer")
+    val error by animateColorAsState(target.error, colorSpring, label = "themeError")
+    val onError by animateColorAsState(target.onError, colorSpring, label = "themeOnError")
+    val errorContainer by animateColorAsState(target.errorContainer, colorSpring, label = "themeErrorContainer")
+    val onErrorContainer by animateColorAsState(target.onErrorContainer, colorSpring, label = "themeOnErrorContainer")
     val background by animateColorAsState(target.background, colorSpring, label = "themeBackground")
+    val onBackground by animateColorAsState(target.onBackground, colorSpring, label = "themeOnBackground")
     val surface by animateColorAsState(target.surface, colorSpring, label = "themeSurface")
+    val onSurface by animateColorAsState(target.onSurface, colorSpring, label = "themeOnSurface")
     val surfaceVariant by animateColorAsState(target.surfaceVariant, colorSpring, label = "themeSurfaceVariant")
+    val onSurfaceVariant by animateColorAsState(target.onSurfaceVariant, colorSpring, label = "themeOnSurfaceVariant")
+    val surfaceContainerLowest by animateColorAsState(target.surfaceContainerLowest, colorSpring, label = "themeSurfaceContainerLowest")
+    val surfaceContainerLow by animateColorAsState(target.surfaceContainerLow, colorSpring, label = "themeSurfaceContainerLow")
     val surfaceContainer by animateColorAsState(target.surfaceContainer, colorSpring, label = "themeSurfaceContainer")
     val surfaceContainerHigh by animateColorAsState(target.surfaceContainerHigh, colorSpring, label = "themeSurfaceContainerHigh")
+    val surfaceContainerHighest by animateColorAsState(target.surfaceContainerHighest, colorSpring, label = "themeSurfaceContainerHighest")
     val outline by animateColorAsState(target.outline, colorSpring, label = "themeOutline")
+    val outlineVariant by animateColorAsState(target.outlineVariant, colorSpring, label = "themeOutlineVariant")
 
     return target.copy(
         primary = primary,
@@ -354,13 +367,26 @@ private fun animateColorSchemeCrossFade(
         secondaryContainer = secondaryContainer,
         onSecondaryContainer = onSecondaryContainer,
         tertiary = tertiary,
+        onTertiary = onTertiary,
         tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = onTertiaryContainer,
+        error = error,
+        onError = onError,
+        errorContainer = errorContainer,
+        onErrorContainer = onErrorContainer,
         background = background,
+        onBackground = onBackground,
         surface = surface,
+        onSurface = onSurface,
         surfaceVariant = surfaceVariant,
+        onSurfaceVariant = onSurfaceVariant,
+        surfaceContainerLowest = surfaceContainerLowest,
+        surfaceContainerLow = surfaceContainerLow,
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,
-        outline = outline
+        surfaceContainerHighest = surfaceContainerHighest,
+        outline = outline,
+        outlineVariant = outlineVariant
     )
 }
 
@@ -376,29 +402,36 @@ fun NetGateTheme(
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
-    var liveNightModeBits by remember(configuration.uiMode) {
+    val liveNightModeBits = remember {
         mutableIntStateOf(configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
     }
+    LaunchedEffect(configuration.uiMode) {
+        val configBits = configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (configBits != liveNightModeBits.intValue) {
+            liveNightModeBits.intValue = configBits
+        }
+    }
 
-    DisposableEffect(context) {
+    DisposableEffect(context.applicationContext) {
+        val appContext = context.applicationContext
         val callbacks = object : ComponentCallbacks {
             override fun onConfigurationChanged(newConfig: Configuration) {
                 val nextBits = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
-                if (nextBits != liveNightModeBits) {
-                    liveNightModeBits = nextBits
+                if (nextBits != liveNightModeBits.intValue) {
+                    liveNightModeBits.intValue = nextBits
                 }
             }
 
             override fun onLowMemory() = Unit
         }
-        context.applicationContext.registerComponentCallbacks(callbacks)
+        appContext.registerComponentCallbacks(callbacks)
         onDispose {
-            runCatching { context.applicationContext.unregisterComponentCallbacks(callbacks) }
+            runCatching { appContext.unregisterComponentCallbacks(callbacks) }
         }
     }
 
     val composeSystemDark = isSystemInDarkTheme()
-    val systemDark = when (liveNightModeBits) {
+    val systemDark = when (liveNightModeBits.intValue) {
         Configuration.UI_MODE_NIGHT_YES -> true
         Configuration.UI_MODE_NIGHT_NO -> false
         else -> composeSystemDark
