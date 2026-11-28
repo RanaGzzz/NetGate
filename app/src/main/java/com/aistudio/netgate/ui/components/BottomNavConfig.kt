@@ -76,12 +76,19 @@ enum class BottomNavIconScale(
     LARGE("Large", 22.dp, 10.5.sp, 54.dp)
 }
 
+/** Default number of tabs fully visible at once; remaining tabs are reached by swiping the bar. */
+const val DEFAULT_NAV_VISIBLE_COUNT = 5
+
+/** How many times the one-time "swipe me" nudge animation may play before it stops for good. */
+const val MAX_NAV_SWIPE_NUDGES = 3
+
 data class BottomNavConfig(
     val heightOption: BottomNavHeightOption = BottomNavHeightOption.STANDARD,
     val widthOption: BottomNavWidthOption = BottomNavWidthOption.STANDARD,
     val iconScale: BottomNavIconScale = BottomNavIconScale.STANDARD,
     val orderedTabIds: List<BottomNavTabId> = BottomNavTabId.entries,
-    val visibleTabIds: Set<BottomNavTabId> = BottomNavTabId.entries.toSet()
+    val visibleTabIds: Set<BottomNavTabId> = BottomNavTabId.entries.toSet(),
+    val visibleCount: Int = DEFAULT_NAV_VISIBLE_COUNT
 ) {
     val activeOrderedTabs: List<BottomNavTabId>
         get() = orderedTabIds.filter { it in visibleTabIds }
@@ -94,6 +101,8 @@ object BottomNavConfigManager {
     private const val KEY_SCALE = "key_nav_scale"
     private const val KEY_ORDER = "key_nav_order"
     private const val KEY_VISIBLE = "key_nav_visible_v2"
+    private const val KEY_VISIBLE_COUNT = "key_nav_visible_count"
+    private const val KEY_NUDGE_COUNT = "key_nav_nudge_count"
 
     private val _configFlow = MutableStateFlow(BottomNavConfig())
     val configFlow: StateFlow<BottomNavConfig> = _configFlow.asStateFlow()
@@ -138,13 +147,44 @@ object BottomNavConfigManager {
             BottomNavTabId.entries.toSet()
         }
 
+        val visibleCount = prefs.getInt(KEY_VISIBLE_COUNT, DEFAULT_NAV_VISIBLE_COUNT)
+            .coerceIn(1, BottomNavTabId.entries.size)
+
         _configFlow.value = BottomNavConfig(
             heightOption = height,
             widthOption = width,
             iconScale = scale,
             orderedTabIds = orderedList,
-            visibleTabIds = visibleSet
+            visibleTabIds = visibleSet,
+            visibleCount = visibleCount
         )
+    }
+
+    /** Sets how many tabs are fully visible at once (1..all). The rest are reached by swiping. */
+    fun setVisibleCount(context: Context, count: Int) {
+        val clamped = count.coerceIn(1, BottomNavTabId.entries.size)
+        if (clamped == _configFlow.value.visibleCount) return
+        val updated = _configFlow.value.copy(visibleCount = clamped)
+        _configFlow.value = updated
+        persist(context, updated)
+    }
+
+    fun getNudgeCount(context: Context): Int =
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_NUDGE_COUNT, 0)
+
+    fun incrementNudge(context: Context) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(
+            KEY_NUDGE_COUNT,
+            (prefs.getInt(KEY_NUDGE_COUNT, 0) + 1).coerceAtMost(MAX_NAV_SWIPE_NUDGES)
+        ).apply()
+    }
+
+    /** Called once the user has swiped the bar themselves, so the hint never plays again. */
+    fun markNudgeDone(context: Context) {
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_NUDGE_COUNT, MAX_NAV_SWIPE_NUDGES).apply()
     }
 
     fun setHeightOption(context: Context, option: BottomNavHeightOption) {
@@ -212,6 +252,8 @@ object BottomNavConfigManager {
         val default = BottomNavConfig()
         _configFlow.value = default
         persist(context, default)
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_NUDGE_COUNT, 0).apply()
     }
 
     private fun persist(context: Context, config: BottomNavConfig) {
@@ -222,6 +264,7 @@ object BottomNavConfigManager {
             .putString(KEY_SCALE, config.iconScale.name)
             .putString(KEY_ORDER, config.orderedTabIds.joinToString(",") { it.name })
             .putString(KEY_VISIBLE, config.visibleTabIds.joinToString(",") { it.name })
+            .putInt(KEY_VISIBLE_COUNT, config.visibleCount)
             .apply()
     }
 }

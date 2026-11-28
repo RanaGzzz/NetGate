@@ -397,7 +397,7 @@ fun AppearanceSettingsAccordionBody(
             title = "Bottom Navigation Bar",
             summary = "Height, width, tab size, visibility & ordering",
             icon = Icons.Rounded.Navigation,
-            statusLabel = "${navConfig.heightOption.label.substringBefore(" ")} • ${navConfig.activeOrderedTabs.size}/${BottomNavTabId.entries.size} tabs",
+            statusLabel = "${navConfig.heightOption.label.substringBefore(" ")} • ${navConfig.visibleCount} icons • ${navConfig.activeOrderedTabs.size}/${BottomNavTabId.entries.size} tabs",
             expanded = bottomNavExpanded,
             onToggleExpand = { bottomNavExpanded = !bottomNavExpanded },
             modifier = Modifier.testTag("settings_bottom_nav_card"),
@@ -481,6 +481,46 @@ fun AppearanceSettingsAccordionBody(
                         variant = GlassTabVariant.CHIP,
                         forceEqualWidth = true,
                         modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Section: Icons shown at once
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    val maxVisibleCount = BottomNavTabId.entries.size
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Icons Shown at Once",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = when (navConfig.visibleCount) {
+                                1 -> "1 icon"
+                                maxVisibleCount -> "All $maxVisibleCount icons"
+                                else -> "${navConfig.visibleCount} icons"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("nav_visible_count_label")
+                        )
+                    }
+                    Slider(
+                        value = navConfig.visibleCount.toFloat(),
+                        onValueChange = { BottomNavConfigManager.setVisibleCount(context, it.roundToInt()) },
+                        valueRange = 1f..maxVisibleCount.toFloat(),
+                        steps = maxVisibleCount - 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("nav_visible_count_slider")
+                    )
+                    Text(
+                        text = "Swipe the bar to reach the rest.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 

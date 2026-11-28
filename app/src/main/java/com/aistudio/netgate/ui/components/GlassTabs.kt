@@ -2,6 +2,8 @@ package com.aistudio.netgate.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -10,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,8 +47,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +65,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -78,6 +84,9 @@ import com.aistudio.netgate.ui.theme.GlassBlurStyle
 import com.aistudio.netgate.ui.theme.resolveWcagAccessibleContentColor
 import com.aistudio.netgate.ui.theme.useBlurStyle
 import io.github.fletchmckee.liquid.liquid
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 enum class GlassTabVariant {
@@ -517,10 +526,58 @@ private fun GlassBottomNavTabs(
     val navConfig = LocalBottomNavConfig.current
     val barHeight = navConfig.heightOption.heightDp.coerceAtLeast(48.dp)
     val maxContainerWidth = navConfig.widthOption.maxDp
-    val configMinTabWidth = navConfig.iconScale.minTabWidth.coerceAtLeast(48.dp)
     val iconSize = navConfig.iconScale.iconSize
     val fontSize = navConfig.iconScale.fontSize
     val scrollState = rememberScrollState()
+
+    // "Icons shown at once" setting: exactly this many tabs are fully visible; the rest are
+    // reached by swiping the bar. A sliver of the next tab peeks in to signal there is more.
+    val visibleCount = navConfig.visibleCount.coerceIn(1, items.size)
+    val needsScroll = items.size > visibleCount
+    val context = LocalContext.current
+    val density = LocalDensity.current
+
+    val canScrollBack by remember { derivedStateOf { scrollState.canScrollBackward } }
+    val canScrollForward by remember { derivedStateOf { scrollState.canScrollForward } }
+    val scrollPage by remember(items.size, visibleCount) {
+        derivedStateOf {
+            val pages = ceil(items.size / visibleCount.toFloat()).toInt()
+            if (scrollState.maxValue <= 0 || pages <= 1) {
+                0
+            } else {
+                ((scrollState.value.toFloat() / scrollState.maxValue) * (pages - 1)).roundToInt()
+            }
+        }
+    }
+
+    // One-time swipe hint: a short nudge to the right and back, only while the user has never
+    // swiped the bar themselves and only for the first few launches.
+    LaunchedEffect(needsScroll, blur.isReducedMotion, isDimmed) {
+        if (!needsScroll || blur.isReducedMotion || isDimmed) return@LaunchedEffect
+        if (BottomNavConfigManager.getNudgeCount(context) >= MAX_NAV_SWIPE_NUDGES) return@LaunchedEffect
+        delay(1200)
+        snapshotFlow { scrollState.maxValue }.first { it > 0 }
+        if (!scrollState.canScrollForward) return@LaunchedEffect
+        val start = scrollState.value
+        val distancePx = with(density) { 28.dp.toPx() }.roundToInt()
+        scrollState.animateScrollTo(
+            (start + distancePx).coerceAtMost(scrollState.maxValue),
+            tween(durationMillis = 450, easing = FastOutSlowInEasing)
+        )
+        scrollState.animateScrollTo(
+            start,
+            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+        )
+        BottomNavConfigManager.incrementNudge(context)
+    }
+    // As soon as the user drags the bar, they know it scrolls: never nudge again.
+    LaunchedEffect(scrollState) {
+        scrollState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) {
+                BottomNavConfigManager.markNudgeDone(context)
+            }
+        }
+    }
 
     val offsetSpec = if (blur.isReducedMotion) {
         snap<Dp>()
@@ -554,17 +611,32 @@ private fun GlassBottomNavTabs(
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
-                val isDenseBar = items.size >= 7
+                val isDenseBar = visibleCount >= 7
                 val gap = if (isDenseBar) 1.dp else 2.dp
-                val minRequiredWidth = configMinTabWidth * items.size + gap * (items.size - 1)
-                val needsScroll = maxWidth < minRequiredWidth
                 val tabWidth = if (needsScroll) {
-                    configMinTabWidth
+                    // visibleCount full tabs + a 0.4 tab sliver of the next one
+                    ((maxWidth - gap * visibleCount) / (visibleCount + 0.4f)).coerceAtLeast(30.dp)
                 } else {
-                    (maxWidth - gap * (items.size - 1)) / items.size
+                    ((maxWidth - gap * (items.size - 1)) / items.size).coerceAtMost(72.dp)
                 }
-                val contentWidth = if (needsScroll) minRequiredWidth else maxWidth
-                val targetIndicatorOffset = (tabWidth + gap) * clampedSelected
+                val tabsTotalWidth = tabWidth * items.size + gap * (items.size - 1)
+                val contentWidth = if (needsScroll) tabsTotalWidth else maxWidth
+                // When there is no scrolling and the tabs don't fill the bar, centre them.
+                val startPad = if (needsScroll) 0.dp else ((maxWidth - tabsTotalWidth) / 2).coerceAtLeast(0.dp)
+                val targetIndicatorOffset = startPad + (tabWidth + gap) * clampedSelected
+                val fadeColor = blur.containerColor
+                    .compositeOver(MaterialTheme.colorScheme.background)
+                    .copy(alpha = 0.92f)
+                val fadeLeftAlpha by animateFloatAsState(
+                    targetValue = if (needsScroll && canScrollBack) 1f else 0f,
+                    animationSpec = if (blur.isReducedMotion) snap<Float>() else tween<Float>(180),
+                    label = "glassBottomNavFadeLeft"
+                )
+                val fadeRightAlpha by animateFloatAsState(
+                    targetValue = if (needsScroll && canScrollForward) 1f else 0f,
+                    animationSpec = if (blur.isReducedMotion) snap<Float>() else tween<Float>(180),
+                    label = "glassBottomNavFadeRight"
+                )
 
                 val indicatorOffset by animateDpAsState(
                     targetValue = targetIndicatorOffset,
@@ -581,7 +653,6 @@ private fun GlassBottomNavTabs(
                     label = "glassBottomNavIndicatorAlpha"
                 )
 
-                val density = LocalDensity.current
                 LaunchedEffect(clampedSelected, hasSelection, needsScroll, contentWidth) {
                     if (hasSelection && needsScroll && scrollState.maxValue > 0) {
                         val targetPx = with(density) {
@@ -648,7 +719,9 @@ private fun GlassBottomNavTabs(
                         }
 
                         Row(
-                            modifier = Modifier.width(contentWidth),
+                            modifier = Modifier
+                                .width(contentWidth)
+                                .padding(start = startPad),
                             horizontalArrangement = Arrangement.spacedBy(gap),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -718,18 +791,48 @@ private fun GlassBottomNavTabs(
                         }
                     }
                 }
+
+                // Edge fades hint that more tabs are hidden on that side.
+                if (fadeLeftAlpha > 0.01f) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .width(20.dp)
+                            .height(barHeight + 8.dp)
+                            .graphicsLayer { alpha = fadeLeftAlpha }
+                            .background(Brush.horizontalGradient(listOf(fadeColor, Color.Transparent)))
+                            .testTag("glass_nav_fade_start")
+                    )
+                }
+                if (fadeRightAlpha > 0.01f) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(20.dp)
+                            .height(barHeight + 8.dp)
+                            .graphicsLayer { alpha = fadeRightAlpha }
+                            .background(Brush.horizontalGradient(listOf(Color.Transparent, fadeColor)))
+                            .testTag("glass_nav_fade_end")
+                    )
+                }
             }
         }
 
-        if (showPageIndicatorDots && items.size > 1) {
+        // Dots follow scroll pages when the bar scrolls; otherwise they mirror the selected tab.
+        val dotCount = if (needsScroll) ceil(items.size / visibleCount.toFloat()).toInt() else items.size
+        if (showPageIndicatorDots && dotCount > 1) {
             Spacer(modifier = Modifier.height(5.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.testTag("glass_pill_page_dots")
             ) {
-                items.forEachIndexed { index, _ ->
-                    val isCurrent = !isDimmed && hasSelection && index == clampedSelected
+                repeat(dotCount) { index ->
+                    val isCurrent = if (needsScroll) {
+                        index == scrollPage
+                    } else {
+                        !isDimmed && hasSelection && index == clampedSelected
+                    }
                     val dotWidth by animateDpAsState(
                         targetValue = if (isCurrent) 14.dp else 4.dp,
                         animationSpec = offsetSpec,

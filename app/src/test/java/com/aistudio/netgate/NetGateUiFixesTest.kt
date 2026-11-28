@@ -817,6 +817,89 @@ class NetGateUiFixesTest {
     }
 
     @Test
+    fun `BottomNavConfigManager clamps and persists visible icon count`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        BottomNavConfigManager.init(context)
+        BottomNavConfigManager.resetToDefaults(context)
+        assertEquals(5, BottomNavConfigManager.configFlow.value.visibleCount)
+
+        BottomNavConfigManager.setVisibleCount(context, 3)
+        assertEquals(3, BottomNavConfigManager.configFlow.value.visibleCount)
+
+        BottomNavConfigManager.setVisibleCount(context, 0)
+        assertEquals(1, BottomNavConfigManager.configFlow.value.visibleCount)
+
+        BottomNavConfigManager.setVisibleCount(context, 99)
+        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.visibleCount)
+
+        val prefs = context.getSharedPreferences("netgate_bottom_nav_customization", Context.MODE_PRIVATE)
+        assertEquals(BottomNavTabId.entries.size, prefs.getInt("key_nav_visible_count", -1))
+
+        BottomNavConfigManager.resetToDefaults(context)
+        assertEquals(5, BottomNavConfigManager.configFlow.value.visibleCount)
+    }
+
+    @Test
+    fun `Bottom nav swipe nudge counter increments caps and resets`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        BottomNavConfigManager.init(context)
+        BottomNavConfigManager.resetToDefaults(context)
+        assertEquals(0, BottomNavConfigManager.getNudgeCount(context))
+
+        BottomNavConfigManager.incrementNudge(context)
+        assertEquals(1, BottomNavConfigManager.getNudgeCount(context))
+
+        repeat(10) { BottomNavConfigManager.incrementNudge(context) }
+        assertEquals(3, BottomNavConfigManager.getNudgeCount(context))
+
+        BottomNavConfigManager.resetToDefaults(context)
+        assertEquals(0, BottomNavConfigManager.getNudgeCount(context))
+
+        BottomNavConfigManager.markNudgeDone(context)
+        assertEquals(3, BottomNavConfigManager.getNudgeCount(context))
+        BottomNavConfigManager.resetToDefaults(context)
+    }
+
+    @Test
+    fun `Bottom nav shows live page dots and edge fade only when it can scroll`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        BottomNavConfigManager.init(context)
+        BottomNavConfigManager.resetToDefaults(context)
+        BottomNavConfigManager.markNudgeDone(context)
+        assertEquals(5, BottomNavConfigManager.configFlow.value.visibleCount)
+        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.activeOrderedTabs.size)
+
+        composeRule.setContent {
+            val navConfig by BottomNavConfigManager.configFlow.collectAsState()
+            NetGateTheme(dynamicColor = false) {
+                CompositionLocalProvider(LocalBottomNavConfig provides navConfig) {
+                    FloatingFrostedNavBar(
+                        currentDestination = AppDestination.FIREWALL,
+                        isConnectionInfoOpen = false,
+                        onSelectFirewall = {},
+                        onSelectWebsites = {},
+                        onSelectDnsProtection = {}
+                    )
+                }
+            }
+        }
+
+        // Default: 5 of 9 icons visible, so the bar scrolls: dots + right fade are present.
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("glass_pill_page_dots").assertIsDisplayed()
+        composeRule.onNodeWithTag("glass_nav_fade_end").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("glass_nav_fade_start").assertCountEquals(0)
+
+        // Show all icons: nothing to swipe, so no fade is drawn.
+        BottomNavConfigManager.setVisibleCount(context, BottomNavTabId.entries.size)
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithTag("glass_nav_fade_end").assertCountEquals(0)
+        composeRule.onAllNodesWithTag("glass_nav_fade_start").assertCountEquals(0)
+
+        BottomNavConfigManager.resetToDefaults(context)
+    }
+
+    @Test
     fun `AppearanceSettingsSheet renders Bottom Navigation Bar settings accordion and options`() {
         composeRule.setContent {
             NetGateTheme(dynamicColor = false) {
