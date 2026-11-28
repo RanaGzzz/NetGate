@@ -49,6 +49,7 @@ import com.aistudio.netgate.service.proxy.ProxyConfiguration
 import com.aistudio.netgate.service.proxy.ProxyCoordinator
 import com.aistudio.netgate.service.proxy.ProxyRole
 import com.aistudio.netgate.service.session.VpnSessionCoordinator
+import com.aistudio.netgate.service.session.VpnSlotOwner
 import com.aistudio.netgate.service.vpn.TunnelWatchdog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,8 +112,21 @@ data class VpnRuntimeState(
     val antiDnsPoisonBlockedCount: Long = 0L,
     val quicStrippedCount: Long = 0L,
     val recentBlockedDomains: List<String> = emptyList(),
-    val recentDnsLogs: List<DnsQueryLogEntry> = emptyList()
+    val recentDnsLogs: List<DnsQueryLogEntry> = emptyList(),
+    /** Short, user-safe reason when a tunnel failed to establish; null once it is up. */
+    val tunnelError: String? = null
 )
+
+/**
+ * Bounded backoff for a tunnel that fails to establish: three retries after 1s, 3s and 10s. When
+ * the budget is spent the failure stays visible in the firewall header until the next rebuild.
+ */
+internal object TunnelRetryPolicy {
+    private val delaysMs = longArrayOf(1_000L, 3_000L, 10_000L)
+
+    /** Delay before retry number [retriesSoFar] + 1, or null once every retry has been used. */
+    fun delayBeforeRetry(retriesSoFar: Int): Long? = delaysMs.getOrNull(retriesSoFar)
+}
 
 class NetGateVpnService : VpnService() {
 
@@ -124,6 +138,15 @@ class NetGateVpnService : VpnService() {
     private var rulesJob: Job? = null
     private var timerJob: Job? = null
     private var wifiAutomationJob: Job? = null
+
+    /** Pending self-healing retry; cancelled by a new rebuild, ACTION_STOP and onDestroy. */
+    private var tunnelRetryJob: Job? = null
+
+    @Volatile
+    private var tunnelEstablishAttempts: Int = 0
+
+    @Volatile
+    private var latestTunnelError: String? = null
 
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallbackRegistered = false
@@ -399,6 +422,8 @@ class NetGateVpnService : VpnService() {
         wifiAutomationJob?.cancel()
         advancedPrefsJob?.cancel()
         drainJob?.cancel()
+        tunnelRetryJob?.cancel()
+        tunnelRetryJob = null
         BackgroundPowerHelper.releaseServiceWakeLock("firewall-vpn")
         serviceScope.cancel()
         stopProxyServerLocked()
@@ -704,6 +729,9 @@ class NetGateVpnService : VpnService() {
     }.getOrDefault(false)
 
     private suspend fun rebuildTunnel(forceRebuild: Boolean) = tunnelMutex.withLock {
+        // A new rebuild supersedes any retry that was waiting for its backoff to elapse.
+        tunnelRetryJob?.cancel()
+        tunnelRetryJob = null
         val prefs: FirewallPreferencesState
         val rulesSnapshot: List<AppNetworkRuleEntity>
         val websiteMode: WebsiteFilterMode
@@ -786,6 +814,7 @@ class NetGateVpnService : VpnService() {
                 val established = buildGlobalWifiLockInterface()
                 if (established == null) {
                     AppLog.warn("Tunnel", "global Wi-Fi lock interface establish failed")
+                    scheduleTunnelRetry("Global Wi-Fi lock tunnel could not start")
                     publishRuntimeState(
                         isTunnelActive = false,
                         netType = netType,
@@ -817,6 +846,7 @@ class NetGateVpnService : VpnService() {
                 val (established, addedCount) = buildPerAppSinkholeInterface(plan.blockedPackages, netType)
                 if (established == null || addedCount == 0) {
                     AppLog.warn("Tunnel", "per-app sinkhole interface establish failed")
+                    scheduleTunnelRetry("Per-app firewall tunnel could not start")
                     publishRuntimeState(
                         isTunnelActive = false,
                         netType = netType,
@@ -864,6 +894,7 @@ class NetGateVpnService : VpnService() {
                 )
                 if (established == null) {
                     AppLog.warn("Tunnel", "hybrid DNS proxy interface establish failed")
+                    scheduleTunnelRetry("DNS proxy tunnel could not start")
                     stopProxyServerLocked()
                     publishRuntimeState(
                         isTunnelActive = false,
@@ -1868,6 +1899,33 @@ class NetGateVpnService : VpnService() {
         )
     }
 
+    /**
+     * Records a short reason for a failed establish and schedules one bounded retry. Never retries
+     * while VPN Guard owns the VPN slot, since establishing would fight that handshake.
+     */
+    private fun scheduleTunnelRetry(reason: String) {
+        if (VpnSessionCoordinator.instance.state.value.owner == VpnSlotOwner.TUNNEL) {
+            latestTunnelError = "$reason — VPN Guard holds the VPN slot"
+            return
+        }
+        val delayMs = TunnelRetryPolicy.delayBeforeRetry(tunnelEstablishAttempts)
+            ?: run {
+                latestTunnelError = "$reason — retries exhausted"
+                return
+            }
+        latestTunnelError = "$reason — retrying"
+        tunnelEstablishAttempts += 1
+        tunnelRetryJob?.cancel()
+        tunnelRetryJob = serviceScope.launch {
+            delay(delayMs)
+            if (!isActive) return@launch
+            if (VpnSessionCoordinator.instance.state.value.owner == VpnSlotOwner.TUNNEL) return@launch
+            // The retry now runs; drop the handle so the rebuild below cannot cancel itself.
+            tunnelRetryJob = null
+            rebuildTunnel(forceRebuild = true)
+        }
+    }
+
     private fun publishRuntimeState(
         isTunnelActive: Boolean,
         netType: ActiveNetworkType,
@@ -1875,6 +1933,11 @@ class NetGateVpnService : VpnService() {
         websiteMode: WebsiteFilterMode,
         adBlockEnabled: Boolean
     ) {
+        if (isTunnelActive) {
+            // A live tunnel clears both the retry budget and the visible error.
+            tunnelEstablishAttempts = 0
+            latestTunnelError = null
+        }
         val recentSnapshot = synchronized(recentBlockedLock) { recentBlockedQueue.toList() }
         val logSnapshot = synchronized(dnsLogLock) { dnsLogQueue.toList() }
         _runtimeState.value = VpnRuntimeState(
@@ -1907,7 +1970,8 @@ class NetGateVpnService : VpnService() {
             antiDnsPoisonBlockedCount = antiDnsPoisonCount.get(),
             quicStrippedCount = quicStrippedCount.get(),
             recentBlockedDomains = recentSnapshot,
-            recentDnsLogs = logSnapshot
+            recentDnsLogs = logSnapshot,
+            tunnelError = latestTunnelError
         )
     }
 
@@ -1925,6 +1989,10 @@ class NetGateVpnService : VpnService() {
             closeVpnInterface()
             activeTunnelSignature = null
         }
+        tunnelRetryJob?.cancel()
+        tunnelRetryJob = null
+        tunnelEstablishAttempts = 0
+        latestTunnelError = null
         _runtimeState.value = VpnRuntimeState()
         killSwitchLockdown = false
         TunnelWatchdog.releaseKillSwitch(applicationContext)

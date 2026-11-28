@@ -893,6 +893,7 @@ fun FirewallScreen(
                                                     blockedWebsitesCount = websiteRulesCount,
                                                     websiteRulesBadgeText = websiteRulesBadge,
                                                     dnsSummaryLabel = dnsSummary,
+                                                    tunnelError = uiState.vpnRuntimeState.tunnelError,
                                                     onToggleFirewall = { enable ->
                                                         if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                                     },
@@ -1020,6 +1021,7 @@ fun FirewallScreen(
                                                             blockedWebsitesCount = websiteRulesCount,
                                                             websiteRulesBadgeText = websiteRulesBadge,
                                                             dnsSummaryLabel = dnsSummary,
+                                                            tunnelError = uiState.vpnRuntimeState.tunnelError,
                                                             onToggleFirewall = { enable ->
                                                                 if (enable) onRequestEnableFirewall() else viewModel.disableFirewall()
                                                             },

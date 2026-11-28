@@ -64,7 +64,8 @@ object BundledChangelog {
                     bullets = listOf(
                         "The firewall service now posts its notification before the consent and VPN-slot checks, so an early return can no longer get the app killed with ForegroundServiceDidNotStartInTimeException.",
                         "A background start refused by Android 12+ is skipped instead of thrown, so the widget, timer and settings screens keep running.",
-                        "Blocking-schedule and Wi-Fi automation alarms retry on their next alarm instead of crashing the process."
+                        "Blocking-schedule and Wi-Fi automation alarms retry on their next alarm instead of crashing the process.",
+                        "A tunnel that fails to establish retries after 1, 3 and 10 seconds and shows a short reason in the firewall card until it is up; retries stop on disable, a new rebuild, or while VPN Guard holds the VPN slot."
                     )
                 ),
                 ChangelogSection(

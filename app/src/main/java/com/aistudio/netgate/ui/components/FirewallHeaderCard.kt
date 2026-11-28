@@ -90,6 +90,8 @@ fun FirewallHeaderCard(
     blockedWebsitesCount: Int = 0,
     websiteRulesBadgeText: String = "$blockedWebsitesCount Blocked",
     dnsSummaryLabel: String = "1.1.1.1",
+    /** Short self-healing reason when the tunnel failed to establish; null while healthy. */
+    tunnelError: String? = null,
     onToggleFirewall: (Boolean) -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onOpenDnsProtection: () -> Unit,
@@ -535,6 +537,20 @@ fun FirewallHeaderCard(
                     contentDescription = null,
                     tint = vpnAccent,
                     modifier = Modifier.size(14.dp)
+                )
+            }
+
+            if (!tunnelError.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = tunnelError,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .testTag("header_tunnel_error")
                 )
             }
 

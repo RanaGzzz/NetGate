@@ -4,6 +4,7 @@
 - **The VPN service always reaches the foreground.** The filter service is started with `startForegroundService()`, but the notification was only posted after the consent and VPN-slot checks, so an early return on Android 26+ could kill the app with `ForegroundServiceDidNotStartInTimeException`. The notification now goes up first on every path.
 - **A refused start no longer crashes the caller.** Android 12+ can reject a background `startForegroundService()`; the request is skipped and the current state is kept instead of throwing out of the widget, the timer receiver or the settings screen.
 - **Timer alarms cannot take the app down.** Blocking-schedule and Wi-Fi automation alarms now swallow a failure and retry on their next alarm instead of crashing the process.
+- **A failed tunnel heals itself.** When `establish()` returns nothing, or no app route could be added, the firewall retries after 1, 3 and 10 seconds instead of staying silently down, and the firewall card shows a short reason until the tunnel is up. Retries stop the moment you stop the firewall, start a new rebuild, or when VPN Guard holds the VPN slot.
 
 ### Diagnostics
 - **A local-only app log.** Tunnel establish, VPN Guard connect and proxy start failures are written to `logs/netgate.log` in the app's private storage with the exception type and stack frames only — never domains, IPs, package names, configuration text or keys — and nothing is uploaded anywhere. The file rotates at 512 KB and keeps one previous copy.
