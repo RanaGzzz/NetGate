@@ -13,12 +13,9 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -119,7 +116,7 @@ fun DnsProtectionContent(
             .testTag("dns_protection_sheet")
     ) {
         val isWide = maxWidth >= 800.dp
-        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val portraitBottomPadding = rememberBottomNavClearancePadding()
 
         if (isWide) {
             Row(
@@ -183,28 +180,6 @@ fun DnsProtectionContent(
                         onToggle = onToggleDnsCache
                     )
 
-                    DpiBypassShieldCard(
-                        dpiBypassMode = preferences.dpiBypassMode,
-                        dpiFragmentChunkSize = preferences.dpiFragmentChunkSize,
-                        dpiIdleKeepAliveEnabled = preferences.dpiIdleKeepAliveEnabled,
-                        blockQuicForDpiBypass = preferences.blockQuicForDpiBypass,
-                        antiDnsPoisonEnabled = preferences.antiDnsPoisonEnabled,
-                        dnsTransportMode = preferences.dnsTransportMode,
-                        dpiBypassedConnectionsCount = vpnRuntimeState.dpiBypassedConnectionsCount,
-                        dpiAutopilotLearnedCount = vpnRuntimeState.dpiAutopilotLearnedCount,
-                        antiDnsPoisonBlockedCount = vpnRuntimeState.antiDnsPoisonBlockedCount,
-                        quicStrippedCount = vpnRuntimeState.quicStrippedCount,
-                        isFirewallActive = isFirewallActive,
-                        onSelectDpiMode = onSelectDpiMode,
-                        onSelectChunkSize = onSelectDpiChunkSize,
-                        onToggleIdleKeepAlive = onToggleDpiIdleKeepAlive,
-                        onToggleBlockQuic = onToggleBlockQuic,
-                        onToggleAntiDnsPoison = onToggleAntiDnsPoison,
-                        onSelectDnsTransportMode = onSelectDnsTransportMode,
-                        onFlushCache = onFlushDpiCache,
-                        onRequestEnableFirewall = onRequestEnableFirewall
-                    )
-
                     DnsPresetsList(
                         selectedPreset = selectedPreset,
                         onSelectPreset = { selectedPreset = it },
@@ -224,7 +199,7 @@ fun DnsProtectionContent(
                         .align(Alignment.TopCenter)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp, bottom = navInsetBottom + 120.dp),
+                        .padding(top = 8.dp, bottom = portraitBottomPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     ActiveDnsCheckCard(
@@ -252,28 +227,6 @@ fun DnsProtectionContent(
                     DnsResponseCacheCard(
                         enabled = preferences.dnsResponseCacheEnabled,
                         onToggle = onToggleDnsCache
-                    )
-
-                    DpiBypassShieldCard(
-                        dpiBypassMode = preferences.dpiBypassMode,
-                        dpiFragmentChunkSize = preferences.dpiFragmentChunkSize,
-                        dpiIdleKeepAliveEnabled = preferences.dpiIdleKeepAliveEnabled,
-                        blockQuicForDpiBypass = preferences.blockQuicForDpiBypass,
-                        antiDnsPoisonEnabled = preferences.antiDnsPoisonEnabled,
-                        dnsTransportMode = preferences.dnsTransportMode,
-                        dpiBypassedConnectionsCount = vpnRuntimeState.dpiBypassedConnectionsCount,
-                        dpiAutopilotLearnedCount = vpnRuntimeState.dpiAutopilotLearnedCount,
-                        antiDnsPoisonBlockedCount = vpnRuntimeState.antiDnsPoisonBlockedCount,
-                        quicStrippedCount = vpnRuntimeState.quicStrippedCount,
-                        isFirewallActive = isFirewallActive,
-                        onSelectDpiMode = onSelectDpiMode,
-                        onSelectChunkSize = onSelectDpiChunkSize,
-                        onToggleIdleKeepAlive = onToggleDpiIdleKeepAlive,
-                        onToggleBlockQuic = onToggleBlockQuic,
-                        onToggleAntiDnsPoison = onToggleAntiDnsPoison,
-                        onSelectDnsTransportMode = onSelectDnsTransportMode,
-                        onFlushCache = onFlushDpiCache,
-                        onRequestEnableFirewall = onRequestEnableFirewall
                     )
 
                     DnsStatusAndSetupCards(

@@ -54,8 +54,6 @@ import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -485,54 +483,26 @@ fun SafeSearchAndYoutubeCard(
             )
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                YouTubeRestrictedMode.entries.forEach { mode ->
-                    val selected = state.youtubeRestrictedMode == mode
-                    FilterChip(
-                        selected = selected,
-                        onClick = {
-                            onSelectYoutubeMode(mode)
-                            if (mode != YouTubeRestrictedMode.OFF && !isFirewallActive) {
-                                onRequestEnableFirewall()
-                            }
-                        },
-                        label = {
-                            Box(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = mode.title,
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = selected,
-                            selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            selectedBorderWidth = 1.25.dp
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                            .testTag("youtube_mode_${mode.name.lowercase()}")
+            val ytModes = YouTubeRestrictedMode.entries
+            GlassTabs(
+                items = ytModes.map { mode ->
+                    GlassTabItem(
+                        label = mode.title,
+                        testTag = "youtube_mode_${mode.name.lowercase()}"
                     )
-                }
-            }
+                },
+                selectedIndex = ytModes.indexOf(state.youtubeRestrictedMode),
+                onSelect = { index ->
+                    val mode = ytModes[index]
+                    onSelectYoutubeMode(mode)
+                    if (mode != YouTubeRestrictedMode.OFF && !isFirewallActive) {
+                        onRequestEnableFirewall()
+                    }
+                },
+                variant = GlassTabVariant.CHIP,
+                forceEqualWidth = true,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -843,46 +813,23 @@ fun HttpsFilteringProxyCard(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        SniProxyPreset.entries.forEach { preset ->
-                            val selected = state.sniProxyPreset == preset
-                            FilterChip(
-                                selected = selected,
-                                onClick = {
-                                    onSelectSniPreset(preset)
-                                    if (!isFirewallActive) {
-                                        onRequestEnableFirewall()
-                                    }
-                                },
-                                label = {
-                                    Text(
-                                        text = preset.title,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = selected,
-                                    selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
-                                    selectedBorderWidth = 1.25.dp
-                                ),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("sni_preset_${preset.name.lowercase()}")
+                    val sniPresets = SniProxyPreset.entries
+                    GlassChipFlowGroup(
+                        items = sniPresets.map { preset ->
+                            GlassTabItem(
+                                label = preset.title,
+                                testTag = "sni_preset_${preset.name.lowercase()}"
                             )
-                        }
-                    }
+                        },
+                        selectedIndex = sniPresets.indexOf(state.sniProxyPreset).takeIf { it >= 0 },
+                        onSelect = { index ->
+                            onSelectSniPreset(sniPresets[index])
+                            if (!isFirewallActive) {
+                                onRequestEnableFirewall()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
                     if (state.sniProxyPreset == SniProxyPreset.CUSTOM_UPSTREAM_SNI) {
                         Spacer(modifier = Modifier.height(10.dp))
@@ -930,33 +877,30 @@ fun HttpsFilteringProxyCard(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    FlowRow(
+                    val proxyPorts = listOf(8899, 8080, 8888)
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        itemVerticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "Local Port:",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        listOf(8899, 8080, 8888).forEach { presetPort ->
-                            val selected = state.httpsProxyPort == presetPort
-                            FilterChip(
-                                selected = selected,
-                                onClick = { onSelectProxyPort(presetPort) },
-                                label = { Text(presetPort.toString(), style = MaterialTheme.typography.labelSmall) },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("proxy_port_chip_$presetPort")
-                            )
-                        }
+                        GlassTabs(
+                            items = proxyPorts.map { presetPort ->
+                                GlassTabItem(
+                                    label = presetPort.toString(),
+                                    testTag = "proxy_port_chip_$presetPort"
+                                )
+                            },
+                            selectedIndex = proxyPorts.indexOf(state.httpsProxyPort),
+                            onSelect = { index -> onSelectProxyPort(proxyPorts[index]) },
+                            variant = GlassTabVariant.CHIP,
+                            forceEqualWidth = true,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1303,28 +1247,18 @@ fun DnsLogsFilterCard(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                DnsLogFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = selectedFilter == filter,
-                        onClick = { onSelectFilter(filter) },
-                        label = {
-                            Text(
-                                text = filter.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("dns_log_filter_${filter.name.lowercase()}")
+            val dnsFilters = DnsLogFilter.entries
+            GlassChipFlowGroup(
+                items = dnsFilters.map { filter ->
+                    GlassTabItem(
+                        label = filter.label,
+                        testTag = "dns_log_filter_${filter.name.lowercase()}"
                     )
-                }
-            }
+                },
+                selectedIndex = dnsFilters.indexOf(selectedFilter).takeIf { it >= 0 },
+                onSelect = { index -> onSelectFilter(dnsFilters[index]) },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

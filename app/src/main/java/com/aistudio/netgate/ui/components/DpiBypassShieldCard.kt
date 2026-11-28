@@ -16,8 +16,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,8 +35,6 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -72,7 +68,6 @@ import com.aistudio.netgate.ui.theme.WarningAmber
 
 private val CHUNK_SIZE_OPTIONS = listOf(2, 3, 4, 8, 16)
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DpiBypassShieldCard(
     dpiBypassMode: DpiBypassMode,
@@ -321,44 +316,24 @@ fun DpiBypassShieldCard(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        DpiBypassMode.entries.forEach { mode ->
-                            val selected = dpiBypassMode == mode
-                            FilterChip(
-                                selected = selected,
-                                onClick = {
-                                    onSelectDpiMode(mode)
-                                    if (mode != DpiBypassMode.OFF && !isFirewallActive) {
-                                        onRequestEnableFirewall()
-                                    }
-                                },
-                                label = {
-                                    Text(
-                                        text = mode.title,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = selected,
-                                    selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
-                                    selectedBorderWidth = 1.25.dp
-                                ),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("dpi_mode_${mode.name.lowercase()}")
+                    val dpiModes = DpiBypassMode.entries
+                    GlassChipFlowGroup(
+                        items = dpiModes.map { mode ->
+                            GlassTabItem(
+                                label = mode.title,
+                                testTag = "dpi_mode_${mode.name.lowercase()}"
                             )
-                        }
-                    }
+                        },
+                        selectedIndex = dpiModes.indexOf(dpiBypassMode).takeIf { it >= 0 },
+                        onSelect = { index ->
+                            val mode = dpiModes[index]
+                            onSelectDpiMode(mode)
+                            if (mode != DpiBypassMode.OFF && !isFirewallActive) {
+                                onRequestEnableFirewall()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
                     AnimatedVisibility(
                         visible = isEnabled,
@@ -373,33 +348,19 @@ fun DpiBypassShieldCard(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                CHUNK_SIZE_OPTIONS.forEach { size ->
-                                    val selected = dpiFragmentChunkSize == size
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = { onSelectChunkSize(size) },
-                                        label = { Text("${size}B") },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            enabled = true,
-                                            selected = selected,
-                                            selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
-                                            selectedBorderWidth = 1.25.dp
-                                        ),
-                                        modifier = Modifier
-                                            .heightIn(min = 48.dp)
-                                            .testTag("dpi_chunk_$size")
+                            GlassTabs(
+                                items = CHUNK_SIZE_OPTIONS.map { size ->
+                                    GlassTabItem(
+                                        label = "${size}B",
+                                        testTag = "dpi_chunk_$size"
                                     )
-                                }
-                            }
+                                },
+                                selectedIndex = CHUNK_SIZE_OPTIONS.indexOf(dpiFragmentChunkSize),
+                                onSelect = { index -> onSelectChunkSize(CHUNK_SIZE_OPTIONS[index]) },
+                                variant = GlassTabVariant.CHIP,
+                                minScrollableTabWidth = 56.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
 
@@ -417,33 +378,18 @@ fun DpiBypassShieldCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        DnsTransportMode.entries.forEach { mode ->
-                            val selected = dnsTransportMode == mode
-                            FilterChip(
-                                selected = selected,
-                                onClick = { onSelectDnsTransportMode(mode) },
-                                label = { Text(mode.title) },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = selected,
-                                    selectedBorderColor = primaryAccent.copy(alpha = 0.7f),
-                                    selectedBorderWidth = 1.25.dp
-                                ),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("dns_transport_${mode.name.lowercase()}")
+                    val dnsModes = DnsTransportMode.entries
+                    GlassChipFlowGroup(
+                        items = dnsModes.map { mode ->
+                            GlassTabItem(
+                                label = mode.title,
+                                testTag = "dns_transport_${mode.name.lowercase()}"
                             )
-                        }
-                    }
+                        },
+                        selectedIndex = dnsModes.indexOf(dnsTransportMode).takeIf { it >= 0 },
+                        onSelect = { index -> onSelectDnsTransportMode(dnsModes[index]) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
 

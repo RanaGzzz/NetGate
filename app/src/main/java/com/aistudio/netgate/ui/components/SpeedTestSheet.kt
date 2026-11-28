@@ -15,13 +15,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,6 +63,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.data.network.SpeedTestPhase
 import com.aistudio.netgate.data.network.SpeedTestState
@@ -87,6 +85,7 @@ fun SpeedTestContent(
     onStartTest: () -> Unit,
     onStopTest: () -> Unit,
     onRunVideoTest: () -> Unit = {},
+    bottomPadding: Dp = rememberBottomNavClearancePadding(),
     modifier: Modifier = Modifier
 ) {
     val animatedProgress by animateFloatAsState(
@@ -109,7 +108,6 @@ fun SpeedTestContent(
             .testTag("speed_test_sheet")
     ) {
         val isWide = maxWidth >= 800.dp
-        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
         if (isWide) {
             Row(
@@ -157,7 +155,7 @@ fun SpeedTestContent(
                         .align(Alignment.TopCenter)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp, bottom = navInsetBottom + 120.dp),
+                        .padding(top = 8.dp, bottom = bottomPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {

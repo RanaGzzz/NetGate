@@ -11,7 +11,6 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
@@ -94,7 +93,7 @@ object BottomNavConfigManager {
     private const val KEY_WIDTH = "key_nav_width"
     private const val KEY_SCALE = "key_nav_scale"
     private const val KEY_ORDER = "key_nav_order"
-    private const val KEY_VISIBLE = "key_nav_visible"
+    private const val KEY_VISIBLE = "key_nav_visible_v2"
 
     private val _configFlow = MutableStateFlow(BottomNavConfig())
     val configFlow: StateFlow<BottomNavConfig> = _configFlow.asStateFlow()
@@ -122,8 +121,7 @@ object BottomNavConfigManager {
         val orderedList = if (!orderRaw.isNullOrBlank()) {
             orderRaw.split(",").mapNotNull { name ->
                 runCatching { BottomNavTabId.valueOf(name) }.getOrNull()
-            }.let { loaded ->
-                // Append any newly added tabs that were not in old saved prefs
+            }.distinct().let { loaded ->
                 val missing = BottomNavTabId.entries.filter { it !in loaded }
                 loaded + missing
             }
@@ -135,9 +133,7 @@ object BottomNavConfigManager {
         val visibleSet = if (!visibleRaw.isNullOrBlank()) {
             visibleRaw.split(",").mapNotNull { name ->
                 runCatching { BottomNavTabId.valueOf(name) }.getOrNull()
-            }.toSet().let { set ->
-                if (set.size < 2) BottomNavTabId.entries.toSet() else set
-            }
+            }.toSet().ifEmpty { BottomNavTabId.entries.toSet() }
         } else {
             BottomNavTabId.entries.toSet()
         }
@@ -169,21 +165,23 @@ object BottomNavConfigManager {
         persist(context, updated)
     }
 
-    fun toggleTabVisibility(context: Context, tabId: BottomNavTabId) {
-        val current = _configFlow.value
-        val newVisible = if (tabId in current.visibleTabIds) {
-            // Guarantee at least 2 tabs stay visible
-            if (current.visibleTabIds.size > 2) {
-                current.visibleTabIds - tabId
+    fun toggleTabVisibility(context: Context, tabId: BottomNavTabId): Boolean {
+        val currentVisible = _configFlow.value.visibleTabIds
+        return if (tabId in currentVisible) {
+            if (currentVisible.size <= 1) {
+                false
             } else {
-                current.visibleTabIds
+                val updated = _configFlow.value.copy(visibleTabIds = currentVisible - tabId)
+                _configFlow.value = updated
+                persist(context, updated)
+                true
             }
         } else {
-            current.visibleTabIds + tabId
+            val updated = _configFlow.value.copy(visibleTabIds = currentVisible + tabId)
+            _configFlow.value = updated
+            persist(context, updated)
+            true
         }
-        val updated = current.copy(visibleTabIds = newVisible)
-        _configFlow.value = updated
-        persist(context, updated)
     }
 
     fun moveTabUp(context: Context, tabId: BottomNavTabId) {

@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -54,6 +55,7 @@ import com.aistudio.netgate.data.model.ActiveNetworkType
 import com.aistudio.netgate.data.model.ManagedApp
 import com.aistudio.netgate.data.model.formatCountdownTimer
 import com.aistudio.netgate.ui.theme.BlockedRed
+import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.WarningAmber
 
@@ -84,16 +86,71 @@ fun AppRuleRow(
 
     val isBlockedRightNow = isFirewallActive && app.isBlockedOn(activeNetworkType)
     val activeTimer = app.activeTimer
+    val redAccent = BlockedRed
+    val greenAccent = EmeraldPrimary
+
+    val borderBrushOverride: Brush? = remember(
+        isSelected,
+        activeTimer,
+        app.blockWifi,
+        app.blockMobileData,
+        isDark
+    ) {
+        when {
+            isSelected -> null
+            activeTimer != null -> null
+            app.blockWifi && app.blockMobileData -> {
+                // Both blocked: red accent on both left and right edges
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        redAccent.copy(alpha = if (isDark) 0.85f else 0.90f),
+                        redAccent.copy(alpha = if (isDark) 0.30f else 0.35f),
+                        redAccent.copy(alpha = if (isDark) 0.85f else 0.90f)
+                    )
+                )
+            }
+            app.blockWifi -> {
+                // Wi-Fi blocked: red accent starts from the right
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        redAccent.copy(alpha = if (isDark) 0.10f else 0.08f),
+                        redAccent.copy(alpha = if (isDark) 0.85f else 0.92f)
+                    )
+                )
+            }
+            app.blockMobileData -> {
+                // Data blocked: red accent starts from the left
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        redAccent.copy(alpha = if (isDark) 0.85f else 0.92f),
+                        redAccent.copy(alpha = if (isDark) 0.10f else 0.08f)
+                    )
+                )
+            }
+            else -> {
+                // Allowed / whitelisted: green color accent in the same style
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        greenAccent.copy(alpha = if (isDark) 0.70f else 0.80f),
+                        greenAccent.copy(alpha = if (isDark) 0.28f else 0.35f)
+                    )
+                )
+            }
+        }
+    }
+
     val borderAccent = when {
         isSelected -> MaterialTheme.colorScheme.primary
-        isBlockedRightNow -> BlockedRed
         activeTimer != null -> WarningAmber
-        else -> null
+        app.isFullyBlocked -> redAccent
+        app.isAnyBlocked -> redAccent
+        else -> greenAccent
     }
-    val glassTint = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-    } else {
-        null
+    val glassTint = when {
+        isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        app.isFullyBlocked -> redAccent.copy(alpha = if (isDark) 0.08f else 0.05f)
+        app.isAnyBlocked -> redAccent.copy(alpha = if (isDark) 0.05f else 0.03f)
+        else -> greenAccent.copy(alpha = if (isDark) 0.05f else 0.03f)
     }
 
     val rowInteraction = remember { MutableInteractionSource() }
@@ -124,7 +181,8 @@ fun AppRuleRow(
             .testTag("app_row_${app.packageName}"),
         shape = RoundedCornerShape(20.dp),
         tintColor = glassTint,
-        borderAccent = borderAccent
+        borderAccent = borderAccent,
+        borderBrushOverride = borderBrushOverride
     ) {
         Row(
             modifier = Modifier
@@ -196,7 +254,7 @@ fun AppRuleRow(
                 val statusColor = when {
                     isBlockedRightNow -> MaterialTheme.colorScheme.error
                     app.isAnyBlocked -> MaterialTheme.colorScheme.onSurface
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> greenAccent
                 }
 
                 Text(
@@ -292,10 +350,10 @@ private fun NetworkRuleToggleButton(
     testTag: String
 ) {
     val isDark = LocalIsDarkTheme.current
-    val primaryColor = MaterialTheme.colorScheme.primary
+    val activeColor = EmeraldPrimary
     val containerColor by animateColorAsState(
         targetValue = when {
-            !isBlocked -> primaryColor.copy(alpha = if (isDark) 0.26f else 0.16f)
+            !isBlocked -> activeColor.copy(alpha = if (isDark) 0.26f else 0.16f)
             isDark -> Color.Black.copy(alpha = 0.28f)
             else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
         },
@@ -304,7 +362,7 @@ private fun NetworkRuleToggleButton(
     )
     val contentColor by animateColorAsState(
         targetValue = if (!isBlocked) {
-            primaryColor
+            activeColor
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
@@ -312,7 +370,7 @@ private fun NetworkRuleToggleButton(
         label = "toggleFg"
     )
     val borderColor = if (!isBlocked) {
-        primaryColor.copy(alpha = 0.72f)
+        activeColor.copy(alpha = 0.72f)
     } else if (isDark) {
         Color.White.copy(alpha = 0.14f)
     } else {

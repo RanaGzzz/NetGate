@@ -9,8 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,7 +35,6 @@ import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -244,7 +241,6 @@ fun AppDetailBottomSheet(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AutoDisableTimerCard(
     activeTimer: AppCountdownTimer?,
@@ -370,20 +366,20 @@ private fun AutoDisableTimerCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    TimerTargetNetwork.entries.forEach { target ->
-                        FilterChip(
-                            selected = selectedTarget == target,
-                            onClick = { selectedTarget = target },
-                            label = { Text(target.label, style = MaterialTheme.typography.labelMedium) },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.testTag("timer_target_${target.name.lowercase()}")
+                val timerTargets = TimerTargetNetwork.entries
+                GlassTabs(
+                    items = timerTargets.map { target ->
+                        GlassTabItem(
+                            label = target.label,
+                            testTag = "timer_target_${target.name.lowercase()}"
                         )
-                    }
-                }
+                    },
+                    selectedIndex = timerTargets.indexOf(selectedTarget),
+                    onSelect = { index -> selectedTarget = timerTargets[index] },
+                    variant = GlassTabVariant.CHIP,
+                    forceEqualWidth = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
@@ -392,21 +388,18 @@ private fun AutoDisableTimerCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    PRESET_MINUTES.forEach { mins ->
+                GlassChipFlowGroup(
+                    items = PRESET_MINUTES.map { mins ->
                         val label = if (mins >= 60) "${mins / 60}h" else "${mins}m"
-                        FilterChip(
-                            selected = selectedMinutes == mins,
-                            onClick = { selectedMinutes = mins },
-                            label = { Text(label, style = MaterialTheme.typography.labelMedium) },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.testTag("timer_preset_${mins}m")
+                        GlassTabItem(
+                            label = label,
+                            testTag = "timer_preset_${mins}m"
                         )
-                    }
-                }
+                    },
+                    selectedIndex = PRESET_MINUTES.indexOf(selectedMinutes).takeIf { it >= 0 },
+                    onSelect = { index -> selectedMinutes = PRESET_MINUTES[index] },
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 

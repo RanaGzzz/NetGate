@@ -3,8 +3,6 @@ package com.aistudio.netgate.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,7 +17,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +43,6 @@ import com.aistudio.netgate.ui.theme.WarningAmber
  * Hotspot security controls: PAC/QR setup, tunnel sharing, new-device approval and per-device
  * filtering profiles plus speed limits.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HotspotSecurityCard(
     hotspotState: HotspotProxyRuntimeState,
@@ -203,7 +199,6 @@ private fun ToggleRow(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HotspotClientRuleRow(
     client: HotspotClientInfo,
@@ -274,43 +269,25 @@ private fun HotspotClientRuleRow(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                HotspotFilterProfile.entries.forEach { profile ->
-                    FilterChip(
-                        selected = client.profile == profile,
-                        onClick = { onProfileChange(profile) },
-                        label = { Text(profile.label) }
-                    )
-                }
-            }
+            val profiles = HotspotFilterProfile.entries
+            GlassChipFlowGroup(
+                items = profiles.map { profile ->
+                    GlassTabItem(label = profile.label)
+                },
+                selectedIndex = profiles.indexOf(client.profile).takeIf { it >= 0 },
+                onSelect = { index -> onProfileChange(profiles[index]) }
+            )
             Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                SpeedOption(0L, client, onSpeedChange)
-                SpeedOption(2L * 1024 * 1024, client, onSpeedChange)
-                SpeedOption(5L * 1024 * 1024, client, onSpeedChange)
-                SpeedOption(10L * 1024 * 1024, client, onSpeedChange)
-            }
+            val speedOptions = listOf(0L, 2L * 1024 * 1024, 5L * 1024 * 1024, 10L * 1024 * 1024)
+            GlassChipFlowGroup(
+                items = speedOptions.map { limit ->
+                    GlassTabItem(
+                        label = if (limit <= 0L) "Unlimited" else formatDataBytes(limit) + "/s"
+                    )
+                },
+                selectedIndex = speedOptions.indexOf(client.speedLimitBytesPerSec).takeIf { it >= 0 },
+                onSelect = { index -> onSpeedChange(speedOptions[index]) }
+            )
         }
     }
-}
-
-@Composable
-private fun SpeedOption(
-    limit: Long,
-    client: HotspotClientInfo,
-    onSpeedChange: (Long) -> Unit
-) {
-    FilterChip(
-        selected = client.speedLimitBytesPerSec == limit,
-        onClick = { onSpeedChange(limit) },
-        label = {
-            Text(if (limit <= 0L) "Unlimited" else formatDataBytes(limit) + "/s")
-        }
-    )
 }

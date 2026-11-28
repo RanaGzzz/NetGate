@@ -61,8 +61,11 @@ import com.aistudio.netgate.ui.components.BottomNavIconScale
 import com.aistudio.netgate.ui.components.BottomNavTabId
 import com.aistudio.netgate.ui.components.BottomNavWidthOption
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
+import com.aistudio.netgate.ui.components.LocalBottomNavConfig
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
 import com.aistudio.netgate.ui.components.websiteManagementItems
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import com.aistudio.netgate.ui.theme.LocalBlurEngineConfig
 import com.aistudio.netgate.ui.theme.LocalDynamicColorEnabled
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
@@ -82,7 +85,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36], qualifiers = "w411dp-h915dp")
+@Config(sdk = [35], qualifiers = "w411dp-h915dp")
 class NetGateUiFixesTest {
 
     @get:Rule
@@ -313,7 +316,7 @@ class NetGateUiFixesTest {
     }
 
     @Test
-    fun `GlassPillBottomNav renders stacked icons labels and page dots and switches tabs`() {
+    fun `GlassTabs bottom nav renders stacked icons labels and page dots and switches tabs`() {
         var selected by mutableStateOf(AppDestination.FIREWALL)
         var sniDpiSelected by mutableStateOf(false)
 
@@ -363,24 +366,24 @@ class NetGateUiFixesTest {
         composeRule.onNodeWithTag("glass_pill_page_dots").assertIsDisplayed()
         composeRule.onNodeWithTag("nav_tab_firewall").assertIsDisplayed()
         composeRule.onNodeWithTag("floating_nav_vpn_guard").assertIsDisplayed()
-        composeRule.onNodeWithTag("floating_nav_hotspot").assertIsDisplayed()
-        composeRule.onNodeWithTag("nav_tab_data_usage").assertIsDisplayed()
+        composeRule.onNodeWithTag("floating_nav_hotspot").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("nav_tab_data_usage").performScrollTo().assertIsDisplayed()
 
-        composeRule.onNodeWithTag("nav_tab_websites").performClick()
+        composeRule.onNodeWithTag("nav_tab_websites").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertEquals(AppDestination.WEBSITES, selected)
         assertFalse(sniDpiSelected)
 
-        composeRule.onNodeWithTag("nav_tab_sni_dpi").performClick()
+        composeRule.onNodeWithTag("nav_tab_sni_dpi").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertTrue(sniDpiSelected)
 
-        composeRule.onNodeWithTag("floating_nav_dns").performClick()
+        composeRule.onNodeWithTag("floating_nav_dns").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertEquals(AppDestination.DNS, selected)
         assertFalse(sniDpiSelected)
 
-        composeRule.onNodeWithTag("nav_tab_data_usage").performClick()
+        composeRule.onNodeWithTag("nav_tab_data_usage").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertEquals(AppDestination.DATA_USAGE, selected)
         assertFalse(sniDpiSelected)
@@ -743,39 +746,48 @@ class NetGateUiFixesTest {
     }
 
     @Test
-    fun `FloatingFrostedNavBar renders Wi-Fi and Speed Test bottom navigation tabs`() {
+    fun `FloatingFrostedNavBar shows all enabled tabs directly including Wi-Fi and Speed Test`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        BottomNavConfigManager.init(context)
+        BottomNavConfigManager.resetToDefaults(context)
+
         var clickedWifi = false
         var clickedSpeedTest = false
 
         composeRule.setContent {
+            val navConfig by BottomNavConfigManager.configFlow.collectAsState()
             NetGateTheme(dynamicColor = false) {
-                FloatingFrostedNavBar(
-                    currentDestination = AppDestination.DATA_USAGE,
-                    isConnectionInfoOpen = false,
-                    onSelectFirewall = {},
-                    onSelectWebsites = {},
-                    onSelectDataUsage = {},
-                    onSelectDnsProtection = {},
-                    onSelectHotspot = {},
-                    onSelectVpnGuard = {},
-                    onSelectWifi = { clickedWifi = true },
-                    onSelectSpeedTest = { clickedSpeedTest = true }
-                )
+                CompositionLocalProvider(LocalBottomNavConfig provides navConfig) {
+                    FloatingFrostedNavBar(
+                        currentDestination = AppDestination.DATA_USAGE,
+                        isConnectionInfoOpen = false,
+                        onSelectFirewall = {},
+                        onSelectWebsites = {},
+                        onSelectDataUsage = {},
+                        onSelectDnsProtection = {},
+                        onSelectHotspot = {},
+                        onSelectVpnGuard = {},
+                        onSelectWifi = { clickedWifi = true },
+                        onSelectSpeedTest = { clickedSpeedTest = true }
+                    )
+                }
             }
         }
 
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("nav_tab_wifi").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("nav_tab_firewall").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("nav_tab_wifi").performScrollTo().assertIsDisplayed().performClick()
         assertTrue(clickedWifi)
 
-        composeRule.onNodeWithTag("nav_tab_speed_test").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("nav_tab_speed_test").performScrollTo().assertIsDisplayed().performClick()
         assertTrue(clickedSpeedTest)
     }
 
     @Test
-    fun `BottomNavConfigManager modifies options, toggles visibility, and preserves minimum 2 tabs`() {
+    fun `BottomNavConfigManager modifies options, visibility, and preserves order`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         BottomNavConfigManager.init(context)
+        BottomNavConfigManager.resetToDefaults(context)
 
         BottomNavConfigManager.setHeightOption(context, BottomNavHeightOption.SPACIOUS)
         assertEquals(BottomNavHeightOption.SPACIOUS, BottomNavConfigManager.configFlow.value.heightOption)
@@ -786,6 +798,12 @@ class NetGateUiFixesTest {
         BottomNavConfigManager.setIconScale(context, BottomNavIconScale.LARGE)
         assertEquals(BottomNavIconScale.LARGE, BottomNavConfigManager.configFlow.value.iconScale)
 
+        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.activeOrderedTabs.size)
+        assertTrue(BottomNavConfigManager.toggleTabVisibility(context, BottomNavTabId.WIFI))
+        assertEquals(BottomNavTabId.entries.size - 1, BottomNavConfigManager.configFlow.value.activeOrderedTabs.size)
+        assertTrue(BottomNavConfigManager.toggleTabVisibility(context, BottomNavTabId.WIFI))
+        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.activeOrderedTabs.size)
+
         val initialOrder = BottomNavConfigManager.configFlow.value.orderedTabIds
         BottomNavConfigManager.moveTabDown(context, initialOrder[0])
         assertEquals(initialOrder[0], BottomNavConfigManager.configFlow.value.orderedTabIds[1])
@@ -795,7 +813,7 @@ class NetGateUiFixesTest {
 
         BottomNavConfigManager.resetToDefaults(context)
         assertEquals(BottomNavHeightOption.STANDARD, BottomNavConfigManager.configFlow.value.heightOption)
-        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.visibleTabIds.size)
+        assertEquals(BottomNavTabId.entries.toSet(), BottomNavConfigManager.configFlow.value.visibleTabIds)
     }
 
     @Test

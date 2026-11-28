@@ -463,6 +463,7 @@ fun FrostedSurface(
     shape: Shape = RoundedCornerShape(20.dp),
     tintColor: Color? = null,
     borderAccent: Color? = null,
+    borderBrushOverride: Brush? = null,
     elevation: Dp = 0.dp,
     enableLiquidTouch: Boolean = false,
     liquidStateOverride: LiquidState? = null,
@@ -529,7 +530,7 @@ fun FrostedSurface(
     val outlineColor = MaterialTheme.colorScheme.outline
     val morphAccentPrimary = MaterialTheme.colorScheme.primary
     val morphAccentSecondary = if (useDynamicColor) MaterialTheme.colorScheme.secondary else LiquidGlassCyan
-    val borderBrush = remember(isDark, borderAccent, sheenStrength, outlineColor, themeStyle, isMorph, morphAccentPrimary, morphAccentSecondary) {
+    val borderBrush = borderBrushOverride ?: remember(isDark, borderAccent, sheenStrength, outlineColor, themeStyle, isMorph, morphAccentPrimary, morphAccentSecondary) {
         when {
             themeStyle == NetGateThemeStyle.LIQUID_GLASS && borderAccent == null -> {
                 Brush.linearGradient(

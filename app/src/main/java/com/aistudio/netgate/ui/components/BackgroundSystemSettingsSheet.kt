@@ -8,8 +8,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,8 +25,6 @@ import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -62,7 +58,6 @@ import com.aistudio.netgate.ui.theme.WarningAmber
  * Inline Background & System controls rendered inside the Background & System [SettingsAccordionCard]
  * on the main Settings list (no separate full-page drill-down).
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BackgroundSystemSettingsAccordionBody(
     context: Context,
@@ -230,35 +225,18 @@ fun BackgroundSystemSettingsAccordionBody(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        StatusBarSpeedStyle.entries.forEach { style ->
-                            val selected = preferences.statusBarSpeedStyle == style
-                            FilterChip(
-                                selected = selected,
-                                onClick = { onSelectStatusBarStyle(style) },
-                                label = {
-                                    Text(
-                                        text = style.title,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("settings_status_bar_style_${style.name.lowercase()}")
+                    val speedStyles = StatusBarSpeedStyle.entries
+                    GlassChipFlowGroup(
+                        items = speedStyles.map { style ->
+                            GlassTabItem(
+                                label = style.title,
+                                testTag = "settings_status_bar_style_${style.name.lowercase()}"
                             )
-                        }
-                    }
+                        },
+                        selectedIndex = speedStyles.indexOf(preferences.statusBarSpeedStyle).takeIf { it >= 0 },
+                        onSelect = { index -> onSelectStatusBarStyle(speedStyles[index]) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f))
 

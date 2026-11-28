@@ -6,16 +6,21 @@ import android.graphics.RenderEffect as AndroidRenderEffect
 import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,9 +38,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -82,6 +90,43 @@ val LocalBlurEngineConfig = staticCompositionLocalOf { BlurEngineConfig() }
 val LocalExpressiveMotion = staticCompositionLocalOf { ExpressiveMotionSpec() }
 val LocalBackdropLiquidState = staticCompositionLocalOf<LiquidState?> { null }
 val LocalOverlayLiquidState = staticCompositionLocalOf<LiquidState?> { null }
+val LocalPerformanceMode = staticCompositionLocalOf { false }
+
+@Immutable
+data class GlassBlurStyle(
+    val blurStyle: BlurEngineStyle,
+    val themeStyle: NetGateThemeStyle,
+    val isDark: Boolean,
+    val blurSupported: Boolean,
+    val isBlurActive: Boolean,
+    val isReducedMotion: Boolean,
+    val isPerformanceFallback: Boolean,
+    val useFletchLiquid: Boolean,
+    val liquidState: LiquidState?,
+    val containerBlurDp: Dp,
+    val navBlurDp: Dp,
+    val liquidFrostDp: Dp,
+    val saturation: Float,
+    val containerColor: Color,
+    val containerBorderColor: Color,
+    val containerBorderWidth: Dp,
+    val menuColor: Color,
+    val menuBorderColor: Color,
+    val indicatorColor: Color,
+    val activeContentColor: Color,
+    val inactiveContentColor: Color,
+    val activeBadgeBgColor: Color,
+    val activeBadgeTextColor: Color,
+    val inactiveBadgeBgColor: Color,
+    val inactiveBadgeTextColor: Color,
+    val accentColor: Color,
+    val styleTransitionMillis: Int,
+    val indicatorTransitionMillis: Int,
+    val liquidRefraction: Float,
+    val liquidCurve: Float,
+    val liquidEdge: Float,
+    val liquidDispersion: Float
+)
 
 fun BlurEngineStyle.liquidFrostDp(intensity: Float = 1f): Dp = when (this) {
     BlurEngineStyle.OFF -> 0.dp
@@ -162,6 +207,236 @@ fun isSystemRemoveAnimationsEnabled(context: android.content.Context): Boolean {
             1f
         ) == 0f
     }.getOrDefault(false)
+}
+
+fun isSystemReduceTransparencyEnabled(context: android.content.Context): Boolean {
+    return runCatching {
+        Settings.Secure.getInt(context.contentResolver, "reduce_transparency", 0) == 1 ||
+            Settings.Secure.getInt(context.contentResolver, "high_text_contrast_enabled", 0) == 1
+    }.getOrDefault(false)
+}
+
+fun wcagContrastRatio(foreground: Color, background: Color): Float {
+    val fg = if (foreground.alpha < 1f) foreground.compositeOver(background) else foreground
+    val l1 = fg.luminance()
+    val l2 = background.luminance()
+    val lighter = maxOf(l1, l2)
+    val darker = minOf(l1, l2)
+    return (lighter + 0.05f) / (darker + 0.05f)
+}
+
+fun resolveWcagAccessibleContentColor(
+    background: Color,
+    preferred: Color,
+    secondaryFallback: Color? = null,
+    minRatio: Float = 4.5f
+): Color {
+    if (wcagContrastRatio(preferred, background) >= minRatio) {
+        return preferred
+    }
+    if (secondaryFallback != null && wcagContrastRatio(secondaryFallback, background) >= minRatio) {
+        return secondaryFallback
+    }
+    val darkInk = Color(0xFF0A1018)
+    val lightInk = Color(0xFFF8FAFC)
+    val darkRatio = wcagContrastRatio(darkInk, background)
+    val lightRatio = wcagContrastRatio(lightInk, background)
+    return if (lightRatio >= darkRatio) lightInk else darkInk
+}
+
+@Composable
+fun useBlurStyle(
+    accentColor: Color = MaterialTheme.colorScheme.primary,
+    useOverlayLiquid: Boolean = false
+): GlassBlurStyle {
+    val context = LocalContext.current
+    val isDark = LocalIsDarkTheme.current
+    val config = LocalBlurEngineConfig.current
+    val themeStyle = LocalThemeStyle.current
+    val isPerformanceMode = LocalPerformanceMode.current
+    val backdropLiquid = LocalBackdropLiquidState.current
+    val overlayLiquid = LocalOverlayLiquidState.current
+    val resolvedLiquidState = if (useOverlayLiquid) overlayLiquid ?: backdropLiquid else backdropLiquid
+
+    val isReducedMotion = remember(context, config.animateMotion) {
+        !config.animateMotion || isSystemRemoveAnimationsEnabled(context)
+    }
+    val reduceTransparency = remember(context) {
+        isSystemReduceTransparencyEnabled(context)
+    }
+
+    val blurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val isPerformanceFallback = !blurSupported ||
+        isPerformanceMode ||
+        reduceTransparency ||
+        config.style == BlurEngineStyle.OFF
+    val isBlurActive = !isPerformanceFallback &&
+        themeStyle != NetGateThemeStyle.MATERIAL_YOU_LITE
+
+    val useFletchLiquid = isBlurActive &&
+        themeStyle == NetGateThemeStyle.LIQUID_GLASS &&
+        resolvedLiquidState != null
+
+    val intensityScale = config.intensity.coerceIn(0.4f, 1.5f)
+    val styleTransitionMillis = if (isReducedMotion) 0 else 180
+    val indicatorTransitionMillis = if (isReducedMotion) 0 else 200
+
+    val basePresetAlpha = if (isDark) config.style.tintAlphaDark else config.style.tintAlphaLight
+    val fallbackPresetAlpha = if (reduceTransparency) {
+        0.96f
+    } else if (isDark) {
+        BlurEngineStyle.OFF.tintAlphaDark
+    } else {
+        BlurEngineStyle.OFF.tintAlphaLight
+    }
+
+    val targetContainerAlpha = when {
+        !isBlurActive -> fallbackPresetAlpha
+        useFletchLiquid -> (basePresetAlpha * 0.78f).coerceIn(0.30f, 0.78f)
+        else -> basePresetAlpha
+    }
+
+    val targetContainerBlur = if (isBlurActive) {
+        (config.style.modalBlurDp * intensityScale).dp
+    } else {
+        0.dp
+    }
+    val targetNavBlur = if (isBlurActive) {
+        (config.style.navLiquidFrostDp(intensityScale).value * 1.15f).dp
+    } else {
+        0.dp
+    }
+    val targetLiquidFrost = if (useFletchLiquid) {
+        if (useOverlayLiquid) config.style.navLiquidFrostDp(intensityScale) else config.style.liquidFrostDp(intensityScale)
+    } else {
+        0.dp
+    }
+
+    val colorScheme = MaterialTheme.colorScheme
+    val tintWeight = ((config.style.saturationBoost - 1.0f) * 0.45f).coerceIn(0.04f, 0.16f)
+    val baseContainerSurface = if (isDark) colorScheme.surfaceContainerHigh else colorScheme.surfaceContainerLow
+    val targetContainerBase = lerp(baseContainerSurface, colorScheme.primaryContainer, tintWeight)
+    val targetContainerColor = targetContainerBase.copy(alpha = targetContainerAlpha)
+
+    val menuAlpha = if (isBlurActive) {
+        (basePresetAlpha + 0.24f).coerceIn(0.78f, 0.96f)
+    } else {
+        fallbackPresetAlpha.coerceAtLeast(0.94f)
+    }
+    val targetMenuColor = lerp(
+        if (isDark) colorScheme.surfaceContainer else colorScheme.surface,
+        colorScheme.primaryContainer,
+        tintWeight * 0.75f
+    ).copy(alpha = menuAlpha)
+
+    val borderStrength = when {
+        reduceTransparency -> 0.50f
+        !isBlurActive -> 0.34f
+        else -> (0.20f + (1f - basePresetAlpha) * 0.35f).coerceIn(0.18f, 0.42f)
+    }
+    val targetBorderBase = if (isDark) {
+        lerp(colorScheme.outlineVariant, Color.White, 0.18f)
+    } else {
+        lerp(colorScheme.outline, Color.White, 0.28f)
+    }
+    val targetContainerBorderColor = targetBorderBase.copy(alpha = borderStrength)
+    val targetMenuBorderColor = targetBorderBase.copy(alpha = (borderStrength * 1.15f).coerceAtMost(0.55f))
+
+    // Active indicator derives directly from the user's Material You / theme primary accent + preset alpha
+    val indicatorTint = if (accentColor.luminance() > 0.56f && !isDark) {
+        lerp(accentColor, colorScheme.primaryContainer, 0.18f)
+    } else {
+        accentColor
+    }
+    val indicatorAlpha = if (isBlurActive) {
+        (basePresetAlpha + 0.36f).coerceIn(0.88f, 0.98f)
+    } else {
+        0.96f
+    }
+    val targetIndicatorColor = indicatorTint.copy(alpha = indicatorAlpha)
+
+    // Composite colors against the screen background to compute true WCAG >= 4.5:1 contrast
+    val effectiveContainerBg = targetContainerColor.compositeOver(colorScheme.background)
+    val effectiveIndicatorBg = targetIndicatorColor.compositeOver(effectiveContainerBg)
+
+    val targetActiveContentColor = resolveWcagAccessibleContentColor(
+        background = effectiveIndicatorBg,
+        preferred = colorScheme.onPrimary,
+        secondaryFallback = colorScheme.onPrimaryContainer,
+        minRatio = 4.5f
+    )
+    val targetInactiveContentColor = resolveWcagAccessibleContentColor(
+        background = effectiveContainerBg,
+        preferred = colorScheme.onSurfaceVariant,
+        secondaryFallback = colorScheme.onSurface,
+        minRatio = 4.5f
+    )
+
+    val crossfadeColorSpec = tween<Color>(
+        durationMillis = styleTransitionMillis,
+        easing = FastOutSlowInEasing
+    )
+    val crossfadeDpSpec = tween<Dp>(
+        durationMillis = styleTransitionMillis,
+        easing = FastOutSlowInEasing
+    )
+
+    val containerBlurDp by animateDpAsState(targetContainerBlur, crossfadeDpSpec, label = "blurStyleContainerBlur")
+    val navBlurDp by animateDpAsState(targetNavBlur, crossfadeDpSpec, label = "blurStyleNavBlur")
+    val liquidFrostDp by animateDpAsState(targetLiquidFrost, crossfadeDpSpec, label = "blurStyleLiquidFrost")
+    val containerColor by animateColorAsState(targetContainerColor, crossfadeColorSpec, label = "blurStyleContainerBg")
+    val containerBorderColor by animateColorAsState(targetContainerBorderColor, crossfadeColorSpec, label = "blurStyleContainerBorder")
+    val menuColor by animateColorAsState(targetMenuColor, crossfadeColorSpec, label = "blurStyleMenuBg")
+    val menuBorderColor by animateColorAsState(targetMenuBorderColor, crossfadeColorSpec, label = "blurStyleMenuBorder")
+    val indicatorColor by animateColorAsState(targetIndicatorColor, crossfadeColorSpec, label = "blurStyleIndicatorBg")
+    val activeContentColor by animateColorAsState(targetActiveContentColor, crossfadeColorSpec, label = "blurStyleActiveFg")
+    val inactiveContentColor by animateColorAsState(targetInactiveContentColor, crossfadeColorSpec, label = "blurStyleInactiveFg")
+
+    val saturation by animateFloatAsState(
+        targetValue = if (isBlurActive) config.style.saturationBoost else 1f,
+        animationSpec = if (isReducedMotion) snap() else tween(styleTransitionMillis, easing = FastOutSlowInEasing),
+        label = "blurStyleSaturation"
+    )
+
+    return GlassBlurStyle(
+        blurStyle = config.style,
+        themeStyle = themeStyle,
+        isDark = isDark,
+        blurSupported = blurSupported,
+        isBlurActive = isBlurActive,
+        isReducedMotion = isReducedMotion,
+        isPerformanceFallback = isPerformanceFallback,
+        useFletchLiquid = useFletchLiquid,
+        liquidState = resolvedLiquidState,
+        containerBlurDp = containerBlurDp,
+        navBlurDp = navBlurDp,
+        liquidFrostDp = liquidFrostDp,
+        saturation = saturation,
+        containerColor = containerColor,
+        containerBorderColor = containerBorderColor,
+        containerBorderWidth = 1.dp,
+        menuColor = menuColor,
+        menuBorderColor = menuBorderColor,
+        indicatorColor = indicatorColor,
+        activeContentColor = activeContentColor,
+        inactiveContentColor = inactiveContentColor,
+        activeBadgeBgColor = activeContentColor.copy(alpha = 0.20f),
+        activeBadgeTextColor = activeContentColor,
+        inactiveBadgeBgColor = accentColor.copy(alpha = 0.16f),
+        inactiveBadgeTextColor = resolveWcagAccessibleContentColor(
+            background = accentColor.copy(alpha = 0.16f).compositeOver(effectiveContainerBg),
+            preferred = accentColor,
+            secondaryFallback = targetInactiveContentColor,
+            minRatio = 4.5f
+        ),
+        accentColor = accentColor,
+        styleTransitionMillis = styleTransitionMillis,
+        indicatorTransitionMillis = indicatorTransitionMillis,
+        liquidRefraction = if (useOverlayLiquid) 0.26f else 0.20f,
+        liquidCurve = if (useOverlayLiquid) 0.30f else 0.24f,
+        liquidEdge = if (useOverlayLiquid) 0.06f else 0.04f,
+        liquidDispersion = if (useOverlayLiquid) 0.03f else 0.02f
+    )
 }
 
 /**

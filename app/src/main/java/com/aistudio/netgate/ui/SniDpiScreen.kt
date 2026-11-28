@@ -71,8 +71,10 @@ import com.aistudio.netgate.ui.components.DpiBypassShieldCard
 import com.aistudio.netgate.ui.components.DpiNetworkGuardsCard
 import com.aistudio.netgate.ui.components.EmptyWebsiteRulesCard
 import com.aistudio.netgate.ui.components.FilterLogEntryCard
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabBar
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabItem
+import com.aistudio.netgate.ui.components.GlassTabItem
+import com.aistudio.netgate.ui.components.GlassTabVariant
+import com.aistudio.netgate.ui.components.GlassTabs
+import com.aistudio.netgate.ui.components.rememberBottomNavClearancePadding
 import com.aistudio.netgate.ui.components.HttpsFilteringProxyCard
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 
@@ -154,8 +156,7 @@ fun SniDpiContent(
             .testTag("sni_dpi_screen")
     ) {
         val isWide = maxWidth >= 800.dp
-        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val listBottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp
+        val listBottomPadding = if (isWide) 24.dp else rememberBottomNavClearancePadding()
         val sidePadding = if (isWide) 20.dp else 16.dp
 
         Column(
@@ -475,17 +476,18 @@ private fun SniDpiSegmentedTabToggle(
             SniDpiTab.SETTINGS -> Icons.Rounded.Tune to Icons.Outlined.Tune
             SniDpiTab.LIVE_LOGS -> Icons.Rounded.Terminal to Icons.Outlined.Terminal
         }
-        FrostedSegmentedTabItem(
+        GlassTabItem(
             label = tab.label,
             testTag = "sni_dpi_tab_${tab.name.lowercase()}",
             activeIcon = activeIcon,
             inactiveIcon = inactiveIcon
         )
     }
-    FrostedSegmentedTabBar(
+    GlassTabs(
         items = tabItems,
         selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
         onSelect = { index -> onSelectTab(tabs[index]) },
+        variant = GlassTabVariant.TOP_SEGMENTED,
         modifier = modifier.testTag("sni_dpi_segmented_tabs")
     )
 }

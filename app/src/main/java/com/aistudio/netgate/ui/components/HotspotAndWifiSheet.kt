@@ -17,12 +17,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,7 +51,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -139,7 +135,7 @@ fun HotspotAndWifiContent(
             .testTag("hotspot_wifi_screen")
     ) {
         val isWide = maxWidth >= 820.dp
-        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val portraitBottomPadding = rememberBottomNavClearancePadding()
 
         if (isWide) {
             Row(
@@ -225,7 +221,7 @@ fun HotspotAndWifiContent(
                         .align(Alignment.TopCenter)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp, bottom = navInsetBottom + 120.dp),
+                        .padding(top = 8.dp, bottom = portraitBottomPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     HotspotProxyCard(
@@ -467,27 +463,33 @@ private fun HotspotProxyCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Port Presets
+            val presetPorts = listOf(8890, 8080, 3128)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                listOf(8890, 8080, 3128).forEach { port ->
-                    FilterChip(
-                        selected = preferences.hotspotProxyPort == port,
-                        onClick = { onSelectHotspotPort(port) },
-                        label = { Text(":$port") },
-                        modifier = Modifier.testTag("hotspot_port_$port")
-                    )
-                }
+                GlassTabs(
+                    items = presetPorts.map { port ->
+                        GlassTabItem(
+                            label = ":$port",
+                            testTag = "hotspot_port_$port"
+                        )
+                    },
+                    selectedIndex = presetPorts.indexOf(preferences.hotspotProxyPort),
+                    onSelect = { index -> onSelectHotspotPort(presetPorts[index]) },
+                    variant = GlassTabVariant.CHIP,
+                    forceEqualWidth = true,
+                    modifier = Modifier.weight(1f)
+                )
                 OutlinedButton(
                     onClick = onOpenCustomPortDialog,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    modifier = Modifier.height(34.dp)
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(48.dp)
                 ) {
                     Text(
-                        text = if (preferences.hotspotProxyPort !in listOf(8890, 8080, 3128)) {
+                        text = if (preferences.hotspotProxyPort !in presetPorts) {
                             ":${preferences.hotspotProxyPort}"
                         } else {
                             "Custom"
@@ -1146,19 +1148,20 @@ private fun WifiAutomationCard(
 
                     if (preferences.autoBlockWifiOnIdleEnabled) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf(3, 5, 10, 15, 30).forEach { mins ->
-                                FilterChip(
-                                    selected = preferences.autoBlockWifiIdleMinutes == mins,
-                                    onClick = { onSelectIdleMinutes(mins) },
-                                    label = { Text("${mins}m") },
-                                    modifier = Modifier.testTag("wifi_idle_minutes_$mins")
+                        val idlePresets = listOf(3, 5, 10, 15, 30)
+                        GlassTabs(
+                            items = idlePresets.map { mins ->
+                                GlassTabItem(
+                                    label = "${mins}m",
+                                    testTag = "wifi_idle_minutes_$mins"
                                 )
-                            }
-                        }
+                            },
+                            selectedIndex = idlePresets.indexOf(preferences.autoBlockWifiIdleMinutes),
+                            onSelect = { index -> onSelectIdleMinutes(idlePresets[index]) },
+                            variant = GlassTabVariant.CHIP,
+                            minScrollableTabWidth = 56.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
                         if (idleStatus.isTracking) {
                             Spacer(modifier = Modifier.height(6.dp))
@@ -1267,19 +1270,22 @@ private fun HotspotClientConfigDialog(
                     style = MaterialTheme.typography.labelLarge
                 )
 
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    capPresets.chunked(3).forEach { rowPresets ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            rowPresets.forEach { (bytes, title) ->
-                                FilterChip(
-                                    selected = selectedCapBytes == bytes,
-                                    onClick = { selectedCapBytes = bytes },
-                                    label = { Text(title, maxLines = 1) },
-                                    modifier = Modifier.weight(1f)
-                                )
+                GlassGroupTrack(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        capPresets.chunked(3).forEach { rowPresets ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                rowPresets.forEach { (bytes, title) ->
+                                    GlassChipPill(
+                                        item = GlassTabItem(label = title),
+                                        selected = selectedCapBytes == bytes,
+                                        onClick = { selectedCapBytes = bytes },
+                                        fillWidth = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                         }
                     }

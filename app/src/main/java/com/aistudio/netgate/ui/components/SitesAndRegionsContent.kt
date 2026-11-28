@@ -38,8 +38,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -135,23 +133,24 @@ fun SitesAndRegionsContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FeedModePill(
-                        selected = state.showLiveSitesFeed,
-                        label = "Live (${state.liveConnections.size})",
-                        icon = Icons.Rounded.RadioButtonChecked,
-                        onClick = { onSetShowLiveFeed(true) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("sites_feed_live_button")
-                    )
-                    FeedModePill(
-                        selected = !state.showLiveSitesFeed,
-                        label = "Room History (${state.historicalConnections.size})",
-                        icon = Icons.Rounded.History,
-                        onClick = { onSetShowLiveFeed(false) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("sites_feed_history_button")
+                    GlassTabs(
+                        items = listOf(
+                            GlassTabItem(
+                                label = "Live (${state.liveConnections.size})",
+                                activeIcon = Icons.Rounded.RadioButtonChecked,
+                                testTag = "sites_feed_live_button"
+                            ),
+                            GlassTabItem(
+                                label = "Room History (${state.historicalConnections.size})",
+                                activeIcon = Icons.Rounded.History,
+                                testTag = "sites_feed_history_button"
+                            )
+                        ),
+                        selectedIndex = if (state.showLiveSitesFeed) 0 else 1,
+                        onSelect = { index -> onSetShowLiveFeed(index == 0) },
+                        variant = GlassTabVariant.TOP_SEGMENTED,
+                        forceEqualWidth = true,
+                        modifier = Modifier.weight(1f)
                     )
                     Surface(
                         shape = RoundedCornerShape(14.dp),
@@ -253,38 +252,21 @@ fun SitesAndRegionsContent(
             }
 
             item(key = "site_filter_chips") {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(SiteTrafficFilter.entries) { filter ->
-                        val selected = state.siteFilter == filter
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onSiteFilterChange(filter) },
-                            label = {
-                                Text(
-                                    text = filter.label,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = if (isDark) {
-                                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f)
-                                } else {
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
-                                },
-                                selectedContainerColor = if (filter == SiteTrafficFilter.FLAGGED) {
-                                    BlockedRed.copy(alpha = 0.22f)
-                                } else {
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-                                }
-                            ),
-                            modifier = Modifier.testTag("site_filter_${filter.name.lowercase()}")
+                val siteFilters = SiteTrafficFilter.entries
+                GlassTabs(
+                    items = siteFilters.map { filter ->
+                        GlassTabItem(
+                            label = filter.label,
+                            accentColor = if (filter == SiteTrafficFilter.FLAGGED) BlockedRed else null,
+                            testTag = "site_filter_${filter.name.lowercase()}"
                         )
-                    }
-                }
+                    },
+                    selectedIndex = siteFilters.indexOf(state.siteFilter).coerceAtLeast(0),
+                    onSelect = { index -> onSiteFilterChange(siteFilters[index]) },
+                    variant = GlassTabVariant.CHIP,
+                    minScrollableTabWidth = 76.dp,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             if (state.displayedConnections.isEmpty()) {
@@ -450,70 +432,6 @@ private fun MiniStatChip(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
         )
-    }
-}
-
-@Composable
-private fun FeedModePill(
-    selected: Boolean,
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isDark = LocalIsDarkTheme.current
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
-        } else if (isDark) {
-            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.64f)
-        } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
-        },
-        border = BorderStroke(
-            1.dp,
-            if (selected) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-            } else {
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-            }
-        ),
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 }
 

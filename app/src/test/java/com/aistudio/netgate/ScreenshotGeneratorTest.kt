@@ -26,8 +26,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,6 +88,9 @@ import com.aistudio.netgate.ui.components.FirewallHeaderCard
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
 import com.aistudio.netgate.ui.components.FrostedBackdrop
 import com.aistudio.netgate.ui.components.FrostedSurface
+import com.aistudio.netgate.ui.components.GlassTabItem
+import com.aistudio.netgate.ui.components.GlassTabVariant
+import com.aistudio.netgate.ui.components.GlassTabs
 import com.aistudio.netgate.ui.theme.NetGateTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -266,30 +267,20 @@ class ScreenshotGeneratorTest {
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        val previewModes = listOf(
+                            AppFilterMode.ALL to 48,
+                            AppFilterMode.BLOCKED to 12,
+                            AppFilterMode.WIFI_BLOCKED to 6
+                        )
+                        GlassTabs(
+                            items = previewModes.map { (mode, count) ->
+                                GlassTabItem(label = "${mode.label} ($count)")
+                            },
+                            selectedIndex = 0,
+                            onSelect = {},
+                            variant = GlassTabVariant.CHIP,
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            listOf(
-                                AppFilterMode.ALL to 48,
-                                AppFilterMode.BLOCKED to 12,
-                                AppFilterMode.WIFI_BLOCKED to 6
-                            ).forEach { (mode, count) ->
-                                val selected = mode == AppFilterMode.ALL
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = {},
-                                    label = {
-                                        Text("${mode.label} ($count)", style = MaterialTheme.typography.labelMedium)
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                )
-                            }
-                        }
+                        )
                     }
                     items(sampleApps, key = { it.packageName }) { app ->
                         AppRuleRow(

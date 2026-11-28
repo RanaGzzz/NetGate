@@ -26,7 +26,6 @@ import androidx.compose.material.icons.rounded.SettingsBackupRestore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -85,23 +84,23 @@ fun ImportRulesDialog(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = !defaultIsWhitelist,
-                        onClick = { defaultIsWhitelist = false },
-                        label = { Text("Target: Blacklist") },
-                        modifier = Modifier.testTag("import_target_blacklist")
-                    )
-                    FilterChip(
-                        selected = defaultIsWhitelist,
-                        onClick = { defaultIsWhitelist = true },
-                        label = { Text("Target: Whitelist") },
-                        modifier = Modifier.testTag("import_target_whitelist")
-                    )
-                }
+                GlassTabs(
+                    items = listOf(
+                        GlassTabItem(
+                            label = "Target: Blacklist",
+                            testTag = "import_target_blacklist"
+                        ),
+                        GlassTabItem(
+                            label = "Target: Whitelist",
+                            testTag = "import_target_whitelist"
+                        )
+                    ),
+                    selectedIndex = if (defaultIsWhitelist) 1 else 0,
+                    onSelect = { index -> defaultIsWhitelist = index == 1 },
+                    variant = GlassTabVariant.CHIP,
+                    forceEqualWidth = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -252,15 +251,15 @@ fun BackupAndRestoreRulesDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                FrostedSegmentedTabBar(
+                GlassTabs(
                     items = listOf(
-                        FrostedSegmentedTabItem(
+                        GlassTabItem(
                             label = "Backup",
                             testTag = "backup_restore_tab_backup",
                             activeIcon = Icons.Rounded.Download,
                             inactiveIcon = Icons.Outlined.Download
                         ),
-                        FrostedSegmentedTabItem(
+                        GlassTabItem(
                             label = "Restore",
                             testTag = "backup_restore_tab_restore",
                             activeIcon = Icons.Rounded.Restore,
@@ -268,7 +267,8 @@ fun BackupAndRestoreRulesDialog(
                         )
                     ),
                     selectedIndex = selectedTab,
-                    onSelect = { selectedTab = it }
+                    onSelect = { selectedTab = it },
+                    variant = GlassTabVariant.TOP_SEGMENTED
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))

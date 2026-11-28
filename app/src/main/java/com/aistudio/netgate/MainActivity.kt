@@ -90,7 +90,8 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = uiState.preferences.useDynamicColor,
                 blurEngineStyle = uiState.preferences.blurEngineStyle,
                 blurIntensity = uiState.preferences.blurIntensity,
-                blurAnimationEnabled = uiState.preferences.isBlurAnimationEnabled
+                blurAnimationEnabled = uiState.preferences.isBlurAnimationEnabled,
+                lowPowerMode = uiState.preferences.lowPowerMode
             ) {
                 CompositionLocalProvider(
                     LocalBottomNavConfig provides bottomNavConfig

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.GppGood
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SignalCellularAlt
+import androidx.compose.material.icons.rounded.SignalCellularOff
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiLock
 import androidx.compose.material.icons.rounded.WifiOff
@@ -70,6 +71,7 @@ import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.data.model.formatSpeedBytesPerSec
 import com.aistudio.netgate.ui.theme.BlockedRed
+import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalBlurEngineConfig
 import com.aistudio.netgate.ui.theme.LocalExpressiveMotion
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
@@ -184,36 +186,34 @@ fun FirewallHeaderCard(
                         ),
                         label = "shieldOrbitSweep"
                     )
-                    val shieldSecondary = MaterialTheme.colorScheme.secondary
+                    val statusColor = if (isFirewallActive) EmeraldPrimary else BlockedRed
 
                     Surface(
                         shape = CircleShape,
-                        color = accentColor.copy(alpha = 0.18f),
-                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.38f)),
+                        color = statusColor.copy(alpha = 0.18f),
+                        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.38f)),
                         modifier = Modifier
                             .size(44.dp)
                             .drawBehind {
-                                if (isFirewallActive) {
-                                    val angle = orbitSweepState.value
-                                    val pad = 3.dp.toPx()
-                                    val arcSize = Size(size.width + pad * 2f, size.height + pad * 2f)
-                                    val topLeft = Offset(-pad, -pad)
-                                    drawArc(
-                                        brush = Brush.sweepGradient(
-                                            colors = listOf(
-                                                primaryColor.copy(alpha = 0.85f),
-                                                shieldSecondary.copy(alpha = 0.45f),
-                                                Color.Transparent
-                                            )
-                                        ),
-                                        startAngle = angle,
-                                        sweepAngle = 125f,
-                                        useCenter = false,
-                                        topLeft = topLeft,
-                                        size = arcSize,
-                                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                                    )
-                                }
+                                val angle = orbitSweepState.value
+                                val pad = 3.dp.toPx()
+                                val arcSize = Size(size.width + pad * 2f, size.height + pad * 2f)
+                                val topLeft = Offset(-pad, -pad)
+                                drawArc(
+                                    brush = Brush.sweepGradient(
+                                        colors = listOf(
+                                            statusColor.copy(alpha = if (isFirewallActive) 0.90f else 0.75f),
+                                            statusColor.copy(alpha = 0.35f),
+                                            Color.Transparent
+                                        )
+                                    ),
+                                    startAngle = angle,
+                                    sweepAngle = if (isFirewallActive) 125f else 95f,
+                                    useCenter = false,
+                                    topLeft = topLeft,
+                                    size = arcSize,
+                                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                                )
                             }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -228,11 +228,7 @@ fun FirewallHeaderCard(
                                 } else {
                                     "Firewall paused"
                                 },
-                                tint = if (isFirewallActive) {
-                                    primaryColor
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                tint = statusColor,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -244,7 +240,7 @@ fun FirewallHeaderCard(
                         Text(
                             text = if (isFirewallActive) "Firewall Active" else "Firewall Paused",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = statusColor
                         )
                         Spacer(modifier = Modifier.height(1.dp))
                         Text(
@@ -268,7 +264,10 @@ fun FirewallHeaderCard(
                     modifier = Modifier.testTag("master_firewall_switch"),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = primaryColor
+                        checkedTrackColor = EmeraldPrimary,
+                        uncheckedThumbColor = BlockedRed,
+                        uncheckedTrackColor = BlockedRed.copy(alpha = 0.28f),
+                        uncheckedBorderColor = BlockedRed.copy(alpha = 0.50f)
                     )
                 )
             }
@@ -297,9 +296,9 @@ fun FirewallHeaderCard(
                 RadioStatusChip(
                     label = if (isDataOn) "Data ON" else "Data OFF",
                     isOn = isDataOn,
-                    icon = if (isDataOn) Icons.Rounded.SignalCellularAlt else Icons.Rounded.Block,
+                    icon = if (isDataOn) Icons.Rounded.SignalCellularAlt else Icons.Rounded.SignalCellularOff,
                     activeAccent = primaryColor,
-                    inactiveAccent = BlockedRed,
+                    inactiveAccent = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .weight(1f)
                         .testTag("data_radio_status_chip")
@@ -361,54 +360,32 @@ fun FirewallHeaderCard(
                     .clickable(onClick = onOpenNetworkMonitor)
                     .testTag("header_live_monitor_strip")
             ) {
-                BoxWithConstraints(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     val speedText =
                         "↓ ${formatSpeedBytesPerSec(liveTelemetry.downloadBytesPerSec)}  ↑ ${formatSpeedBytesPerSec(liveTelemetry.uploadBytesPerSec)}"
                     val usageText = "${formatDataBytes(liveTelemetry.todayTotalBytes)} Today"
-                    if (maxWidth < 310.dp) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = speedText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = usageText,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = primaryColor,
-                                maxLines = 1
-                            )
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = speedText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = usageText,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = primaryColor,
-                                maxLines = 1
-                            )
-                        }
-                    }
+                    Text(
+                        text = speedText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = usageText,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = primaryColor,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
 

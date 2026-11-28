@@ -21,13 +21,10 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -68,8 +65,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -154,7 +149,7 @@ fun VpnGuardContent(
 ) {
     val context = LocalContext.current
     val isDark = LocalIsDarkTheme.current
-    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val portraitBottomPadding = rememberBottomNavClearancePadding()
 
     var pendingConnectProfile by remember { mutableStateOf<VpnGuardProfile?>(null) }
     var pendingConnectVpnGate by remember { mutableStateOf<VpnGateServer?>(null) }
@@ -271,7 +266,7 @@ fun VpnGuardContent(
             start = 16.dp,
             end = 16.dp,
             top = 8.dp,
-            bottom = bottomInset + 120.dp
+            bottom = portraitBottomPadding
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
@@ -317,17 +312,18 @@ fun VpnGuardContent(
                     VpnGuardSubTab.VPNGATE -> Icons.Rounded.Public to Icons.Outlined.Public
                     VpnGuardSubTab.PROVIDERS -> Icons.Rounded.Cloud to Icons.Outlined.Cloud
                 }
-                FrostedSegmentedTabItem(
+                GlassTabItem(
                     label = label,
                     testTag = "vpn_guard_tab_${tab.name.lowercase()}",
                     activeIcon = activeIcon,
                     inactiveIcon = inactiveIcon
                 )
             }
-            FrostedSegmentedTabBar(
+            GlassTabs(
                 items = subTabItems,
                 selectedIndex = subTabs.indexOf(state.selectedSubTab).coerceAtLeast(0),
                 onSelect = { index -> onSelectSubTab(subTabs[index]) },
+                variant = GlassTabVariant.TOP_SEGMENTED,
                 minScrollableTabWidth = 108.dp
             )
         }
@@ -594,16 +590,17 @@ fun VpnGuardContent(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(VpnGateSortMode.entries) { mode ->
-                                    FilterChip(
-                                        selected = state.vpnGateSortMode == mode,
-                                        onClick = { onVpnGateSortChange(mode) },
-                                        label = { Text(mode.label) },
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                }
-                            }
+                            val sortModes = VpnGateSortMode.entries
+                            GlassTabs(
+                                items = sortModes.map { mode ->
+                                    GlassTabItem(label = mode.label)
+                                },
+                                selectedIndex = sortModes.indexOf(state.vpnGateSortMode),
+                                onSelect = { index -> onVpnGateSortChange(sortModes[index]) },
+                                variant = GlassTabVariant.CHIP,
+                                minScrollableTabWidth = 88.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }
@@ -1104,23 +1101,22 @@ private fun VpnGuardProfileCard(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(VpnGuardRoutingMode.entries) { mode ->
-                    FilterChip(
-                        selected = profile.routingMode == mode,
-                        onClick = { onChangeRoutingMode(mode) },
-                        label = {
-                            val suffix = if (mode != VpnGuardRoutingMode.WHOLE_SYSTEM && profile.routingMode == mode) {
-                                " (${profile.targetPackages.size})"
-                            } else {
-                                ""
-                            }
-                            Text(mode.title + suffix)
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            }
+            val routingModes = VpnGuardRoutingMode.entries
+            GlassTabs(
+                items = routingModes.map { mode ->
+                    val suffix = if (mode != VpnGuardRoutingMode.WHOLE_SYSTEM && profile.routingMode == mode) {
+                        " (${profile.targetPackages.size})"
+                    } else {
+                        ""
+                    }
+                    GlassTabItem(label = mode.title + suffix)
+                },
+                selectedIndex = routingModes.indexOf(profile.routingMode),
+                onSelect = { index -> onChangeRoutingMode(routingModes[index]) },
+                variant = GlassTabVariant.CHIP,
+                minScrollableTabWidth = 100.dp,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             onApplySplitTunnelPreset?.let { applyPreset ->
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1130,19 +1126,16 @@ private fun VpnGuardProfileCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    SplitTunnelPreset.entries.forEach { preset ->
-                        FilterChip(
-                            selected = false,
-                            onClick = { applyPreset(profile.id, preset) },
-                            label = { Text(preset.title) },
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
-                }
+                val presets = SplitTunnelPreset.entries
+                GlassChipFlowGroup(
+                    items = presets.map { preset ->
+                        GlassTabItem(label = preset.title)
+                    },
+                    selectedIndex = null,
+                    onSelect = { index -> applyPreset(profile.id, presets[index]) },
+                    showContainerTrack = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             if (profile.routingMode != VpnGuardRoutingMode.WHOLE_SYSTEM) {
@@ -1698,27 +1691,28 @@ private fun SplitTunnelAppPickerSheet(
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+            val pickerModes = listOf(
+                VpnGuardRoutingMode.SELECTED_APPS to "Only Selected Apps Use VPN",
+                VpnGuardRoutingMode.EXCLUDE_APPS to "Bypass Selected Apps"
+            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                FilterChip(
-                    selected = currentMode == VpnGuardRoutingMode.SELECTED_APPS,
-                    onClick = { currentMode = VpnGuardRoutingMode.SELECTED_APPS },
-                    label = { Text("Only Selected Apps Use VPN") }
-                )
-                FilterChip(
-                    selected = currentMode == VpnGuardRoutingMode.EXCLUDE_APPS,
-                    onClick = { currentMode = VpnGuardRoutingMode.EXCLUDE_APPS },
-                    label = { Text("Bypass Selected Apps") }
+                GlassChipFlowGroup(
+                    items = pickerModes.map { (_, title) -> GlassTabItem(label = title) },
+                    selectedIndex = pickerModes.indexOfFirst { it.first == currentMode }.takeIf { it >= 0 },
+                    onSelect = { index -> currentMode = pickerModes[index].first },
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedButton(
                     onClick = {
                         currentMode = VpnGuardRoutingMode.SELECTED_APPS
                         selectedPackages = selectedPackages + WireGuardConfigHelper.WHATSAPP_PACKAGES
                     },
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     Text("+ WhatsApp")
                 }

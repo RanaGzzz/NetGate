@@ -98,7 +98,7 @@ fun WifiAnalysisContent(
     state: WifiDiagnosticsUiState,
     onRefreshWifi: () -> Unit,
     onClearObservedHistory: () -> Unit,
-    bottomPadding: Dp = 120.dp,
+    bottomPadding: Dp = rememberBottomNavClearancePadding(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current

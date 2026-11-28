@@ -15,18 +15,34 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.aistudio.netgate.data.local.FirewallPreferences
+import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.FirewallPreferencesState
 import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.ThemeMode
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
+import com.aistudio.netgate.data.model.AppDestination
+import com.aistudio.netgate.ui.components.BottomNavConfigManager
+import com.aistudio.netgate.ui.components.BottomNavTabId
 import com.aistudio.netgate.ui.components.FirewallSettingsSheet
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
 import com.aistudio.netgate.ui.components.FrostedBackdrop
 import com.aistudio.netgate.ui.components.FrostedSurface
+import com.aistudio.netgate.ui.components.GlassTabItem
+import com.aistudio.netgate.ui.components.GlassTabVariant
+import com.aistudio.netgate.ui.components.GlassTabs
+import com.aistudio.netgate.ui.components.LocalBottomNavConfig
+import com.aistudio.netgate.ui.theme.GlassBlurStyle
 import com.aistudio.netgate.ui.theme.LocalBackdropLiquidState
 import com.aistudio.netgate.ui.theme.LocalExpressiveMotion
 import com.aistudio.netgate.ui.theme.LocalOverlayLiquidState
 import com.aistudio.netgate.ui.theme.LocalThemeStyle
 import com.aistudio.netgate.ui.theme.NetGateTheme
+import com.aistudio.netgate.ui.theme.useBlurStyle
+import com.aistudio.netgate.ui.theme.wcagContrastRatio
 import io.github.fletchmckee.liquid.LiquidState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -199,5 +215,119 @@ class ThemeStyleTest {
         composeRule.onNodeWithTag("settings_open_appearance").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_open_appearance").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `GlassTabs reacts to every BlurEngineStyle via useBlurStyle and preserves WCAG contrast`() {
+        var blurStyle by mutableStateOf(BlurEngineStyle.OFF)
+        var themeMode by mutableStateOf(ThemeMode.DARK)
+        var selectedIndex by mutableStateOf(0)
+        var capturedBlur: GlassBlurStyle? = null
+
+        composeRule.setContent {
+            NetGateTheme(
+                themeMode = themeMode,
+                blurEngineStyle = blurStyle,
+                blurIntensity = 1.0f,
+                dynamicColor = false
+            ) {
+                capturedBlur = useBlurStyle()
+                GlassTabs(
+                    items = listOf(
+                        GlassTabItem(label = "All Apps", testTag = "test_tab_apps"),
+                        GlassTabItem(label = "Websites", testTag = "test_tab_sites")
+                    ),
+                    selectedIndex = selectedIndex,
+                    onSelect = { selectedIndex = it },
+                    variant = GlassTabVariant.TOP_SEGMENTED
+                )
+            }
+        }
+
+        BlurEngineStyle.entries.forEach { style ->
+            listOf(ThemeMode.DARK, ThemeMode.LIGHT).forEach { mode ->
+                blurStyle = style
+                themeMode = mode
+                composeRule.waitForIdle()
+                val snapshot = capturedBlur
+                assertNotNull(snapshot)
+                assertEquals(style, snapshot!!.blurStyle)
+                assertEquals(style != BlurEngineStyle.OFF, snapshot.isBlurActive)
+                val activeContrast = wcagContrastRatio(snapshot.activeContentColor, snapshot.indicatorColor)
+                val inactiveContrast = wcagContrastRatio(snapshot.inactiveContentColor, snapshot.containerColor)
+                assertTrue("Active contrast $activeContrast < 4.5 for $style / $mode", activeContrast >= 4.5f)
+                assertTrue("Inactive contrast $inactiveContrast < 4.5 for $style / $mode", inactiveContrast >= 4.5f)
+            }
+        }
+
+        composeRule.onNodeWithTag("test_tab_sites").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, selectedIndex)
+    }
+
+    @Test
+    fun `BottomNav shows all enabled tabs directly on scrollable bar`() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        BottomNavConfigManager.init(context)
+        BottomNavConfigManager.resetToDefaults(context)
+
+        var selectedDestination by mutableStateOf(AppDestination.FIREWALL)
+        var clickedSniDpi by mutableStateOf(false)
+        var clickedWifi by mutableStateOf(false)
+        var clickedSpeedTest by mutableStateOf(false)
+
+        composeRule.setContent {
+            val navConfig by BottomNavConfigManager.configFlow.collectAsState()
+            NetGateTheme(dynamicColor = false) {
+                CompositionLocalProvider(LocalBottomNavConfig provides navConfig) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        FloatingFrostedNavBar(
+                            currentDestination = selectedDestination,
+                            isConnectionInfoOpen = false,
+                            onSelectFirewall = { selectedDestination = AppDestination.FIREWALL },
+                            onSelectWebsites = { selectedDestination = AppDestination.WEBSITES },
+                            onSelectDataUsage = { selectedDestination = AppDestination.DATA_USAGE },
+                            onSelectDnsProtection = { selectedDestination = AppDestination.DNS },
+                            onSelectHotspot = { selectedDestination = AppDestination.HOTSPOT },
+                            onSelectVpnGuard = { selectedDestination = AppDestination.VPN_GUARD },
+                            onSelectSniDpi = { clickedSniDpi = true },
+                            onSelectWifi = {
+                                clickedWifi = true
+                                selectedDestination = AppDestination.DATA_USAGE
+                            },
+                            onSelectSpeedTest = {
+                                clickedSpeedTest = true
+                                selectedDestination = AppDestination.DATA_USAGE
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("nav_tab_firewall").assertIsDisplayed()
+        composeRule.onNodeWithTag("nav_tab_sni_dpi").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(clickedSniDpi)
+
+        composeRule.onNodeWithTag("nav_tab_wifi").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(clickedWifi)
+
+        composeRule.onNodeWithTag("nav_tab_speed_test").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(clickedSpeedTest)
+
+        assertEquals(BottomNavTabId.entries.size, BottomNavConfigManager.configFlow.value.activeOrderedTabs.size)
+        assertTrue(BottomNavConfigManager.toggleTabVisibility(context, BottomNavTabId.USAGE))
+        assertFalse(BottomNavTabId.USAGE in BottomNavConfigManager.configFlow.value.activeOrderedTabs)
+        assertTrue(BottomNavConfigManager.toggleTabVisibility(context, BottomNavTabId.USAGE))
+        assertTrue(BottomNavTabId.USAGE in BottomNavConfigManager.configFlow.value.activeOrderedTabs)
+
+        BottomNavConfigManager.resetToDefaults(context)
+        assertEquals(BottomNavTabId.entries.toSet(), BottomNavConfigManager.configFlow.value.visibleTabIds)
     }
 }

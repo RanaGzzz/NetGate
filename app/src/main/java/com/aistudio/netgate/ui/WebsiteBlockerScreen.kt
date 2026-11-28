@@ -79,10 +79,12 @@ import com.aistudio.netgate.ui.components.AdBlockerHeroCard
 import com.aistudio.netgate.ui.components.AdFilterListRow
 import com.aistudio.netgate.ui.components.AdUpstreamAndPassthroughCard
 import com.aistudio.netgate.ui.components.EmptyWebsiteRulesCard
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabBar
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabItem
+import com.aistudio.netgate.ui.components.GlassTabItem
+import com.aistudio.netgate.ui.components.GlassTabVariant
+import com.aistudio.netgate.ui.components.GlassTabs
 import com.aistudio.netgate.ui.components.SafeSearchAndYoutubeCard
 import com.aistudio.netgate.ui.components.SmartProtectionProfileCard
+import com.aistudio.netgate.ui.components.rememberBottomNavClearancePadding
 
 enum class AdBlockerTab(val label: String) {
     DASHBOARD("Dashboard"),
@@ -156,8 +158,7 @@ fun WebsiteBlockerContent(
             .testTag("website_blocker_screen")
     ) {
         val isWide = maxWidth >= 800.dp
-        val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val listBottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp
+        val listBottomPadding = if (isWide) 24.dp else rememberBottomNavClearancePadding()
         val sidePadding = if (isWide) 20.dp else 16.dp
 
         Column(modifier = Modifier.fillMaxSize()) {
@@ -382,7 +383,7 @@ private fun AdBlockerTopPillTabs(
             AdBlockerTab.DASHBOARD -> Icons.Rounded.Dashboard to Icons.Outlined.Dashboard
             AdBlockerTab.ADVANCED -> Icons.Rounded.Settings to Icons.Outlined.Settings
         }
-        FrostedSegmentedTabItem(
+        GlassTabItem(
             label = tab.label,
             testTag = "ad_blocker_tab_${tab.name.lowercase()}",
             activeIcon = activeIcon,
@@ -393,10 +394,11 @@ private fun AdBlockerTopPillTabs(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        FrostedSegmentedTabBar(
+        GlassTabs(
             items = tabItems,
             selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
             onSelect = { index -> onSelectTab(tabs[index]) },
+            variant = GlassTabVariant.TOP_SEGMENTED,
             modifier = Modifier
                 .widthIn(max = 520.dp)
                 .testTag("ad_blocker_tab_bar")

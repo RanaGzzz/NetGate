@@ -398,6 +398,7 @@ fun NetGateTheme(
     blurEngineStyle: BlurEngineStyle = BlurEngineStyle.ACRYLIC_PRO,
     blurIntensity: Float = 1.0f,
     blurAnimationEnabled: Boolean = true,
+    lowPowerMode: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
@@ -490,6 +491,7 @@ fun NetGateTheme(
         LocalThemeStyle provides themeStyle,
         LocalDynamicColorEnabled provides (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
         LocalExpressiveMotion provides motionSpec,
+        LocalPerformanceMode provides lowPowerMode,
         LocalBlurEngineConfig provides BlurEngineConfig(
             style = blurEngineStyle,
             intensity = blurIntensity.coerceIn(0.4f, 1.5f),

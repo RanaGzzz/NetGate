@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -43,7 +42,6 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -377,7 +375,7 @@ fun VpnDpiLogsSheet(
                 val streamTabItems = streamTabs.map { tab ->
                     val count = if (tab == LogStreamTab.LIVE_APP) appLogs.size else logs.size
                     when (tab) {
-                        LogStreamTab.LIVE_APP -> FrostedSegmentedTabItem(
+                        LogStreamTab.LIVE_APP -> GlassTabItem(
                             label = "Live App",
                             testTag = "logs_tab_live_app",
                             activeIcon = Icons.Rounded.Terminal,
@@ -385,7 +383,7 @@ fun VpnDpiLogsSheet(
                             badgeText = "$count",
                             contentDescription = "${tab.label} ($count)"
                         )
-                        LogStreamTab.VPN_DPI -> FrostedSegmentedTabItem(
+                        LogStreamTab.VPN_DPI -> GlassTabItem(
                             label = "VPN & DPI",
                             testTag = "logs_tab_vpn_dpi",
                             activeIcon = Icons.Rounded.Shield,
@@ -395,10 +393,11 @@ fun VpnDpiLogsSheet(
                         )
                     }
                 }
-                FrostedSegmentedTabBar(
+                GlassTabs(
                     items = streamTabItems,
                     selectedIndex = streamTabs.indexOf(selectedTab).coerceAtLeast(0),
-                    onSelect = { index -> selectedTab = streamTabs[index] }
+                    onSelect = { index -> selectedTab = streamTabs[index] },
+                    variant = GlassTabVariant.TOP_SEGMENTED
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -518,103 +517,77 @@ fun VpnDpiLogsSheet(
 
                 if (selectedTab == LogStreamTab.LIVE_APP) {
                     // Level Filters
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    val levelOptions: List<AppLogLevel?> = listOf(null) + AppLogLevel.entries
+                    GlassChipFlowGroup(
+                        items = levelOptions.map { level ->
+                            if (level == null) {
+                                GlassTabItem(
+                                    label = "All (${appLogs.size})",
+                                    testTag = "log_level_filter_all"
+                                )
+                            } else {
+                                val count = appLogs.count { it.level == level }
+                                GlassTabItem(
+                                    label = "${level.label} ($count)",
+                                    testTag = "log_level_filter_${level.name.lowercase()}"
+                                )
+                            }
+                        },
+                        selectedIndex = levelOptions.indexOf(selectedLevel).takeIf { it >= 0 },
+                        onSelect = { index ->
+                            val picked = levelOptions[index]
+                            selectedLevel = if (picked == null || selectedLevel == picked) null else picked
+                        },
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        FilterChip(
-                            selected = selectedLevel == null,
-                            onClick = { selectedLevel = null },
-                            label = {
-                                Text("All (${appLogs.size})", style = MaterialTheme.typography.labelMedium)
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("log_level_filter_all")
-                        )
-                        AppLogLevel.entries.forEach { level ->
-                            val count = appLogs.count { it.level == level }
-                            FilterChip(
-                                selected = selectedLevel == level,
-                                onClick = {
-                                    selectedLevel = if (selectedLevel == level) null else level
-                                },
-                                label = {
-                                    Text("${level.label} ($count)", style = MaterialTheme.typography.labelMedium)
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("log_level_filter_${level.name.lowercase()}")
-                            )
-                        }
-                    }
+                    )
 
                     if (availableTags.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        val tagOptions: List<String?> = listOf(null) + availableTags
+                        GlassTabs(
+                            items = tagOptions.map { tag ->
+                                if (tag == null) {
+                                    GlassTabItem(
+                                        label = "All Tags",
+                                        testTag = "log_tag_filter_all"
+                                    )
+                                } else {
+                                    GlassTabItem(
+                                        label = tag,
+                                        testTag = "log_tag_filter_${tag.lowercase().replace(" ", "_")}"
+                                    )
+                                }
+                            },
+                            selectedIndex = tagOptions.indexOf(selectedTag).coerceAtLeast(0),
+                            onSelect = { index ->
+                                val picked = tagOptions[index]
+                                selectedTag = if (picked == null || selectedTag == picked) null else picked
+                            },
+                            variant = GlassTabVariant.CHIP,
+                            minScrollableTabWidth = 72.dp,
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            item {
-                                FilterChip(
-                                    selected = selectedTag == null,
-                                    onClick = { selectedTag = null },
-                                    label = {
-                                        Text("All Tags", style = MaterialTheme.typography.labelSmall)
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .heightIn(min = 48.dp)
-                                        .testTag("log_tag_filter_all")
-                                )
-                            }
-                            items(availableTags) { tag ->
-                                FilterChip(
-                                    selected = selectedTag == tag,
-                                    onClick = {
-                                        selectedTag = if (selectedTag == tag) null else tag
-                                    },
-                                    label = {
-                                        Text(tag, style = MaterialTheme.typography.labelSmall)
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .heightIn(min = 48.dp)
-                                        .testTag("log_tag_filter_${tag.lowercase().replace(" ", "_")}")
-                                )
-                            }
-                        }
+                        )
                     }
                 } else {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(VpnDpiLogCategory.entries) { category ->
+                    val categories = VpnDpiLogCategory.entries
+                    GlassTabs(
+                        items = categories.map { category ->
                             val count = if (category == VpnDpiLogCategory.ALL) {
                                 logs.size
                             } else {
                                 logs.count { it.category == category }
                             }
-                            FilterChip(
-                                selected = selectedCategory == category,
-                                onClick = { selectedCategory = category },
-                                label = {
-                                    Text(
-                                        text = "${category.label} ($count)",
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("vpn_dpi_log_filter_${category.name.lowercase()}")
+                            GlassTabItem(
+                                label = "${category.label} ($count)",
+                                testTag = "vpn_dpi_log_filter_${category.name.lowercase()}"
                             )
-                        }
-                    }
+                        },
+                        selectedIndex = categories.indexOf(selectedCategory).coerceAtLeast(0),
+                        onSelect = { index -> selectedCategory = categories[index] },
+                        variant = GlassTabVariant.CHIP,
+                        minScrollableTabWidth = 84.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))

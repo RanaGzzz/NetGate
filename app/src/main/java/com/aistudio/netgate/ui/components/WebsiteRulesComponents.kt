@@ -6,8 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,8 +44,6 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -64,6 +61,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -299,17 +297,18 @@ fun WebsiteRulesSubTabsBar(
                 WebsiteTabSection.WHITELIST -> Icons.Rounded.GppGood to Icons.Outlined.GppGood
                 else -> Icons.Rounded.Apps to Icons.Outlined.Apps
             }
-            FrostedSegmentedTabItem(
+            GlassTabItem(
                 label = "${section.label} ($count)",
                 testTag = "website_section_tab_${section.name.lowercase()}",
                 activeIcon = activeIcon,
                 inactiveIcon = inactiveIcon
             )
         }
-        FrostedSegmentedTabBar(
+        GlassTabs(
             items = sectionTabItems,
             selectedIndex = ruleSections.indexOf(selectedSection).coerceAtLeast(0),
             onSelect = { index -> onSelectSection(ruleSections[index]) },
+            variant = GlassTabVariant.TOP_SEGMENTED,
             minScrollableTabWidth = 114.dp
         )
     }
@@ -691,7 +690,6 @@ private fun DnsCounterPill(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ManualDomainEntryCard(
     domainInput: String,
@@ -831,8 +829,8 @@ fun ManualDomainEntryCard(
                     },
                     enabled = domainInput.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
+                        containerColor = EmeraldPrimary,
+                        contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
@@ -897,32 +895,23 @@ fun ManualDomainEntryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QUICK_SUGGESTED_DOMAINS.forEach { domain ->
-                    FilterChip(
-                        selected = false,
-                        onClick = { onQuickAddDomain(domain, defaultTargetIsWhitelist) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        label = { Text(domain, style = MaterialTheme.typography.labelMedium) },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("quick_domain_$domain")
+            GlassChipFlowGroup(
+                items = QUICK_SUGGESTED_DOMAINS.map { domain ->
+                    GlassTabItem(
+                        label = domain,
+                        activeIcon = Icons.Rounded.Add,
+                        testTag = "quick_domain_$domain"
                     )
-                }
-            }
+                },
+                selectedIndex = null,
+                onSelect = { index -> onQuickAddDomain(QUICK_SUGGESTED_DOMAINS[index], defaultTargetIsWhitelist) },
+                showContainerTrack = true,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RecentBlockedDomainsCard(
     domains: List<String>,
@@ -940,27 +929,19 @@ fun RecentBlockedDomainsCard(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                domains.forEach { domain ->
-                    FilterChip(
-                        selected = false,
-                        onClick = { onAllowDomain(domain) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.VerifiedUser,
-                                contentDescription = "Allow $domain",
-                                tint = EmeraldPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        label = { Text(domain, style = MaterialTheme.typography.labelMedium) },
-                        shape = RoundedCornerShape(12.dp)
+            GlassChipFlowGroup(
+                items = domains.map { domain ->
+                    GlassTabItem(
+                        label = domain,
+                        activeIcon = Icons.Rounded.VerifiedUser,
+                        contentDescription = "Allow $domain"
                     )
-                }
-            }
+                },
+                selectedIndex = null,
+                onSelect = { index -> onAllowDomain(domains[index]) },
+                showContainerTrack = true,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -971,10 +952,29 @@ fun WebsiteRuleRow(
     onToggleEnabled: (Boolean) -> Unit,
     onDelete: () -> Unit
 ) {
-    val accent = if (rule.isWhitelist) MaterialTheme.colorScheme.primary else BlockedRed
+    val accent = if (rule.isWhitelist) EmeraldPrimary else BlockedRed
+    val borderBrush = if (rule.isEnabled) {
+        if (rule.isWhitelist) {
+            Brush.horizontalGradient(
+                listOf(
+                    EmeraldPrimary.copy(alpha = 0.75f),
+                    EmeraldPrimary.copy(alpha = 0.30f)
+                )
+            )
+        } else {
+            Brush.horizontalGradient(
+                listOf(
+                    BlockedRed.copy(alpha = 0.85f),
+                    BlockedRed.copy(alpha = 0.35f)
+                )
+            )
+        }
+    } else null
+
     FrostedSurface(
         shape = RoundedCornerShape(18.dp),
-        borderAccent = if (rule.isEnabled) accent.copy(alpha = 0.45f) else null,
+        borderBrushOverride = borderBrush,
+        borderAccent = if (rule.isEnabled && borderBrush == null) accent.copy(alpha = 0.45f) else null,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("website_rule_row_${rule.domain}")
@@ -1050,6 +1050,10 @@ fun WebsiteRuleRow(
             Switch(
                 checked = rule.isEnabled,
                 onCheckedChange = onToggleEnabled,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = accent
+                ),
                 modifier = Modifier.testTag("website_rule_switch_${rule.domain}")
             )
             IconButton(

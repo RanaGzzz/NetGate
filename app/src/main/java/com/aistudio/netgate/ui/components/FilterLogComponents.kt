@@ -36,8 +36,6 @@ import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -320,48 +318,44 @@ fun FilterLogEntryCard(
                                 Text("Allow", style = MaterialTheme.typography.labelSmall, color = EmeraldPrimary)
                             }
 
-                            DropdownMenu(
+                            GlassDropdownMenu(
                                 expanded = isAllowMenuOpen,
                                 onDismissRequest = { isAllowMenuOpen = false }
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Allow for 1 Hour") },
-                                    leadingIcon = {
-                                        Icon(Icons.Rounded.Timer, contentDescription = null, tint = WifiAccent)
-                                    },
+                                GlassDropdownMenuItem(
+                                    text = "Allow for 1 Hour",
+                                    leadingIcon = Icons.Rounded.Timer,
+                                    leadingIconTint = WifiAccent,
                                     onClick = {
                                         isAllowMenuOpen = false
                                         onAllowTemporarily(entry.domain, TempAllowDuration.ONE_HOUR)
                                     },
                                     modifier = Modifier.testTag("allow_1_hour_${entry.domain}")
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Allow for 24 Hours") },
-                                    leadingIcon = {
-                                        Icon(Icons.Rounded.Timer, contentDescription = null, tint = WifiAccent)
-                                    },
+                                GlassDropdownMenuItem(
+                                    text = "Allow for 24 Hours",
+                                    leadingIcon = Icons.Rounded.Timer,
+                                    leadingIconTint = WifiAccent,
                                     onClick = {
                                         isAllowMenuOpen = false
                                         onAllowTemporarily(entry.domain, TempAllowDuration.TWENTY_FOUR_HOURS)
                                     },
                                     modifier = Modifier.testTag("allow_24_hours_${entry.domain}")
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Allow for 7 Days") },
-                                    leadingIcon = {
-                                        Icon(Icons.Rounded.Timer, contentDescription = null, tint = WifiAccent)
-                                    },
+                                GlassDropdownMenuItem(
+                                    text = "Allow for 7 Days",
+                                    leadingIcon = Icons.Rounded.Timer,
+                                    leadingIconTint = WifiAccent,
                                     onClick = {
                                         isAllowMenuOpen = false
                                         onAllowTemporarily(entry.domain, TempAllowDuration.SEVEN_DAYS)
                                     },
                                     modifier = Modifier.testTag("allow_7_days_${entry.domain}")
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Permanent Allow") },
-                                    leadingIcon = {
-                                        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = EmeraldPrimary)
-                                    },
+                                GlassDropdownMenuItem(
+                                    text = "Permanent Allow",
+                                    leadingIcon = Icons.Rounded.CheckCircle,
+                                    leadingIconTint = EmeraldPrimary,
                                     onClick = {
                                         isAllowMenuOpen = false
                                         onAllowPermanently(entry.domain)

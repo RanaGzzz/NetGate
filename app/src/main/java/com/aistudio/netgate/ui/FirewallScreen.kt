@@ -78,8 +78,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -141,14 +139,16 @@ import com.aistudio.netgate.ui.components.FirewallHeaderCard
 import com.aistudio.netgate.ui.components.FirewallSettingsSheet
 import com.aistudio.netgate.ui.components.FloatingFrostedNavBar
 import com.aistudio.netgate.ui.components.FrostedBackdrop
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabBar
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabItem
 import com.aistudio.netgate.ui.components.FrostedSurface
+import com.aistudio.netgate.ui.components.GlassTabItem
+import com.aistudio.netgate.ui.components.GlassTabVariant
+import com.aistudio.netgate.ui.components.GlassTabs
 import com.aistudio.netgate.ui.components.GlassToast
 import com.aistudio.netgate.ui.components.HotspotAndWifiContent
 import com.aistudio.netgate.ui.components.ImportRulesDialog
 import com.aistudio.netgate.ui.components.VpnDpiLogsSheet
 import com.aistudio.netgate.ui.components.VpnGuardContent
+import com.aistudio.netgate.ui.components.rememberBottomNavClearancePadding
 import com.aistudio.netgate.ui.components.websiteManagementItems
 import com.aistudio.netgate.service.AppLogCollector
 import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineModalDepth
@@ -1060,7 +1060,9 @@ fun FirewallScreen(
                                                         uiState = uiState,
                                                         isGrid = false,
                                                         viewModel = viewModel,
-                                                        bottomPadding = navBarBottomInset + if (uiState.isSelectionMode) 172.dp else 120.dp,
+                                                        bottomPadding = rememberBottomNavClearancePadding(
+                                                            extraPadding = if (uiState.isSelectionMode) 56.dp else 0.dp
+                                                        ),
                                                         headerContent = {
                                                             Column(
                                                                 modifier = Modifier
@@ -1090,7 +1092,7 @@ fun FirewallScreen(
                                                             start = 16.dp,
                                                             end = 16.dp,
                                                             top = 8.dp,
-                                                            bottom = navBarBottomInset + 120.dp
+                                                            bottom = rememberBottomNavClearancePadding()
                                                         ),
                                                         verticalArrangement = Arrangement.spacedBy(12.dp)
                                                     ) {
@@ -1449,13 +1451,13 @@ private fun FirewallSegmentedTabToggle(
     val tabs = FirewallContentTab.entries
     val tabItems = tabs.map { tab ->
         when (tab) {
-            FirewallContentTab.ALL_APPS -> FrostedSegmentedTabItem(
+            FirewallContentTab.ALL_APPS -> GlassTabItem(
                 label = "All Apps ($totalAppsCount)",
                 testTag = "firewall_tab_all_apps",
                 activeIcon = Icons.Rounded.Apps,
                 inactiveIcon = Icons.Outlined.Apps
             )
-            FirewallContentTab.WEBSITES -> FrostedSegmentedTabItem(
+            FirewallContentTab.WEBSITES -> GlassTabItem(
                 label = "Websites",
                 testTag = "firewall_tab_websites",
                 activeIcon = Icons.Rounded.Public,
@@ -1463,10 +1465,11 @@ private fun FirewallSegmentedTabToggle(
             )
         }
     }
-    FrostedSegmentedTabBar(
+    GlassTabs(
         items = tabItems,
         selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
         onSelect = { index -> onSelectTab(tabs[index]) },
+        variant = GlassTabVariant.TOP_SEGMENTED,
         modifier = modifier.testTag("firewall_segmented_tabs")
     )
 }
@@ -1571,53 +1574,29 @@ private fun SearchAndFiltersBlock(
             Column(modifier = Modifier.fillMaxWidth()) {
                 Spacer(modifier = Modifier.height(10.dp))
 
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(AppFilterMode.entries) { mode ->
-                        val count = when (mode) {
-                            AppFilterMode.ALL -> uiState.allManagedApps.size
-                            AppFilterMode.BLOCKED -> uiState.anyRestrictedCount
-                            AppFilterMode.WIFI_BLOCKED -> uiState.wifiBlockedCount
-                            AppFilterMode.DATA_BLOCKED -> uiState.dataBlockedCount
-                            AppFilterMode.ALLOWED -> uiState.allManagedApps.size - uiState.anyRestrictedCount
-                            AppFilterMode.TIMERS -> uiState.activeTimersCount
-                        }
-                        val selected = uiState.filterMode == mode
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onFilterModeChange(mode) },
-                            label = {
-                                Text(
-                                    text = "${mode.label} ($count)",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = if (isDark) {
-                                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
-                                } else {
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
-                                },
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = selected,
-                                borderColor = if (isDark) {
-                                    Color.White.copy(alpha = 0.18f)
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
-                                },
-                                selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-                            ),
-                            modifier = Modifier.testTag("filter_chip_${mode.name.lowercase()}")
-                        )
+                val filterModes = AppFilterMode.entries
+                val filterChipItems = filterModes.map { mode ->
+                    val count = when (mode) {
+                        AppFilterMode.ALL -> uiState.allManagedApps.size
+                        AppFilterMode.BLOCKED -> uiState.anyRestrictedCount
+                        AppFilterMode.WIFI_BLOCKED -> uiState.wifiBlockedCount
+                        AppFilterMode.DATA_BLOCKED -> uiState.dataBlockedCount
+                        AppFilterMode.ALLOWED -> uiState.allManagedApps.size - uiState.anyRestrictedCount
+                        AppFilterMode.TIMERS -> uiState.activeTimersCount
                     }
+                    GlassTabItem(
+                        label = "${mode.label} ($count)",
+                        testTag = "filter_chip_${mode.name.lowercase()}"
+                    )
                 }
+                GlassTabs(
+                    items = filterChipItems,
+                    selectedIndex = filterModes.indexOf(uiState.filterMode).coerceAtLeast(0),
+                    onSelect = { index -> onFilterModeChange(filterModes[index]) },
+                    variant = GlassTabVariant.CHIP,
+                    minScrollableTabWidth = 72.dp,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(modifier = Modifier.height(6.dp))
 

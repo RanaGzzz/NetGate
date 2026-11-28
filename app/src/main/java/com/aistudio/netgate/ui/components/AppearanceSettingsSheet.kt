@@ -1,6 +1,7 @@
 package com.aistudio.netgate.ui.components
 
 import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,7 +35,6 @@ import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Wallpaper
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -120,70 +120,29 @@ fun AppearanceSettingsAccordionBody(
             headerModifier = Modifier.testTag("theme_mode_accordion_toggle")
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                    ),
+                val themeModes = ThemeMode.entries
+                GlassTabs(
+                    items = themeModes.map { mode ->
+                        val icon = when (mode) {
+                            ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
+                            ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                            ThemeMode.DARK -> Icons.Rounded.DarkMode
+                        }
+                        GlassTabItem(
+                            label = mode.label,
+                            activeIcon = icon,
+                            inactiveIcon = icon,
+                            testTag = "theme_mode_${mode.name.lowercase()}"
+                        )
+                    },
+                    selectedIndex = themeModes.indexOf(preferences.themeMode).coerceAtLeast(0),
+                    onSelect = { index -> onThemeModeChange(themeModes[index]) },
+                    variant = GlassTabVariant.TOP_SEGMENTED,
+                    forceEqualWidth = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        ThemeMode.entries.forEach { mode ->
-                            val selected = preferences.themeMode == mode
-                            val icon = when (mode) {
-                                ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-                                ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                                ThemeMode.DARK -> Icons.Rounded.DarkMode
-                            }
-                            FilledTonalButton(
-                                onClick = { onThemeModeChange(mode) },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (selected) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        Color.Transparent
-                                    },
-                                    contentColor = if (selected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                ),
-                                contentPadding = PaddingValues(horizontal = 6.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("theme_mode_${mode.name.lowercase()}")
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = mode.label,
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
+                )
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     SettingsCardDivider()
@@ -216,55 +175,28 @@ fun AppearanceSettingsAccordionBody(
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                NetGateThemeStyle.entries.chunked(2).forEach { rowStyles ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        rowStyles.forEach { style ->
-                            val selected = preferences.themeStyle == style
-                            val buttonShape = RoundedCornerShape(
-                                when (style) {
-                                    NetGateThemeStyle.LIQUID_GLASS -> 14.dp
-                                    NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> 16.dp
-                                    else -> 12.dp
-                                }
-                            )
-                            FilledTonalButton(
-                                onClick = { onThemeStyleChange(style) },
-                                shape = buttonShape,
-                                border = if (selected) {
-                                    BorderStroke(1.25.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f))
-                                } else {
-                                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                },
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (selected) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f)
-                                    },
-                                    contentColor = if (selected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                ),
-                                contentPadding = PaddingValues(horizontal = 8.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("theme_style_${style.name.lowercase()}")
+                GlassGroupTrack(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        NetGateThemeStyle.entries.chunked(2).forEach { rowStyles ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = style.title,
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                rowStyles.forEach { style ->
+                                    GlassChipPill(
+                                        item = GlassTabItem(
+                                            label = style.title,
+                                            testTag = "theme_style_${style.name.lowercase()}"
+                                        ),
+                                        selected = preferences.themeStyle == style,
+                                        onClick = { onThemeStyleChange(style) },
+                                        fillWidth = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                if (rowStyles.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
@@ -290,51 +222,29 @@ fun AppearanceSettingsAccordionBody(
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    BlurEngineStyle.entries.chunked(2).forEach { rowStyles ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            rowStyles.forEach { style ->
-                                val selected = preferences.blurEngineStyle == style
-                                FilledTonalButton(
-                                    onClick = { onBlurStyleChange(style) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = if (selected) {
-                                        BorderStroke(1.25.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f))
-                                    } else {
-                                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                    },
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = if (selected) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f)
-                                        },
-                                        contentColor = if (selected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("blur_style_${style.name.lowercase()}")
+                    GlassGroupTrack(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            BlurEngineStyle.entries.chunked(2).forEach { rowStyles ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Text(
-                                        text = style.title,
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    rowStyles.forEach { style ->
+                                        GlassChipPill(
+                                            item = GlassTabItem(
+                                                label = style.title,
+                                                testTag = "blur_style_${style.name.lowercase()}"
+                                            ),
+                                            selected = preferences.blurEngineStyle == style,
+                                            onClick = { onBlurStyleChange(style) },
+                                            fillWidth = true,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (rowStyles.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
-                            }
-                            if (rowStyles.size == 1) {
-                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -487,7 +397,7 @@ fun AppearanceSettingsAccordionBody(
             title = "Bottom Navigation Bar",
             summary = "Height, width, tab size, visibility & ordering",
             icon = Icons.Rounded.Navigation,
-            statusLabel = "${navConfig.heightOption.label.substringBefore(" ")} • ${navConfig.visibleTabIds.size} tabs",
+            statusLabel = "${navConfig.heightOption.label.substringBefore(" ")} • ${navConfig.activeOrderedTabs.size}/${BottomNavTabId.entries.size} tabs",
             expanded = bottomNavExpanded,
             onToggleExpand = { bottomNavExpanded = !bottomNavExpanded },
             modifier = Modifier.testTag("settings_bottom_nav_card"),
@@ -506,39 +416,22 @@ fun AppearanceSettingsAccordionBody(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        BottomNavHeightOption.entries.forEach { option ->
-                            val selected = navConfig.heightOption == option
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                                border = BorderStroke(
-                                    width = if (selected) 1.5.dp else 1.dp,
-                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { BottomNavConfigManager.setHeightOption(context, option) }
-                                    .testTag("nav_height_${option.name.lowercase()}")
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = option.label.substringBefore(" "),
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                        ),
-                                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    val heightOptions = BottomNavHeightOption.entries
+                    GlassTabs(
+                        items = heightOptions.map { option ->
+                            GlassTabItem(
+                                label = option.label.substringBefore(" "),
+                                testTag = "nav_height_${option.name.lowercase()}"
+                            )
+                        },
+                        selectedIndex = heightOptions.indexOf(navConfig.heightOption).coerceAtLeast(0),
+                        onSelect = { index ->
+                            BottomNavConfigManager.setHeightOption(context, heightOptions[index])
+                        },
+                        variant = GlassTabVariant.CHIP,
+                        forceEqualWidth = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 // Section: Container Width
@@ -548,39 +441,22 @@ fun AppearanceSettingsAccordionBody(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        BottomNavWidthOption.entries.forEach { option ->
-                            val selected = navConfig.widthOption == option
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                                border = BorderStroke(
-                                    width = if (selected) 1.5.dp else 1.dp,
-                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { BottomNavConfigManager.setWidthOption(context, option) }
-                                    .testTag("nav_width_${option.name.lowercase()}")
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = option.label.substringBefore(" "),
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                        ),
-                                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    val widthOptions = BottomNavWidthOption.entries
+                    GlassTabs(
+                        items = widthOptions.map { option ->
+                            GlassTabItem(
+                                label = option.label.substringBefore(" "),
+                                testTag = "nav_width_${option.name.lowercase()}"
+                            )
+                        },
+                        selectedIndex = widthOptions.indexOf(navConfig.widthOption).coerceAtLeast(0),
+                        onSelect = { index ->
+                            BottomNavConfigManager.setWidthOption(context, widthOptions[index])
+                        },
+                        variant = GlassTabVariant.CHIP,
+                        forceEqualWidth = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 // Section: Tab & Icon Scale
@@ -590,39 +466,22 @@ fun AppearanceSettingsAccordionBody(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        BottomNavIconScale.entries.forEach { scale ->
-                            val selected = navConfig.iconScale == scale
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                                border = BorderStroke(
-                                    width = if (selected) 1.5.dp else 1.dp,
-                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { BottomNavConfigManager.setIconScale(context, scale) }
-                                    .testTag("nav_scale_${scale.name.lowercase()}")
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = scale.label,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                        ),
-                                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    val scaleOptions = BottomNavIconScale.entries
+                    GlassTabs(
+                        items = scaleOptions.map { scale ->
+                            GlassTabItem(
+                                label = scale.label,
+                                testTag = "nav_scale_${scale.name.lowercase()}"
+                            )
+                        },
+                        selectedIndex = scaleOptions.indexOf(navConfig.iconScale).coerceAtLeast(0),
+                        onSelect = { index ->
+                            BottomNavConfigManager.setIconScale(context, scaleOptions[index])
+                        },
+                        variant = GlassTabVariant.CHIP,
+                        forceEqualWidth = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 // Section: Visible Tabs & Ordering
@@ -638,7 +497,7 @@ fun AppearanceSettingsAccordionBody(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "${navConfig.visibleTabIds.size} / ${navConfig.orderedTabIds.size} visible",
+                            text = "${navConfig.activeOrderedTabs.size} / ${BottomNavTabId.entries.size} visible",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -657,7 +516,7 @@ fun AppearanceSettingsAccordionBody(
                             .padding(vertical = 4.dp)
                     ) {
                         navConfig.orderedTabIds.forEachIndexed { index, tabId ->
-                            val isVisible = tabId in navConfig.visibleTabIds
+                            val isVisible = tabId in navConfig.activeOrderedTabs
                             val isFirst = index == 0
                             val isLast = index == navConfig.orderedTabIds.lastIndex
 
@@ -724,7 +583,16 @@ fun AppearanceSettingsAccordionBody(
                                     }
                                     Switch(
                                         checked = isVisible,
-                                        onCheckedChange = { BottomNavConfigManager.toggleTabVisibility(context, tabId) },
+                                        onCheckedChange = {
+                                            val changed = BottomNavConfigManager.toggleTabVisibility(context, tabId)
+                                            if (!changed && isVisible) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "At least one navigation tab must stay visible.",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        },
                                         modifier = Modifier
                                             .padding(start = 4.dp)
                                             .testTag("nav_toggle_${tabId.name.lowercase()}")

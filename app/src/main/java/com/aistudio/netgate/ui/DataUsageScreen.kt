@@ -55,8 +55,6 @@ import com.aistudio.netgate.data.network.SpeedTestState
 import com.aistudio.netgate.ui.components.SpeedTestContent
 import com.aistudio.netgate.ui.components.WifiAnalysisContent
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -86,9 +84,11 @@ import com.aistudio.netgate.data.model.UsageFilterCategory
 import com.aistudio.netgate.data.model.UsageTimeRange
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.ui.components.BlockedVsAllowedBarChart
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabBar
-import com.aistudio.netgate.ui.components.FrostedSegmentedTabItem
+import com.aistudio.netgate.ui.components.GlassTabItem
+import com.aistudio.netgate.ui.components.GlassTabVariant
+import com.aistudio.netgate.ui.components.GlassTabs
 import com.aistudio.netgate.ui.components.FrostedSurface
+import com.aistudio.netgate.ui.components.rememberBottomNavClearancePadding
 import com.aistudio.netgate.ui.components.HistoricalTrafficChartCard
 import com.aistudio.netgate.ui.components.SecurityAuditContent
 import com.aistudio.netgate.ui.components.SentReceivedSummaryCard
@@ -146,7 +146,7 @@ fun DataUsageContent(
 ) {
     val context = LocalContext.current
     val maxAppBytes = (state.appItems.maxOfOrNull { it.totalBytes } ?: 1L).coerceAtLeast(1L)
-    val navInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val portraitBottomPadding = rememberBottomNavClearancePadding()
 
     BackHandler(enabled = state.selectedSubTab != DataUsageSubTab.OVERVIEW) {
         onSelectSubTab(DataUsageSubTab.OVERVIEW)
@@ -159,16 +159,20 @@ fun DataUsageContent(
     ) {
         val isWide = maxWidth >= 800.dp
 
+        val isStandaloneTool = state.selectedSubTab == DataUsageSubTab.WIFI ||
+            state.selectedSubTab == DataUsageSubTab.SPEED_TEST
+
         Column(modifier = Modifier.fillMaxSize()) {
-            DataUsageSubTabBar(
-                selectedSubTab = state.selectedSubTab,
-                wifiCount = state.wifiDiagnostics.savedNetworks.size,
-                sitesCount = state.liveConnections.size.coerceAtLeast(state.historicalConnections.size),
-                flaggedCount = state.flaggedSitesCount,
-                onSelectSubTab = onSelectSubTab,
-                modifier = Modifier
-                    .padding(horizontal = if (isWide) 20.dp else 16.dp, vertical = 4.dp)
-            )
+            if (!isStandaloneTool) {
+                DataUsageSubTabBar(
+                    selectedSubTab = state.selectedSubTab,
+                    sitesCount = state.liveConnections.size.coerceAtLeast(state.historicalConnections.size),
+                    flaggedCount = state.flaggedSitesCount,
+                    onSelectSubTab = onSelectSubTab,
+                    modifier = Modifier
+                        .padding(horizontal = if (isWide) 20.dp else 16.dp, vertical = 4.dp)
+                )
+            }
 
             when (state.selectedSubTab) {
                 DataUsageSubTab.WIFI -> {
@@ -176,7 +180,7 @@ fun DataUsageContent(
                         state = state.wifiDiagnostics,
                         onRefreshWifi = onRefreshWifi,
                         onClearObservedHistory = onClearObservedWifi,
-                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp,
+                        bottomPadding = if (isWide) 24.dp else portraitBottomPadding,
                         modifier = Modifier
                             .weight(1f)
                             .align(Alignment.CenterHorizontally)
@@ -195,7 +199,8 @@ fun DataUsageContent(
                             activeNetworkLabel = activeNetworkLabel,
                             onStartTest = onStartSpeedTest,
                             onStopTest = onStopSpeedTest,
-                            onRunVideoTest = onRunVideoTest
+                            onRunVideoTest = onRunVideoTest,
+                            bottomPadding = if (isWide) 24.dp else portraitBottomPadding
                         )
                     }
                 }
@@ -218,7 +223,7 @@ fun DataUsageContent(
                         onQuickAllowSite = onQuickAllowSite,
                         onQuickBlockApp = onQuickBlockApp,
                         onQuickAllowApp = onQuickAllowApp,
-                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp,
+                        bottomPadding = if (isWide) 24.dp else portraitBottomPadding,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -242,7 +247,7 @@ fun DataUsageContent(
                                     onOpenFlaggedSitesFromAudit()
                             }
                         },
-                        bottomPadding = if (isWide) 24.dp else navInsetBottom + 120.dp,
+                        bottomPadding = if (isWide) 24.dp else portraitBottomPadding,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -366,7 +371,7 @@ fun DataUsageContent(
                         start = 16.dp,
                         end = 16.dp,
                         top = 8.dp,
-                        bottom = navInsetBottom + 120.dp
+                        bottom = portraitBottomPadding
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -489,37 +494,40 @@ fun DataUsageContent(
     }
 }
 
+private val USAGE_SUB_TABS: List<DataUsageSubTab> = listOf(
+    DataUsageSubTab.OVERVIEW,
+    DataUsageSubTab.SITES_REGIONS,
+    DataUsageSubTab.SECURITY_AUDIT
+)
+
 @Composable
 private fun DataUsageSubTabBar(
     selectedSubTab: DataUsageSubTab,
-    wifiCount: Int,
     sitesCount: Int,
     flaggedCount: Int,
     onSelectSubTab: (DataUsageSubTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val tabs = DataUsageSubTab.entries
-    val tabItems = tabs.map { tab ->
+    val defaultBadgeColor = MaterialTheme.colorScheme.primary
+    val tabItems = USAGE_SUB_TABS.map { tab ->
         val (activeIcon, inactiveIcon) = when (tab) {
             DataUsageSubTab.OVERVIEW -> Icons.Rounded.BarChart to Icons.Outlined.BarChart
-            DataUsageSubTab.WIFI -> Icons.Rounded.Wifi to Icons.Outlined.Wifi
             DataUsageSubTab.SITES_REGIONS -> Icons.Rounded.Public to Icons.Outlined.Public
             DataUsageSubTab.SECURITY_AUDIT -> Icons.Rounded.Security to Icons.Outlined.Security
-            DataUsageSubTab.SPEED_TEST -> Icons.Rounded.Speed to Icons.Outlined.Speed
+            else -> Icons.Rounded.BarChart to Icons.Outlined.BarChart
         }
         val badgeText = when (tab) {
             DataUsageSubTab.OVERVIEW -> null
-            DataUsageSubTab.WIFI -> if (wifiCount > 0) "$wifiCount" else null
             DataUsageSubTab.SITES_REGIONS -> if (sitesCount > 0) "$sitesCount" else null
             DataUsageSubTab.SECURITY_AUDIT -> if (flaggedCount > 0) "$flaggedCount!" else null
-            DataUsageSubTab.SPEED_TEST -> null
+            else -> null
         }
         val badgeColor = if (tab == DataUsageSubTab.SECURITY_AUDIT && flaggedCount > 0) {
             BlockedRed
         } else {
-            MaterialTheme.colorScheme.primary
+            defaultBadgeColor
         }
-        FrostedSegmentedTabItem(
+        GlassTabItem(
             label = tab.label,
             testTag = "data_usage_subtab_${tab.name.lowercase()}",
             activeIcon = activeIcon,
@@ -529,10 +537,11 @@ private fun DataUsageSubTabBar(
         )
     }
 
-    FrostedSegmentedTabBar(
+    GlassTabs(
         items = tabItems,
-        selectedIndex = tabs.indexOf(selectedSubTab).coerceAtLeast(0),
-        onSelect = { index -> onSelectSubTab(tabs[index]) },
+        selectedIndex = USAGE_SUB_TABS.indexOf(selectedSubTab).coerceAtLeast(0),
+        onSelect = { index -> onSelectSubTab(USAGE_SUB_TABS[index]) },
+        variant = GlassTabVariant.TOP_SEGMENTED,
         minScrollableTabWidth = 108.dp,
         modifier = modifier
     )
@@ -553,35 +562,21 @@ private fun TimeRangeBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                UsageTimeRange.entries.forEach { range ->
-                    val selected = selectedRange == range
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectRange(range) },
-                        label = {
-                            Text(
-                                text = range.label,
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = if (isDark) {
-                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
-                            } else {
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
-                            },
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        ),
-                        modifier = Modifier.testTag("usage_range_${range.name.lowercase()}")
+            val rangeEntries = UsageTimeRange.entries
+            GlassTabs(
+                items = rangeEntries.map { range ->
+                    GlassTabItem(
+                        label = range.label,
+                        testTag = "usage_range_${range.name.lowercase()}"
                     )
-                }
-            }
+                },
+                selectedIndex = rangeEntries.indexOf(selectedRange).coerceAtLeast(0),
+                onSelect = { index -> onSelectRange(rangeEntries[index]) },
+                variant = GlassTabVariant.CHIP,
+                minScrollableTabWidth = 68.dp,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
 
             Surface(
                 shape = RoundedCornerShape(14.dp),
@@ -817,26 +812,20 @@ private fun BreakdownHeaderRow(
             )
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            UsageFilterCategory.entries.forEach { category ->
-                val selected = selectedCategory == category
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelectCategory(category) },
-                    label = { Text(category.label, style = MaterialTheme.typography.labelMedium) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isDark) {
-                            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.60f)
-                        } else {
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
-                        },
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f)
-                    ),
-                    modifier = Modifier.testTag("usage_filter_${category.name.lowercase()}")
+        val categories = UsageFilterCategory.entries
+        GlassTabs(
+            items = categories.map { category ->
+                GlassTabItem(
+                    label = category.label,
+                    testTag = "usage_filter_${category.name.lowercase()}"
                 )
-            }
-        }
+            },
+            selectedIndex = categories.indexOf(selectedCategory).coerceAtLeast(0),
+            onSelect = { index -> onSelectCategory(categories[index]) },
+            variant = GlassTabVariant.CHIP,
+            minScrollableTabWidth = 72.dp,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
