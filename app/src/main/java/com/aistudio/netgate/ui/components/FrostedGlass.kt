@@ -232,15 +232,15 @@ fun FrostedBackdrop(
                         motionActive = shouldAnimateDrift
                     )
                 }
+
+                AnimatedAppBackground(
+                    style = backgroundAnimation,
+                    parallaxEnabled = backgroundParallaxEnabled,
+                    seasonalEnabled = backgroundSeasonalEnabled,
+                    modifier = Modifier.matchParentSize()
+                )
             }
         }
-
-        AnimatedAppBackground(
-            style = backgroundAnimation,
-            parallaxEnabled = backgroundParallaxEnabled,
-            seasonalEnabled = backgroundSeasonalEnabled,
-            modifier = Modifier.matchParentSize()
-        )
 
         CompositionLocalProvider(
             LocalBackdropLiquidState provides backdropLiquidState,
