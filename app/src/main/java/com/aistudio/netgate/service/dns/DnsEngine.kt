@@ -60,10 +60,13 @@ class DnsEngine(
         policy: NetworkPolicy,
         policyContext: PolicyContext,
         resolutionContext: DnsResolutionContext,
-        quicDowngradeEnabled: Boolean
+        quicDowngradeEnabled: Boolean,
+        dnsCacheEnabled: Boolean = false
     ): DnsOutcome {
         return runCatching {
-            processUnsafe(query, policy, policyContext, resolutionContext, quicDowngradeEnabled)
+            processUnsafe(
+                query, policy, policyContext, resolutionContext, quicDowngradeEnabled, dnsCacheEnabled
+            )
         }.getOrDefault(DnsOutcome.Dropped)
     }
 
@@ -72,7 +75,8 @@ class DnsEngine(
         policy: NetworkPolicy,
         policyContext: PolicyContext,
         resolutionContext: DnsResolutionContext,
-        quicDowngradeEnabled: Boolean
+        quicDowngradeEnabled: Boolean,
+        dnsCacheEnabled: Boolean
     ): DnsOutcome {
         val decision = NetworkPolicyEngine.evaluate(
             rawDomain = query.domain,
@@ -137,12 +141,47 @@ class DnsEngine(
             // A failed rewrite falls through to the normal upstream path, as before.
         }
 
+        // Only the plain upstream-forward path is cacheable: every block, rewrite and QUIC
+        // downgrade returned above, so those outcomes can neither fill nor read the cache.
+        val queryType = DnsPacketParser.extractQueryType(query)
+        val cacheable = dnsCacheEnabled && queryType != DnsRecordType.SVCB_HTTPS
+        if (cacheable) {
+            // The stored answer carries the transaction ID of the query that filled it.
+            val cached = DnsResponseCache.getForQuery(
+                qname = query.domain,
+                qtype = queryType,
+                queryPayload = query.dnsPayload,
+                nowMs = System.currentTimeMillis()
+            )
+            if (cached != null) {
+                val rebound = cached
+                return DnsOutcome.Answered(
+                    responsePacket = responder.buildDnsResponsePacket(query, rebound),
+                    upstreamPayload = rebound,
+                    transportLabel = "DNS cache",
+                    isPassthrough = isPassthrough,
+                    latencyMicros = lookupLatencyMicros
+                )
+            }
+        }
+
         val upstream = transportManager.resolve(
             dnsPayload = query.dnsPayload,
             domain = query.domain,
             context = resolutionContext
         )
         val upstreamPayload = upstream.payload ?: return DnsOutcome.Dropped
+
+        // A forged/poisoned answer never taught the cache anything, and a TTL-less answer is
+        // skipped by the cache itself.
+        if (cacheable && upstream.antiPoisonTrips == 0) {
+            DnsResponseCache.put(
+                qname = query.domain,
+                qtype = queryType,
+                responsePayload = upstreamPayload,
+                nowMs = System.currentTimeMillis()
+            )
+        }
 
         return DnsOutcome.Answered(
             responsePacket = responder.buildDnsResponsePacket(query, upstreamPayload),

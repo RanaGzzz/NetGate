@@ -103,6 +103,7 @@ fun DnsProtectionContent(
     onToggleDpiIdleKeepAlive: (Boolean) -> Unit,
     onToggleBlockQuic: (Boolean) -> Unit,
     onToggleAntiDnsPoison: (Boolean) -> Unit,
+    onToggleDnsCache: (Boolean) -> Unit = {},
     onSelectDnsTransportMode: (DnsTransportMode) -> Unit,
     onFlushDpiCache: () -> Unit,
     onRequestEnableFirewall: () -> Unit,
@@ -177,6 +178,11 @@ fun DnsProtectionContent(
                         onToggleDohUpstream = onToggleDohUpstream
                     )
 
+                    DnsResponseCacheCard(
+                        enabled = preferences.dnsResponseCacheEnabled,
+                        onToggle = onToggleDnsCache
+                    )
+
                     DpiBypassShieldCard(
                         dpiBypassMode = preferences.dpiBypassMode,
                         dpiFragmentChunkSize = preferences.dpiFragmentChunkSize,
@@ -241,6 +247,11 @@ fun DnsProtectionContent(
                         onSelectUpstreamDns = onSelectUpstreamDns,
                         onSaveCustomDns = onSaveCustomDns,
                         onToggleDohUpstream = onToggleDohUpstream
+                    )
+
+                    DnsResponseCacheCard(
+                        enabled = preferences.dnsResponseCacheEnabled,
+                        onToggle = onToggleDnsCache
                     )
 
                     DpiBypassShieldCard(
@@ -1164,6 +1175,43 @@ private fun DnsStatusAndSetupCards(
                     color = MaterialTheme.colorScheme.error
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun DnsResponseCacheCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    FrostedSurface(
+        shape = RoundedCornerShape(22.dp),
+        tintColor = EmeraldPrimary.copy(alpha = 0.08f),
+        borderAccent = EmeraldPrimary.copy(alpha = 0.45f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("dns_cache_card")
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "DNS Response Cache",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Remembers successful upstream answers for their TTL (30s–10min, 1024 entries). Blocked, SafeSearch, YouTube-restricted and QUIC-downgraded queries are never cached. Cleared on rule, list, upstream or DPI changes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                modifier = Modifier.testTag("dns_cache_switch")
+            )
         }
     }
 }

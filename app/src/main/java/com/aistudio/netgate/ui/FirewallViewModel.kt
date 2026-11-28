@@ -125,6 +125,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import android.net.Uri
+import com.aistudio.netgate.service.backup.SettingsTransferCodec
+import com.aistudio.netgate.service.dns.DnsResponseCache
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -2312,6 +2316,91 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     fun flushDnsAndAutopilotCache() {
         NetGateVpnService.flushDnsAndAutopilotCache(getApplication())
         _snackbarMessages.tryEmit("Flushed DNS responses & reset Autopilot strategy cache")
+    }
+
+    fun setDnsResponseCacheEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferences.setDnsResponseCacheEnabled(enabled)
+            DnsResponseCache.clear()
+            _snackbarMessages.tryEmit(
+                if (enabled) "DNS response cache enabled (30s–10min TTL)"
+                else "DNS response cache disabled"
+            )
+        }
+    }
+
+    /** True once a settings file was validated and waits for the user to confirm applying it. */
+    private val _settingsImportPending = MutableStateFlow(false)
+    val settingsImportPending: StateFlow<Boolean> = _settingsImportPending.asStateFlow()
+    private var pendingSettingsJson: String? = null
+
+    fun exportSettingsTo(uri: Uri) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val payload = repository.exportSettingsJson()
+                appContext.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
+                    stream.write(payload.toByteArray(Charsets.UTF_8))
+                } ?: error("The selected file could not be opened for writing")
+            }
+            _snackbarMessages.tryEmit(
+                result.fold(
+                    onSuccess = { "Settings exported to the selected file" },
+                    onFailure = { error -> error.message ?: "Settings export failed" }
+                )
+            )
+        }
+    }
+
+    fun importSettingsFrom(uri: Uri) {
+        viewModelScope.launch {
+            val raw = runCatching {
+                appContext.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.readBytes().toString(Charsets.UTF_8)
+                }
+            }.getOrNull()
+            if (raw.isNullOrBlank()) {
+                _snackbarMessages.tryEmit("The selected file could not be read")
+                return@launch
+            }
+            // Validate before anything is written: nothing changes until the user confirms.
+            val decoded = SettingsTransferCodec.decode(raw)
+            if (decoded.isFailure) {
+                _snackbarMessages.tryEmit(
+                    decoded.exceptionOrNull()?.message ?: "Settings import failed"
+                )
+                return@launch
+            }
+            pendingSettingsJson = raw
+            _settingsImportPending.value = true
+            _snackbarMessages.tryEmit("Settings file validated — confirm to apply")
+        }
+    }
+
+    /**
+     * Applies the validated file: rules in one Room transaction, then preferences, and only then
+     * reloads the VPN service because the user asked for it.
+     */
+    fun applyPendingSettingsImport() {
+        val raw = pendingSettingsJson ?: return
+        viewModelScope.launch {
+            repository.importSettingsJson(raw)
+                .onSuccess { summary ->
+                    pendingSettingsJson = null
+                    _settingsImportPending.value = false
+                    NetGateVpnService.flushDnsAndAutopilotCache(getApplication())
+                    _snackbarMessages.tryEmit(
+                        "Imported ${summary.appRules} app rules, ${summary.websiteRules} website rules and ${summary.adFilterLists} filter lists — filtering reloaded"
+                    )
+                }
+                .onFailure { error ->
+                    _snackbarMessages.tryEmit(error.message ?: "Settings import failed")
+                }
+        }
+    }
+
+    fun dismissSettingsImport() {
+        pendingSettingsJson = null
+        _settingsImportPending.value = false
     }
 
     fun addCustomAdFilterList(title: String, sourceUrl: String, category: String) {

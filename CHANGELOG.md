@@ -14,6 +14,15 @@
 - **Two threads per tunnel instead of three.** The relay no longer parks a worker thread on a latch: whichever direction finishes last flushes the remaining byte counts and closes both sockets, with the same traffic reporting and order as before.
 - **DNS lookups take a permit.** Concurrent DNS handling is gated by a 64-permit semaphore acquired inside the lookup coroutine and released in `finally`, so the TUN read loop never waits for a resolver slot.
 
+### Privacy
+- **The rules database stays on the device.** Android auto-backup and device-to-device transfer no longer copy `netgate_rules.db` (or its `-wal`/`-shm` files) or the `netgate_live_usage_prefs` snapshot, on both the pre-Android 12 and the Android 12+ rules files.
+- **WireGuard configs stay sealed at rest.** VPN profiles are AES-GCM encrypted with an Android Keystore key before they reach Room. Profiles saved before this existed still load as plaintext and are re-saved encrypted the first time they are read; a config that cannot be decrypted shows "credentials unavailable — re-import" instead of crashing.
+
+### New Features
+- **Optional DNS response cache.** A 1024-entry LRU remembers successful upstream answers for their TTL, clamped to 30 seconds – 10 minutes, and rewrites the transaction ID on a hit. It is off by default, sits only on the upstream-forward path after policy evaluation, and never caches or serves blocked, SafeSearch-rewritten, YouTube-restricted, QUIC-downgraded or poisoned answers. It is cleared on rule, list, upstream and DPI changes and whenever you flush the DNS cache.
+- **Settings export & import.** Choose a JSON file with the system file picker to move your per-app rules, website rules, custom filter lists and preferences between devices. The file carries a schema version, unknown keys are ignored, the rules are applied in one transaction, and the VPN service reloads only after you confirm. VPN profiles, traffic history, connection events and hotspot client details are never included.
+- **Always-on VPN shortcut.** A Settings row explains Android's Always-on VPN and opens the system VPN settings screen (falling back to Wireless settings) so you can keep filtering up after a reboot.
+
 # What's New — NetGate 3.9.7
 
 ### Network & Usage

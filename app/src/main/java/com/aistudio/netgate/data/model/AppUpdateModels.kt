@@ -82,6 +82,21 @@ object BundledChangelog {
                         "A relay no longer parks a third worker thread on a latch; the last direction to finish flushes the byte counts and closes both sockets.",
                         "DNS lookups are gated by a 64-permit semaphore acquired inside the lookup coroutine, so the TUN read loop never waits for a resolver slot."
                     )
+                ),
+                ChangelogSection(
+                    heading = "Privacy",
+                    bullets = listOf(
+                        "Auto-backup and device transfer no longer copy the rules database (including its -wal/-shm files) or the live-usage preference snapshot.",
+                        "VPN profiles are AES-GCM sealed with an Android Keystore key before they reach Room; older plaintext rows are re-saved encrypted on first read, and a config that cannot be decrypted asks for a re-import instead of crashing."
+                    )
+                ),
+                ChangelogSection(
+                    heading = "New Features",
+                    bullets = listOf(
+                        "An optional 1024-entry DNS response cache remembers successful upstream answers for 30 seconds to 10 minutes, off by default, and never caches blocked, rewritten, downgraded or poisoned answers; it clears on rule, list, upstream and DPI changes.",
+                        "Settings export and import through the system file picker: per-app rules, website rules, filter lists and preferences travel as versioned JSON, applied in one transaction, with the VPN service reloaded only after you confirm.",
+                        "An Always-on VPN row explains the system setting and opens the VPN settings screen so filtering survives a reboot."
+                    )
                 )
             )
         ),

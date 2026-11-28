@@ -74,6 +74,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiTethering
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -88,6 +89,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -169,6 +171,7 @@ fun FirewallScreen(
     val advancedPreferences by viewModel.advancedPreferences.collectAsStateWithLifecycle()
     val backupState by viewModel.backupState.collectAsStateWithLifecycle()
     val appLogs by AppLogCollector.entries.collectAsStateWithLifecycle()
+    val settingsImportPending by viewModel.settingsImportPending.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
     var showAdvancedProtection by rememberSaveable { mutableStateOf(false) }
@@ -730,6 +733,7 @@ fun FirewallScreen(
                                         onToggleDpiIdleKeepAlive = viewModel::setDpiIdleKeepAliveEnabled,
                                         onToggleBlockQuic = viewModel::setBlockQuicForDpiBypass,
                                         onToggleAntiDnsPoison = viewModel::setAntiDnsPoisonEnabled,
+                                        onToggleDnsCache = viewModel::setDnsResponseCacheEnabled,
                                         onSelectDnsTransportMode = viewModel::setDnsTransportMode,
                                         onFlushDpiCache = viewModel::flushDnsAndAutopilotCache,
                                         onRequestEnableFirewall = onRequestEnableFirewall,
@@ -1264,8 +1268,37 @@ fun FirewallScreen(
             },
             onOpenChangelog = viewModel::openChangelog,
             onOpenVpnDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.ALL) },
+            onExportSettings = viewModel::exportSettingsTo,
+            onImportSettings = viewModel::importSettingsFrom,
             onClearAllRules = viewModel::clearAllRules,
             onDismiss = viewModel::closeSettings
+        )
+    }
+
+    if (settingsImportPending) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissSettingsImport,
+            title = { Text("Apply imported settings?") },
+            text = {
+                Text(
+                    "This replaces your per-app rules and website rules with the imported ones, " +
+                        "then reloads filtering. VPN profiles, usage history and hotspot details are " +
+                        "not affected."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::applyPendingSettingsImport,
+                    modifier = Modifier.testTag("settings_import_apply_confirm")
+                ) {
+                    Text("Apply & reload")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissSettingsImport) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 

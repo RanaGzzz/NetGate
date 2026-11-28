@@ -45,6 +45,13 @@ object KeystoreSecretBox {
     /** True when the stored value is the placeholder left behind by a lost Keystore key. */
     fun isUnreadable(value: String): Boolean = value.startsWith(UNREADABLE_MARKER)
 
+    /**
+     * True for a value written before sealing existed: readable, not empty and not a lost-key
+     * placeholder. Such a row is accepted as-is and re-sealed the next time it is saved.
+     */
+    fun requiresSealing(value: String): Boolean =
+        value.isNotEmpty() && !isSealed(value) && !isUnreadable(value)
+
     fun seal(plaintext: String): String {
         // Re-sealing an unreadable placeholder would bury the diagnostic text in a new layer and
         // drop the original payload out of reach.

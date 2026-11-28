@@ -73,6 +73,11 @@ import com.aistudio.netgate.service.DnsPacketFilter
 import com.aistudio.netgate.service.SecurityAuditEngine
 import com.aistudio.netgate.service.VpnRuntimeState
 import com.aistudio.netgate.service.backup.RulesBackupCodec
+import com.aistudio.netgate.service.backup.SettingsImportSummary
+import com.aistudio.netgate.service.backup.SettingsTransferCodec
+import com.aistudio.netgate.service.security.KeystoreSecretBox
+import androidx.room.withTransaction
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -141,9 +146,24 @@ class FirewallRepository(
         }
 
     val vpnGuardProfilesFlow: Flow<List<VpnGuardProfile>>
-        get() = guardProfileDao.observeAllProfiles().map { list ->
-            list.map { it.toModel() }
+        get() = guardProfileDao.observeAllProfiles()
+            .onEach { entities -> resealLegacyProfiles(entities) }
+            .map { list -> list.map { it.toModel() } }
+
+    /**
+     * Rows written before at-rest sealing existed are readable plaintext. They are accepted, then
+     * re-saved sealed so the next read (and every later backup of the database) is encrypted.
+     */
+    private suspend fun resealLegacyProfiles(entities: List<VpnGuardProfileEntity>) {
+        for (entity in entities) {
+            if (!KeystoreSecretBox.requiresSealing(entity.rawConfig)) continue
+            val sealed = KeystoreSecretBox.seal(entity.rawConfig)
+            // Sealing degrades to the same text when no Keystore is available; skip the write then.
+            if (sealed != entity.rawConfig) {
+                guardProfileDao.upsertProfile(entity.copy(rawConfig = sealed))
+            }
         }
+    }
 
     suspend fun saveVpnGuardProfile(profile: VpnGuardProfile) {
         guardProfileDao.upsertProfile(VpnGuardProfileEntity.fromModel(profile))
@@ -168,6 +188,44 @@ class FirewallRepository(
     suspend fun deleteVpnGuardProfile(profileId: String) {
         guardProfileDao.deleteProfile(profileId)
     }
+
+    /** Plain-JSON export of rules, filter subscriptions and preferences (no VPN profiles). */
+    suspend fun exportSettingsJson(): String = withContext(Dispatchers.IO) {
+        SettingsTransferCodec.encode(
+            appRules = ruleDao.getAllRulesOnce(),
+            websiteRules = websiteRuleDao.getAllRulesOnce(),
+            adFilterLists = adFilterListDao.getAllFilterListsOnce(),
+            preferences = preferences.exportSettingsSnapshot()
+        )
+    }
+
+    /**
+     * Applies a settings import: rules are replaced in one Room transaction (so a failure leaves
+     * the previous rules intact), then preferences are written. The VPN service is not touched
+     * here; the caller reloads it only after the user confirms.
+     */
+    suspend fun importSettingsJson(raw: String): Result<SettingsImportSummary> =
+        withContext(Dispatchers.IO) {
+            SettingsTransferCodec.decode(raw).mapCatching { payload ->
+                NetGateDatabase.getInstance(context).withTransaction {
+                    ruleDao.clearAllRules()
+                    if (payload.appRules.isNotEmpty()) ruleDao.upsertRules(payload.appRules)
+                    websiteRuleDao.clearAllRules()
+                    if (payload.websiteRules.isNotEmpty()) {
+                        websiteRuleDao.upsertRules(payload.websiteRules)
+                    }
+                    if (payload.adFilterLists.isNotEmpty()) {
+                        adFilterListDao.upsertFilterLists(payload.adFilterLists)
+                    }
+                }
+                preferences.importSettingsSnapshot(payload.preferences)
+                SettingsImportSummary(
+                    appRules = payload.appRules.size,
+                    websiteRules = payload.websiteRules.size,
+                    adFilterLists = payload.adFilterLists.size
+                )
+            }
+        }
     val trafficSummaryFlow: Flow<DataUsageSummary> = trafficUsageDao.observeBlockedVsAllowedSummary()
         .map { tuple ->
             DataUsageSummary(

@@ -103,6 +103,7 @@ class FirewallPreferences(private val context: Context) {
         val BLOCK_QUIC_FOR_DPI_BYPASS = booleanPreferencesKey("block_quic_for_dpi_bypass")
         val ANTI_DNS_POISON_ENABLED = booleanPreferencesKey("anti_dns_poison_enabled")
         val DNS_TRANSPORT_MODE = stringPreferencesKey("dns_transport_mode")
+        val DNS_RESPONSE_CACHE_ENABLED = booleanPreferencesKey("dns_response_cache_enabled")
         val EXCLUDE_FROM_RECENTS = booleanPreferencesKey("exclude_from_recents")
         val LOW_POWER_MODE = booleanPreferencesKey("low_power_mode")
         val INCLUDE_BETA_UPDATES = booleanPreferencesKey("include_beta_updates")
@@ -211,6 +212,7 @@ class FirewallPreferences(private val context: Context) {
             blockQuicForDpiBypass = prefs[Keys.BLOCK_QUIC_FOR_DPI_BYPASS] ?: true,
             antiDnsPoisonEnabled = prefs[Keys.ANTI_DNS_POISON_ENABLED] ?: true,
             dnsTransportMode = dnsTransport,
+            dnsResponseCacheEnabled = prefs[Keys.DNS_RESPONSE_CACHE_ENABLED] ?: false,
             excludeFromRecents = prefs[Keys.EXCLUDE_FROM_RECENTS] ?: false
         )
     }
@@ -568,6 +570,10 @@ class FirewallPreferences(private val context: Context) {
         context.firewallDataStore.edit { it[Keys.ANTI_DNS_POISON_ENABLED] = enabled }
     }
 
+    suspend fun setDnsResponseCacheEnabled(enabled: Boolean) {
+        context.firewallDataStore.edit { it[Keys.DNS_RESPONSE_CACHE_ENABLED] = enabled }
+    }
+
     suspend fun setDnsTransportMode(mode: DnsTransportMode) {
         context.firewallDataStore.edit { prefs ->
             prefs[Keys.DNS_TRANSPORT_MODE] = mode.name
@@ -608,6 +614,29 @@ class FirewallPreferences(private val context: Context) {
 
     suspend fun importRawSnapshot(values: Map<String, String>) {
         context.firewallDataStore.edit { prefs -> DataStoreBackupCodec.apply(prefs, values) }
+    }
+
+    /** Plain-JSON settings export: everything except keys that identify this device's clients. */
+    suspend fun exportSettingsSnapshot(): Map<String, String> =
+        exportRawSnapshot().filterKeys { it !in PERSONAL_KEYS_EXCLUDED_FROM_EXPORT }
+
+    /** Applies a plain-JSON settings import, keeping device-local identity keys untouched. */
+    suspend fun importSettingsSnapshot(values: Map<String, String>) {
+        val filtered = values.filterKeys { it !in PERSONAL_KEYS_EXCLUDED_FROM_EXPORT }
+        context.firewallDataStore.edit { prefs -> DataStoreBackupCodec.apply(prefs, filtered) }
+    }
+
+    companion object {
+        /**
+         * Hotspot/Wi-Fi identity data. It is part of the DataStore file that auto-backup carries,
+         * so the plain-JSON settings export must never contain it.
+         */
+        val PERSONAL_KEYS_EXCLUDED_FROM_EXPORT: Set<String> = setOf(
+            Keys.HOTSPOT_BLOCKED_CLIENT_IPS.name,
+            Keys.HOTSPOT_CLIENT_CAPS_SET.name,
+            Keys.HOTSPOT_CLIENT_LABELS_SET.name,
+            Keys.SAVED_WIFI_OBSERVED_SET.name
+        )
     }
 
     private fun serializeObservedWifi(item: SavedWifiNetworkInfo): String? = runCatching {

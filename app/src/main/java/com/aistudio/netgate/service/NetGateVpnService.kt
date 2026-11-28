@@ -40,6 +40,7 @@ import com.aistudio.netgate.data.model.YouTubeRestrictedMode
 import com.aistudio.netgate.service.dns.DnsEngine
 import com.aistudio.netgate.service.dns.DnsOutcome
 import com.aistudio.netgate.service.dns.DnsResolutionContext
+import com.aistudio.netgate.service.dns.DnsResponseCache
 import com.aistudio.netgate.service.dns.DnsSocketPolicy
 import com.aistudio.netgate.service.policy.NetworkPolicy
 import com.aistudio.netgate.service.policy.NetworkPolicyEngine
@@ -253,6 +254,9 @@ class NetGateVpnService : VpnService() {
     @Volatile
     private var latestDnsTransportMode: DnsTransportMode = DnsTransportMode.DOH_WITH_FALLBACK
 
+    @Volatile
+    private var latestDnsCacheEnabled: Boolean = false
+
     /** Fail-closed kill switch: while true, every packet on the TUN is dropped. */
     @Volatile
     private var killSwitchLockdown: Boolean = false
@@ -271,6 +275,9 @@ class NetGateVpnService : VpnService() {
 
     private var activeTunnelSignature: TunnelConfigSignature? = null
     private var lastAdMatcherSignature: String? = null
+
+    /** Inputs that can invalidate a remembered DNS answer; a change clears the cache. */
+    private var lastDnsCacheSignature: String? = null
 
     private val blockedDnsCount = AtomicLong(0L)
     private val allowedDnsCount = AtomicLong(0L)
@@ -566,6 +573,29 @@ class NetGateVpnService : VpnService() {
                     latestBlockQuicForDpiBypass = prefs.blockQuicForDpiBypass
                     latestAntiDnsPoisonEnabled = prefs.antiDnsPoisonEnabled
                     latestDnsTransportMode = prefs.dnsTransportMode
+                    latestDnsCacheEnabled = prefs.dnsResponseCacheEnabled
+
+                    // Rules, lists, upstreams and DPI/anti-poison settings all change what a
+                    // remembered answer means, so any change drops the cache.
+                    val dnsCacheSignature = listOf(
+                        prefs.websiteFilterMode.name,
+                        prefs.isAdBlockerEnabled.toString(),
+                        prefs.selectedUpstreamDns.name,
+                        prefs.customDohUrl,
+                        prefs.customUdpDnsIp,
+                        prefs.useDohUpstream.toString(),
+                        prefs.dnsTransportMode.name,
+                        prefs.dpiBypassMode.name,
+                        prefs.blockQuicForDpiBypass.toString(),
+                        prefs.antiDnsPoisonEnabled.toString(),
+                        snapshot.appRules.size.toString(),
+                        snapshot.websiteRules.joinToString(",") { "${it.domain}:${it.ruleType}:${it.isEnabled}" },
+                        snapshot.adFilterLists.joinToString(",") { "${it.id}:${it.isEnabled}:${it.lastSyncedAt}" }
+                    ).joinToString("|")
+                    if (lastDnsCacheSignature != null && lastDnsCacheSignature != dnsCacheSignature) {
+                        DnsResponseCache.clear()
+                    }
+                    lastDnsCacheSignature = dnsCacheSignature
 
                     if (adMatcherChanged && rebuiltAdMatcher != null) {
                         lastAdMatcherSignature = desiredAdSig
@@ -1482,7 +1512,8 @@ class NetGateVpnService : VpnService() {
             policyContext = policyContext,
             resolutionContext = buildDnsResolutionContext(),
             quicDowngradeEnabled = latestDpiBypassMode != DpiBypassMode.OFF &&
-                latestBlockQuicForDpiBypass
+                latestBlockQuicForDpiBypass,
+            dnsCacheEnabled = latestDnsCacheEnabled
         )
 
         val poisonTrips = outcomeAntiPoisonTrips(outcome)
@@ -2242,6 +2273,7 @@ class NetGateVpnService : VpnService() {
 
         fun flushDnsAndAutopilotCache(context: Context) {
             DpiBypassEngine.clearAutopilotCache()
+            DnsResponseCache.clear()
             proxyAddressCache.clear()
             if (_runtimeState.value.isServiceRunning) {
                 val intent = Intent(context, NetGateVpnService::class.java).apply {

@@ -662,7 +662,9 @@ data class FirewallPreferencesState(
      * route one app set per VPN session, so that takes the tunnel away from the DNS/ad filter; set
      * this to false to keep DNS filtering and block apps through DNS + proxy instead.
      */
-    val firewallPriority: Boolean = true
+    val firewallPriority: Boolean = true,
+    /** Remember successful upstream DNS answers for their TTL; off by default. */
+    val dnsResponseCacheEnabled: Boolean = false
 ) {
     fun resolvedDohUrl(): String {
         return if (selectedUpstreamDns == UpstreamDnsServer.CUSTOM_DNS) {

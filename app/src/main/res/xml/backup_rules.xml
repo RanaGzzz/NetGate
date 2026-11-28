@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
+   Backup rules for devices before Android 12 (API 31).
    See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+
+   Privacy: the filtered app/website database and the live-usage snapshot are kept on the
+   device. Both are per-device state, and the database carries the user's app rules.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- Room database holding app rules, website rules and filter subscriptions. -->
+    <exclude domain="database" path="netgate_rules.db" />
+    <exclude domain="database" path="netgate_rules.db-wal" />
+    <exclude domain="database" path="netgate_rules.db-shm" />
+    <!-- Live per-app usage snapshot written by SystemNetworkMonitor. -->
+    <exclude domain="sharedpref" path="netgate_live_usage_prefs.xml" />
 </full-backup-content>

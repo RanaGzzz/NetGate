@@ -3,6 +3,9 @@ package com.aistudio.netgate.ui.components
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -113,6 +116,8 @@ fun FirewallSettingsSheet(
     onOpenAdvancedProtection: () -> Unit = {},
     onOpenChangelog: () -> Unit = {},
     onOpenVpnDpiLogs: () -> Unit = {},
+    onExportSettings: (Uri) -> Unit = {},
+    onImportSettings: (Uri) -> Unit = {},
     onClearAllRules: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -136,6 +141,14 @@ fun FirewallSettingsSheet(
         mutableStateOf(appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE)
     }
     var resetExpanded by rememberSaveable { mutableStateOf(false) }
+    var alwaysOnExpanded by rememberSaveable { mutableStateOf(false) }
+
+    val exportSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> if (uri != null) onExportSettings(uri) }
+    val importSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) onImportSettings(uri) }
 
     LaunchedEffect(appUpdateState.status) {
         if (appUpdateState.status == AppUpdateStatus.UPDATE_AVAILABLE) {
@@ -366,6 +379,68 @@ fun FirewallSettingsSheet(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             SettingsAccordionCard(
+                                title = "Always-on VPN",
+                                summary = "Keep filtering up after a reboot or crash",
+                                icon = Icons.Rounded.Shield,
+                                expanded = alwaysOnExpanded,
+                                onToggleExpand = { alwaysOnExpanded = !alwaysOnExpanded },
+                                modifier = Modifier.testTag("settings_always_on_card"),
+                                headerModifier = Modifier.testTag("settings_always_on_header")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = "Android's Always-on VPN asks the system to keep NetGate's VPN running after a reboot and reconnect it when the network changes. Turn it on for NetGate in the system VPN settings; NetGate itself does not need to be open.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    FilledTonalButton(
+                                        onClick = {
+                                            val opened = runCatching {
+                                                context.startActivity(
+                                                    Intent(Settings.ACTION_VPN_SETTINGS)
+                                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                )
+                                            }.isSuccess
+                                            if (!opened) {
+                                                runCatching {
+                                                    context.startActivity(
+                                                        Intent(Settings.ACTION_WIRELESS_SETTINGS)
+                                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("settings_always_on_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Open System VPN Settings",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            SettingsAccordionCard(
                                 title = "Banking-Safe Architecture",
                                 summary = "Zero Accessibility • Local VPN sinkhole",
                                 icon = Icons.Rounded.VerifiedUser,
@@ -507,6 +582,50 @@ fun FirewallSettingsSheet(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                    }
+                                    Text(
+                                        text = "Settings file (JSON): per-app rules, website rules, filter lists and preferences. VPN profiles, usage history and hotspot client details are never included.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                exportSettingsLauncher.launch("netgate-settings-${BuildConfig.VERSION_NAME}.json")
+                                            },
+                                            shape = RoundedCornerShape(12.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .testTag("settings_export_json_button")
+                                        ) {
+                                            Text(
+                                                text = "Export settings",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = { importSettingsLauncher.launch(arrayOf("application/json")) },
+                                            shape = RoundedCornerShape(12.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .testTag("settings_import_json_button")
+                                        ) {
+                                            Text(
+                                                text = "Import settings",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
