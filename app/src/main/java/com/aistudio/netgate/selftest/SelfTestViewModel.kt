@@ -1,4 +1,4 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -78,13 +78,13 @@ class SelfTestViewModel(application: Application) : AndroidViewModel(application
     fun failuresOnlyText(): String = SelfTestReport.failuresOnly(_results.value)
 
     fun buildMarkdownReport(): String = SelfTestReport.markdown(
-        metadata = SelfTestReportMetadata.current(),
+        metadata = SelfTestReportMetadata.current(context = getApplication()),
         results = _results.value,
         logLines = recentLogLines()
     )
 
     fun buildJsonReport(): String = SelfTestReport.json(
-        metadata = SelfTestReportMetadata.current(),
+        metadata = SelfTestReportMetadata.current(context = getApplication()),
         results = _results.value,
         logLines = recentLogLines()
     )

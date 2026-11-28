@@ -1,4 +1,4 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

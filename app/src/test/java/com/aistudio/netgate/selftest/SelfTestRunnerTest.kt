@@ -1,4 +1,4 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList

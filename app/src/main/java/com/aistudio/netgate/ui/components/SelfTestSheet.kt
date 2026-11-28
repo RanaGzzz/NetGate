@@ -58,11 +58,11 @@ import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.WarningAmber
 import com.aistudio.netgate.ui.theme.WifiAccent
-import com.example.selftest.SelfTestReport
-import com.example.selftest.SelfTestViewModel
-import com.example.selftest.TestResult
-import com.example.selftest.TestStatus
-import com.example.selftest.TestSummary
+import com.aistudio.netgate.selftest.SelfTestReport
+import com.aistudio.netgate.selftest.SelfTestViewModel
+import com.aistudio.netgate.selftest.TestResult
+import com.aistudio.netgate.selftest.TestStatus
+import com.aistudio.netgate.selftest.TestSummary
 
 /**
  * In-app self-test sheet: runs the engine suite, streams results grouped by category and exports a

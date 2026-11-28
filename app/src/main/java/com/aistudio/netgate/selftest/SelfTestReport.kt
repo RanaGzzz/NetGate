@@ -1,6 +1,8 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
+import android.content.Context
 import com.aistudio.netgate.BuildConfig
+import com.aistudio.netgate.service.CrashLogRecorder
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -8,18 +10,34 @@ import org.json.JSONObject
 data class SelfTestReportMetadata(
     val appVersion: String,
     val versionCode: Int,
+    val buildType: String,
+    val gitCommitSha: String,
+    val isMinified: Boolean,
     val androidApi: Int,
     val deviceModel: String,
-    val generatedAtMs: Long
+    val generatedAtMs: Long,
+    val latestCrashHeadline: String? = null
 ) {
     companion object {
-        fun current(nowMs: Long = System.currentTimeMillis()) = SelfTestReportMetadata(
-            appVersion = BuildConfig.VERSION_NAME,
-            versionCode = BuildConfig.VERSION_CODE,
-            androidApi = android.os.Build.VERSION.SDK_INT,
-            deviceModel = android.os.Build.MODEL.orEmpty(),
-            generatedAtMs = nowMs
-        )
+        fun current(
+            context: Context? = null,
+            nowMs: Long = System.currentTimeMillis()
+        ): SelfTestReportMetadata {
+            val crashHeadline = context?.let { ctx ->
+                CrashLogRecorder.reports(ctx).firstOrNull()?.headline
+            }
+            return SelfTestReportMetadata(
+                appVersion = BuildConfig.VERSION_NAME,
+                versionCode = BuildConfig.VERSION_CODE,
+                buildType = BuildConfig.BUILD_TYPE,
+                gitCommitSha = BuildConfig.GIT_COMMIT_SHA,
+                isMinified = !BuildConfig.DEBUG,
+                androidApi = android.os.Build.VERSION.SDK_INT,
+                deviceModel = android.os.Build.MODEL.orEmpty(),
+                generatedAtMs = nowMs,
+                latestCrashHeadline = crashHeadline
+            )
+        }
     }
 }
 
@@ -41,12 +59,35 @@ object SelfTestReport {
         RegexOption.IGNORE_CASE
     )
 
+    private val ALLOWED_PACKAGE_PREFIXES = listOf(
+        "com.aistudio.netgate.",
+        "java.",
+        "kotlin.",
+        "android."
+    )
+
+    private fun isAllowedPackage(value: String): Boolean =
+        ALLOWED_PACKAGE_PREFIXES.any { prefix -> value == prefix.trimEnd('.') || value.startsWith(prefix) }
+
+    private fun isAllowedHost(value: String): Boolean {
+        val lower = value.lowercase()
+        if (lower == "localhost" || lower.contains("netgate")) return true
+        // Never redact source-file names that appear in stack traces.
+        if (value != lower) return true
+        if (lower.endsWith(".kt") || lower.endsWith(".java") || lower.endsWith(".class")) return true
+        return false
+    }
+
     /** Replaces anything that could identify a site, resolver or installed app. */
     fun redact(text: String): String = text
-        .replace(IPV4, "<ip>")
-        .replace(IPV6, "<ip>")
-        .replace(PACKAGE_NAME, "<package>")
-        .replace(HOSTNAME, "<host>")
+        .replace(IPV4) { "<ip>" }
+        .replace(IPV6) { "<ip>" }
+        .replace(PACKAGE_NAME) { match ->
+            if (isAllowedPackage(match.value)) match.value else "<package>"
+        }
+        .replace(HOSTNAME) { match ->
+            if (isAllowedHost(match.value)) match.value else "<host>"
+        }
 
     fun markdown(
         metadata: SelfTestReportMetadata,
@@ -60,6 +101,10 @@ object SelfTestReport {
             appendLine("| Field | Value |")
             appendLine("| --- | --- |")
             appendLine("| App | ${metadata.appVersion} (${metadata.versionCode}) |")
+            appendLine("| Build | ${metadata.buildType} |")
+            appendLine("| Git commit | ${metadata.gitCommitSha.ifBlank { "unknown" }} |")
+            appendLine("| Minified | ${metadata.isMinified} |")
+            appendLine("| Latest crash | ${metadata.latestCrashHeadline ?: "none"} |")
             appendLine("| Android API | ${metadata.androidApi} |")
             appendLine("| Device | ${metadata.deviceModel.ifBlank { "unknown" }} |")
             appendLine("| Generated | ${formatTimestamp(metadata.generatedAtMs)} |")
@@ -107,6 +152,10 @@ object SelfTestReport {
         root.put("schemaVersion", 1)
         root.put("appVersion", metadata.appVersion)
         root.put("versionCode", metadata.versionCode)
+        root.put("buildType", metadata.buildType)
+        root.put("gitCommitSha", metadata.gitCommitSha)
+        root.put("isMinified", metadata.isMinified)
+        root.put("latestCrashHeadline", metadata.latestCrashHeadline ?: "")
         root.put("androidApi", metadata.androidApi)
         root.put("deviceModel", metadata.deviceModel)
         root.put("generatedAt", metadata.generatedAtMs)

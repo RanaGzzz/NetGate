@@ -176,7 +176,7 @@ fun FirewallScreen(
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
     var showAdvancedProtection by rememberSaveable { mutableStateOf(false) }
     var showSelfTest by rememberSaveable { mutableStateOf(false) }
-    val selfTestViewModel: com.example.selftest.SelfTestViewModel =
+    val selfTestViewModel: com.aistudio.netgate.selftest.SelfTestViewModel =
         androidx.lifecycle.viewmodel.compose.viewModel()
     var isSniDpiSelected by rememberSaveable { mutableStateOf(false) }
     var selectedFirewallTab by rememberSaveable { mutableStateOf(FirewallContentTab.ALL_APPS) }

@@ -1,4 +1,4 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
 /** Outcome of one self-test. */
 enum class TestStatus { PASS, FAIL, WARN, SKIP }

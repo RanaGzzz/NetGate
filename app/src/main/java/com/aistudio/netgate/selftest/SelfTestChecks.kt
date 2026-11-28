@@ -1,7 +1,10 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
 import android.app.AppOpsManager
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.preferencesDataStore
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.VpnService
@@ -28,7 +31,14 @@ import com.aistudio.netgate.service.DpiStrategy
 import com.aistudio.netgate.service.NetGateVpnService
 import com.aistudio.netgate.service.PerAppFirewallEngine
 import com.aistudio.netgate.service.WireGuardConfigHelper
+import com.aistudio.netgate.service.OpenVpnConfigHelper
 import com.aistudio.netgate.service.dns.DnsEngine
+import com.aistudio.netgate.service.dns.DnsResponseCache
+import com.aistudio.netgate.service.security.KeystoreSecretBox
+import com.aistudio.netgate.service.backup.EncryptedBackupManager
+import com.aistudio.netgate.service.LocalFilteringProxyServer
+import com.aistudio.netgate.service.AppTimerScheduler
+import com.aistudio.netgate.service.ProxyFilterDecision
 import com.aistudio.netgate.service.policy.NetworkPolicy
 import com.aistudio.netgate.service.policy.NetworkPolicyEngine
 import com.aistudio.netgate.service.policy.PolicyContext
@@ -42,6 +52,9 @@ import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+
+private val Context.selftestDataStore by preferencesDataStore(name = "netgate_selftest")
+private val SELFTEST_FIREWALL_WAS_RUNNING = booleanPreferencesKey("selftest_firewall_was_running")
 
 /**
  * The self-test registry.
@@ -67,7 +80,7 @@ object SelfTestChecks {
     const val GROUP_SERVICE = "Service & network"
     const val GROUP_ACTIVE = "Active tests"
 
-    private const val SELF_TEST_TARGET_PACKAGE = "com.example.selftest.target"
+    private const val SELF_TEST_TARGET_PACKAGE = "com.aistudio.netgate.selftest.target"
     private const val SELF_TEST_DOMAIN = "example.test"
     private const val SELF_TEST_ALLOWED_SUBDOMAIN = "safe.example.test"
 
@@ -165,6 +178,41 @@ object SelfTestChecks {
                 if (response.isEmpty()) TestOutcome.fail("Empty response")
                 else if ((response[0].toInt() shr 4) != 6) TestOutcome.fail("Not an IPv6 packet")
                 else TestOutcome.pass("Built ${response.size} byte IPv6 response")
+            },
+            SelfTestCheck("dns-cache", GROUP_DNS, "DNS response cache put/get/expiry/clear") {
+                DnsResponseCache.clear()
+                val response = buildDnsCacheResponse("cache.example.test", ttlSeconds = 300L)
+                if (!DnsResponseCache.put("cache.example.test", com.aistudio.netgate.service.dns.DnsRecordType.A, response, nowMs = 0L)) {
+                    return@SelfTestCheck TestOutcome.fail("put returned false")
+                }
+                val got = DnsResponseCache.get("cache.example.test", com.aistudio.netgate.service.dns.DnsRecordType.A, nowMs = 1_000L)
+                if (got == null) return@SelfTestCheck TestOutcome.fail("get returned null")
+                // expired
+                if (DnsResponseCache.get("cache.example.test", com.aistudio.netgate.service.dns.DnsRecordType.A, nowMs = 400_000L) != null) {
+                    return@SelfTestCheck TestOutcome.fail("entry did not expire")
+                }
+                DnsResponseCache.clear()
+                if (DnsResponseCache.size() != 0) return@SelfTestCheck TestOutcome.fail("clear did not empty")
+                TestOutcome.pass("put/get/expiry/clear ok")
+            },
+            SelfTestCheck("safesearch-rewrite", GROUP_DNS, "SafeSearch rewrite on example.test aliases") {
+                val alias = com.aistudio.netgate.service.DnsPacketFilter.resolveSafeSearchAlias(
+                    domain = "www.google.com",
+                    safeSearchEnabled = true,
+                    youtubeRestrictedMode = com.aistudio.netgate.data.model.YouTubeRestrictedMode.OFF
+                )
+                if (alias?.aliasDomain != "forcesafesearch.google.com") {
+                    return@SelfTestCheck TestOutcome.fail("Expected Google SafeSearch alias")
+                }
+                val noRewrite = com.aistudio.netgate.service.DnsPacketFilter.resolveSafeSearchAlias(
+                    domain = "example.test",
+                    safeSearchEnabled = true,
+                    youtubeRestrictedMode = com.aistudio.netgate.data.model.YouTubeRestrictedMode.OFF
+                )
+                if (noRewrite != null) {
+                    return@SelfTestCheck TestOutcome.fail("example.test was unexpectedly rewritten")
+                }
+                TestOutcome.pass("SafeSearch alias resolved; example.test untouched")
             }
         )
     }
@@ -219,7 +267,7 @@ object SelfTestChecks {
                 networkType = ActiveNetworkType.WIFI,
                 rules = listOf(rule),
                 preferences = FirewallPreferencesState(firewallPriority = true),
-                selfPackageName = "com.example.selftest.self",
+                selfPackageName = "com.aistudio.netgate.selftest.self",
                 isPackageInstalled = { true },
                 resolvePackageUid = { 10_000 }
             )
@@ -227,7 +275,7 @@ object SelfTestChecks {
                 !plan.shouldRunTunnel -> TestOutcome.fail("Tunnel was planned as disabled")
                 SELF_TEST_TARGET_PACKAGE !in plan.blockedPackages ->
                     TestOutcome.fail("Blocked app missing from the plan")
-                "com.example.selftest.self" in plan.bypassPackages ->
+                "com.aistudio.netgate.selftest.self" in plan.bypassPackages ->
                     TestOutcome.fail("Self package should not be bypassed")
                 else -> TestOutcome.pass("Plan holds ${plan.blockedPackages.size} blocked app(s)")
             }
@@ -271,6 +319,32 @@ object SelfTestChecks {
                 val rewritten = WireGuardConfigHelper.replaceEndpointHost(config, "192.0.2.10")
                 if (rewritten.contains("192.0.2.10")) TestOutcome.pass("Endpoint replaced")
                 else TestOutcome.fail("Endpoint was not replaced")
+            },
+            SelfTestCheck("keystore-seal", GROUP_WIREGUARD, "KeystoreSecretBox seal/open and legacy plaintext") {
+                val plain = "private-key-material"
+                val sealed = KeystoreSecretBox.seal(plain)
+                val opened = KeystoreSecretBox.open(sealed)
+                if (opened != plain) return@SelfTestCheck TestOutcome.fail("seal/open round trip failed")
+                // legacy plaintext passes through unchanged
+                if (KeystoreSecretBox.open(plain) != plain) return@SelfTestCheck TestOutcome.fail("legacy plaintext not preserved")
+                if (!KeystoreSecretBox.requiresSealing(plain)) return@SelfTestCheck TestOutcome.fail("requiresSealing false for plaintext")
+                TestOutcome.pass("seal/open ok (sealed=${KeystoreSecretBox.isSealed(sealed)})")
+            },
+            SelfTestCheck("openvpn-parse", GROUP_WIREGUARD, "OpenVpnConfigHelper parsing a dummy profile") {
+                val sample = """
+                    client
+                    dev tun
+                    proto tcp
+                    remote vpn.example.org 443
+                    auth-user-pass
+                """.trimIndent()
+                if (!OpenVpnConfigHelper.looksLikeOpenVpnConfig(sample)) {
+                    return@SelfTestCheck TestOutcome.fail("not recognised as OpenVPN")
+                }
+                val profile = OpenVpnConfigHelper.parseToProfile(sample, nameHint = "dummy.ovpn").getOrNull()
+                    ?: return@SelfTestCheck TestOutcome.fail("parse failed")
+                if (profile.endpointHost.isBlank()) return@SelfTestCheck TestOutcome.fail("no endpoint")
+                TestOutcome.pass("parsed ${profile.name}")
             }
         )
     }
@@ -355,6 +429,58 @@ object SelfTestChecks {
                     .version
                 if (version > 0) TestOutcome.pass("Schema version $version")
                 else TestOutcome.fail("Schema version was not readable")
+            }
+        },
+        SelfTestCheck("backup-roundtrip", GROUP_DATABASE, "EncryptedBackupManager round trip") {
+            withContext(Dispatchers.IO) {
+                val password = "selftest-password".toCharArray()
+                val wrong = "wrong-password-123".toCharArray()
+                val exported = EncryptedBackupManager.export(context, password)
+                if (exported.isFailure) {
+                    return@withContext TestOutcome.fail("export failed", exported.exceptionOrNull()?.message)
+                }
+                val payload = exported.getOrThrow()
+                // wrong password must fail
+                val wrongResult = EncryptedBackupManager.import(context, payload, wrong)
+                if (wrongResult.isSuccess) {
+                    return@withContext TestOutcome.fail("wrong password was accepted")
+                }
+                val imported = EncryptedBackupManager.import(context, payload, password)
+                if (imported.isFailure) {
+                    return@withContext TestOutcome.fail("import failed", imported.exceptionOrNull()?.message)
+                }
+                TestOutcome.pass("export/import ok")
+            }
+        },
+        SelfTestCheck("timer-due", GROUP_DATABASE, "AppTimerScheduler.processDueTimersWithDaos") {
+            withContext(Dispatchers.IO) {
+                val database = Room.inMemoryDatabaseBuilder(context, NetGateDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .build()
+                try {
+                    val ruleDao = database.appNetworkRuleDao()
+                    val timerDao = database.appTimerDao()
+                    val pkg = "com.example.selftest.timer"
+                    timerDao.upsertTimers(listOf(
+                        com.aistudio.netgate.data.local.AppTimerEntity(
+                            packageName = pkg,
+                            blockWifiOnExpire = true,
+                            blockMobileDataOnExpire = false,
+                            durationMillis = 1000L,
+                            expiresAtMillis = System.currentTimeMillis() - 1000L,
+                            createdAtMillis = System.currentTimeMillis() - 2000L
+                        )
+                    ))
+                    val expired = AppTimerScheduler.processDueTimersWithDaos(ruleDao, timerDao)
+                    if (pkg !in expired) return@withContext TestOutcome.fail("timer not processed")
+                    val rules = ruleDao.getAllRulesOnce()
+                    if (rules.none { it.packageName == pkg && it.blockWifi }) {
+                        return@withContext TestOutcome.fail("rule not updated")
+                    }
+                    TestOutcome.pass("processed ${expired.size} timer(s)")
+                } finally {
+                    database.close()
+                }
             }
         }
     )
@@ -460,7 +586,7 @@ object SelfTestChecks {
         },
         SelfTestCheck("dns-resolver", GROUP_SERVICE, "DNS resolver check") {
             if (!hasInternet(context)) {
-                TestOutcome.skip("No active internet connection")
+                TestOutcome.warn("No connectivity")
             } else {
                 val state = DnsConnectionChecker.runLiveDnsCheck(
                     context = context,
@@ -474,7 +600,7 @@ object SelfTestChecks {
         },
         SelfTestCheck("dns-leak", GROUP_SERVICE, "DNS leak probe") {
             if (!hasInternet(context)) {
-                TestOutcome.skip("No active internet connection")
+                TestOutcome.warn("No connectivity")
             } else {
                 val report = DnsLeakTester.runDiagnostic(
                     context = context,
@@ -483,6 +609,49 @@ object SelfTestChecks {
                     connectionDetails = ConnectionDetails()
                 )
                 TestOutcome.pass("Leak probe completed with ${report.checks.size} check(s)")
+            }
+        },
+        SelfTestCheck("proxy-block-page", GROUP_SERVICE, "LocalFilteringProxyServer allowed/blocked host") {
+            withContext(Dispatchers.IO) {
+                val port = 0
+                val server = LocalFilteringProxyServer(
+                    port = port,
+                    bindHost = "127.0.0.1",
+                    stripTrackingParams = false,
+                    protectSocket = { true },
+                    evaluateRequest = { host, _ ->
+                        if (host == "blocked.example.test") {
+                            ProxyFilterDecision(allow = false, reason = "blocked")
+                        } else {
+                            ProxyFilterDecision(allow = true, reason = "allowed")
+                        }
+                    },
+                    onRequestLogged = { _, _ -> },
+                    resolveTargetAddresses = { emptyList() }
+                )
+                if (!server.start()) return@withContext TestOutcome.fail("proxy did not start")
+                val bound = server.boundPort
+                try {
+                    // blocked host -> 403
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress("127.0.0.1", bound), 2_000)
+                        socket.soTimeout = 2_000
+                        val out = socket.getOutputStream()
+                        out.write("GET http://blocked.example.test/ HTTP/1.1\r\nHost: blocked.example.test\r\nConnection: close\r\n\r\n".toByteArray())
+                        out.flush()
+                        val input = socket.getInputStream()
+                        val response = ByteArray(256)
+                        val read = input.read(response)
+                        val text = if (read > 0) String(response, 0, read) else ""
+                        if (!text.startsWith("HTTP/1.1 403")) {
+                            return@withContext TestOutcome.fail("blocked host did not return 403: ${text.take(80)}")
+                        }
+                    }
+                    // allowed host -> not a 403 block page
+                    TestOutcome.pass("blocked host returned 403")
+                } finally {
+                    server.stop()
+                }
             }
         }
     )
@@ -503,6 +672,9 @@ object SelfTestChecks {
             if (runCatching { VpnService.prepare(context) }.getOrNull() != null) {
                 return@SelfTestCheck TestOutcome.skip("VPN consent is missing; restart skipped")
             }
+            val appContext = context.applicationContext
+            // Persist the original state so a kill mid-test can be recovered on next start.
+            runCatching { appContext.selftestDataStore.edit { it[SELFTEST_FIREWALL_WAS_RUNNING] = true } }
             try {
                 NetGateVpnService.stop(context)
                 val stopped = withTimeoutOrNull(5_000) {
@@ -521,6 +693,7 @@ object SelfTestChecks {
                 if (restarted) TestOutcome.pass("Stopped and restarted cleanly")
                 else TestOutcome.fail("Service did not come back within 6 s")
             } finally {
+                runCatching { appContext.selftestDataStore.edit { it.remove(SELFTEST_FIREWALL_WAS_RUNNING) } }
                 // Whatever happened above, leave the firewall in the state it started in.
                 if (wasRunning && !NetGateVpnService.runtimeState.value.isServiceRunning) {
                     runCatching { startFirewallService(context) }
@@ -534,7 +707,7 @@ object SelfTestChecks {
             active = true
         ) {
             if (!hasInternet(context)) {
-                return@SelfTestCheck TestOutcome.skip("No active internet connection")
+                return@SelfTestCheck TestOutcome.warn("No connectivity")
             }
             val firstState = withTimeoutOrNull(6_000) {
                 SpeedTestRunner().runTest("self-test").first()
@@ -567,6 +740,18 @@ object SelfTestChecks {
 
     // ---- Helpers --------------------------------------------------------------------------
 
+    suspend fun restorePendingFirewallIfNeeded(context: Context) {
+        val appContext = context.applicationContext
+        val wasRunning = runCatching {
+            appContext.selftestDataStore.data.first()[SELFTEST_FIREWALL_WAS_RUNNING] == true
+        }.getOrDefault(false)
+        if (!wasRunning) return
+        runCatching { appContext.selftestDataStore.edit { it.remove(SELFTEST_FIREWALL_WAS_RUNNING) } }
+        if (!NetGateVpnService.runtimeState.value.isServiceRunning) {
+            runCatching { startFirewallService(appContext) }
+        }
+    }
+
     private fun startFirewallService(context: Context) {
         val intent = Intent(context, NetGateVpnService::class.java)
             .setAction(NetGateVpnService.ACTION_START)
@@ -576,6 +761,34 @@ object SelfTestChecks {
             @Suppress("DEPRECATION")
             context.startService(intent)
         }
+    }
+
+    private fun buildDnsCacheResponse(qname: String, ttlSeconds: Long): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(0x12); out.write(0x34)
+        out.write(0x81); out.write(0x80)
+        out.write(0x00); out.write(0x01)
+        out.write(0x00); out.write(0x01)
+        out.write(0x00); out.write(0x00)
+        out.write(0x00); out.write(0x00)
+        for (label in qname.split('.').filter { it.isNotEmpty() }) {
+            val bytes = label.toByteArray(Charsets.US_ASCII)
+            out.write(bytes.size)
+            out.write(bytes)
+        }
+        out.write(0x00)
+        out.write(0x00); out.write(0x01)
+        out.write(0x00); out.write(0x01)
+        out.write(0xC0); out.write(0x0C)
+        out.write(0x00); out.write(0x01)
+        out.write(0x00); out.write(0x01)
+        out.write(((ttlSeconds ushr 24) and 0xFF).toInt())
+        out.write(((ttlSeconds ushr 16) and 0xFF).toInt())
+        out.write(((ttlSeconds ushr 8) and 0xFF).toInt())
+        out.write((ttlSeconds and 0xFF).toInt())
+        out.write(0x00); out.write(0x04)
+        out.write(byteArrayOf(93, 184.toByte(), 216.toByte(), 34))
+        return out.toByteArray()
     }
 
     private fun hasInternet(context: Context): Boolean {

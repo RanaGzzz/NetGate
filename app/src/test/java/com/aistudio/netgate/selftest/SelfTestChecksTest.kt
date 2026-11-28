@@ -1,4 +1,4 @@
-package com.example.selftest
+package com.aistudio.netgate.selftest
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -25,7 +25,8 @@ class SelfTestChecksTest {
         SelfTestChecks.GROUP_WIREGUARD,
         SelfTestChecks.GROUP_AD_LISTS,
         SelfTestChecks.GROUP_PREFS,
-        SelfTestChecks.GROUP_DATABASE
+        SelfTestChecks.GROUP_DATABASE,
+        SelfTestChecks.GROUP_SERVICE
     )
 
     @Test

@@ -1,8 +1,10 @@
 package com.aistudio.netgate
 
 import android.app.Application
+import com.aistudio.netgate.selftest.SelfTestChecks
 import com.aistudio.netgate.service.AppLogCollector
 import com.aistudio.netgate.service.CrashLogRecorder
+import kotlinx.coroutines.runBlocking
 
 /**
  * Process entry point. Registers the crash recorder and live app log collector as early as
@@ -17,5 +19,7 @@ class NetGateApplication : Application() {
         AppLog.install(this)
         CrashLogRecorder.install(this)
         AppLogCollector.init(this)
+        // If a self-test was killed mid-run, restore the firewall to its original state.
+        runBlocking { SelfTestChecks.restorePendingFirewallIfNeeded(this@NetGateApplication) }
     }
 }
