@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -377,8 +378,8 @@ object BlurEngine {
             BlurEngineStyle.ULTRA_FROST -> 1.0f
             BlurEngineStyle.MORPH -> 1.12f
         }
-        val primaryEdge = borderAccent ?: if (isLiquid) LiquidGlassCyan else EmeraldBright
-        val secondaryEdge = if (isLiquid) LiquidGlassPrismViolet else LiquidGlassCyan
+        val primaryEdge = borderAccent ?: if (isLiquid) LiquidGlassCyan else MaterialTheme.colorScheme.primary
+        val secondaryEdge = if (isLiquid) LiquidGlassPrismViolet else MaterialTheme.colorScheme.secondary
 
         this
             .clip(shape)
@@ -467,8 +468,11 @@ object BlurEngine {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     isPressed = true
-                    waitForUpOrCancellation(pass = PointerEventPass.Initial)
-                    isPressed = false
+                    try {
+                        waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                    } finally {
+                        isPressed = false
+                    }
                 }
             }
             .graphicsLayer {
