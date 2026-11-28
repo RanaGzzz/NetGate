@@ -528,7 +528,11 @@ object SelfTestChecks {
                 properties?.isPrivateDnsActive == true
             // A configured hostname is an active (strict) Private DNS that can bypass NetGate;
             // "off" or opportunistic/automatic mode is fine.
-            val activeHostname = properties?.privateDnsServerName?.takeIf { it.isNotBlank() }
+            val activeHostname = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                properties?.privateDnsServerName?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
             val isStrictPrivateDns = isPrivateDnsActive && activeHostname != null
             when {
                 properties == null -> TestOutcome.skip("No active network")
