@@ -3,6 +3,7 @@ package com.aistudio.netgate.ui.components
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import com.aistudio.netgate.data.model.AppDestination
 import com.aistudio.netgate.data.model.DataUsageSubTab
 
@@ -56,6 +57,9 @@ fun FloatingFrostedNavBar(
     currentDataUsageSubTab: DataUsageSubTab? = null,
     onSelectWifi: () -> Unit = {},
     onSelectSpeedTest: () -> Unit = {},
+    // Status accent for the bar's glass orb and dots (green when the firewall is on, red when off).
+    // Null keeps the theme's primary colour.
+    accentColor: Color? = null,
     modifier: Modifier = Modifier
 ) {
     val config = LocalBottomNavConfig.current
@@ -84,6 +88,7 @@ fun FloatingFrostedNavBar(
             label = tabId.title,
             contentDescription = tabId.contentDescriptionText(),
             testTag = tabId.testTag,
+            accentColor = accentColor,
             onClick = tabId.resolveDestinationAction(
                 onSelectFirewall = onSelectFirewall,
                 onSelectWebsites = onSelectWebsites,
