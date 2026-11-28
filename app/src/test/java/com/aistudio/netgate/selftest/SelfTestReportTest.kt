@@ -25,6 +25,23 @@ class SelfTestReportTest {
     }
 
     @Test
+    fun `redact keeps log timestamps`() {
+        val text = "12:34:56.789 start and 09:08:07 end"
+        val redacted = SelfTestReport.redact(text)
+        assertTrue(redacted.contains("12:34:56.789"))
+        assertTrue(redacted.contains("09:08:07"))
+        assertTrue(!redacted.contains("<ip>"))
+    }
+
+    @Test
+    fun `redact redacts hyphenated hostname prefixes as one token`() {
+        val text = "Resolved amazon-tam-api.example.com"
+        val redacted = SelfTestReport.redact(text)
+        assertTrue(redacted.contains("<host>"))
+        assertTrue(!redacted.contains("amazon-tam"))
+    }
+
+    @Test
     fun `redact strips ips and hostnames`() {
         val text = "Connected to 192.0.2.1 and api.example.com"
         val redacted = SelfTestReport.redact(text)

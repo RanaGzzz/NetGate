@@ -292,6 +292,7 @@ class NetGateVpnService : VpnService() {
     private val pendingLifetimeAdsDelta = AtomicLong(0L)
     private val isFlushingLifetimeAds = AtomicBoolean(false)
     private val dnsLogSeq = AtomicLong(1L)
+    @Volatile private var stopping = false
 
     private val recentBlockedLock = Any()
     private val recentBlockedQueue = ArrayDeque<String>()
@@ -302,15 +303,18 @@ class NetGateVpnService : VpnService() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            if (stopping) return
             val caps = connectivityManager?.getNetworkCapabilities(network) ?: return
             updateNetworkSet(network, caps, available = true)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            if (stopping) return
             updateNetworkSet(network, networkCapabilities, available = true)
         }
 
         override fun onLost(network: Network) {
+            if (stopping) return
             synchronized(this@NetGateVpnService) {
                 wifiNetworks.remove(network)
                 cellularNetworks.remove(network)
@@ -694,6 +698,7 @@ class NetGateVpnService : VpnService() {
         caps: NetworkCapabilities,
         available: Boolean
     ) {
+        if (stopping) return
         if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return
         val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         synchronized(this) {
@@ -709,6 +714,7 @@ class NetGateVpnService : VpnService() {
     }
 
     private fun recomputeNetworkAndRebuild() {
+        if (stopping) return
         val nextType = synchronized(this) {
             when {
                 wifiNetworks.isNotEmpty() -> ActiveNetworkType.WIFI
@@ -759,6 +765,7 @@ class NetGateVpnService : VpnService() {
     }.getOrDefault(false)
 
     private suspend fun rebuildTunnel(forceRebuild: Boolean) = tunnelMutex.withLock {
+        if (stopping) return
         // A new rebuild supersedes any retry that was waiting for its backoff to elapse.
         tunnelRetryJob?.cancel()
         tunnelRetryJob = null
@@ -1964,6 +1971,7 @@ class NetGateVpnService : VpnService() {
         websiteMode: WebsiteFilterMode,
         adBlockEnabled: Boolean
     ) {
+        if (stopping) return
         if (isTunnelActive) {
             // A live tunnel clears both the retry budget and the visible error.
             tunnelEstablishAttempts = 0
@@ -2012,6 +2020,7 @@ class NetGateVpnService : VpnService() {
     }
 
     private suspend fun stopFirewall() {
+        stopping = true
         AppLogCollector.info("Service", "Firewall tunnel stopped", "Torn down local VPN TUN and proxy")
         tunnelMutex.withLock {
             drainJob?.cancel()

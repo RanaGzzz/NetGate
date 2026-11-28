@@ -526,10 +526,14 @@ object SelfTestChecks {
             val properties = connectivity?.let { it.getLinkProperties(it.activeNetwork) }
             val isPrivateDnsActive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                 properties?.isPrivateDnsActive == true
+            // A configured hostname is an active (strict) Private DNS that can bypass NetGate;
+            // "off" or opportunistic/automatic mode is fine.
+            val activeHostname = properties?.privateDnsServerName?.takeIf { it.isNotBlank() }
+            val isStrictPrivateDns = isPrivateDnsActive && activeHostname != null
             when {
                 properties == null -> TestOutcome.skip("No active network")
-                isPrivateDnsActive -> TestOutcome.pass("Private DNS is active")
-                else -> TestOutcome.warn("Private DNS is not active system-wide")
+                isStrictPrivateDns -> TestOutcome.warn("Private DNS hostname is active: $activeHostname")
+                else -> TestOutcome.pass("Private DNS is off or automatic")
             }
         }
     )
@@ -584,7 +588,7 @@ object SelfTestChecks {
                 }
             }
         },
-        SelfTestCheck("dns-resolver", GROUP_SERVICE, "DNS resolver check") {
+        SelfTestCheck("dns-resolver", GROUP_SERVICE, "DNS resolver check (NetGate's own excluded path)") {
             if (!hasInternet(context)) {
                 TestOutcome.warn("No connectivity")
             } else {
@@ -598,7 +602,7 @@ object SelfTestChecks {
                 else TestOutcome.pass("Resolver responded over ${state.transportLabel.ifBlank { "the active path" }}")
             }
         },
-        SelfTestCheck("dns-leak", GROUP_SERVICE, "DNS leak probe") {
+        SelfTestCheck("dns-leak", GROUP_SERVICE, "DNS leak probe (NetGate's own excluded path)") {
             if (!hasInternet(context)) {
                 TestOutcome.warn("No connectivity")
             } else {
@@ -608,7 +612,18 @@ object SelfTestChecks {
                     vpnState = NetGateVpnService.runtimeState.value,
                     connectionDetails = ConnectionDetails()
                 )
-                TestOutcome.pass("Leak probe completed with ${report.checks.size} check(s)")
+                val failing = report.checks.firstOrNull { it.status == com.aistudio.netgate.data.model.DnsLeakCheckStatus.FAIL }
+                if (failing != null) {
+                    val resolver = report.activeSystemDns.joinToString(", ").ifBlank { failing.detail }
+                    TestOutcome.warn("DNS leak detected via $resolver")
+                } else if (report.verdict == com.aistudio.netgate.data.model.DnsLeakVerdict.LEAK_DETECTED) {
+                    val resolver = report.activeSystemDns.joinToString(", ").ifBlank { "unknown resolver" }
+                    TestOutcome.warn("DNS leak detected via $resolver")
+                } else if (report.checks.any { it.status == com.aistudio.netgate.data.model.DnsLeakCheckStatus.WARN }) {
+                    TestOutcome.warn("Partial risk: ${report.checks.count { it.status == com.aistudio.netgate.data.model.DnsLeakCheckStatus.WARN }} warning(s)")
+                } else {
+                    TestOutcome.pass("Leak probe completed with ${report.checks.size} check(s)")
+                }
             }
         },
         SelfTestCheck("proxy-block-page", GROUP_SERVICE, "LocalFilteringProxyServer allowed/blocked host") {
@@ -677,21 +692,49 @@ object SelfTestChecks {
             runCatching { appContext.selftestDataStore.edit { it[SELFTEST_FIREWALL_WAS_RUNNING] = true } }
             try {
                 NetGateVpnService.stop(context)
-                val stopped = withTimeoutOrNull(5_000) {
-                    while (NetGateVpnService.runtimeState.value.isServiceRunning) delay(100)
-                    true
-                } ?: false
-                if (!stopped) return@SelfTestCheck TestOutcome.fail("Service did not stop")
+                val stopTransitions = mutableListOf<String>()
+                var lastStopSig = ""
+                val stopStartMs = System.currentTimeMillis()
+                var stopped = false
+                while (System.currentTimeMillis() - stopStartMs < 12_000) {
+                    val state = NetGateVpnService.runtimeState.value
+                    val sig = "${state.isServiceRunning}/${state.isTunnelActive}"
+                    if (sig != lastStopSig) {
+                        stopTransitions += "${System.currentTimeMillis() - stopStartMs} ms: isServiceRunning=${state.isServiceRunning}, isTunnelActive=${state.isTunnelActive}"
+                        lastStopSig = sig
+                    }
+                    if (!state.isServiceRunning) { stopped = true; break }
+                    delay(100)
+                }
+                if (!stopped) {
+                    return@SelfTestCheck TestOutcome.fail(
+                        "Service did not stop within 12 s",
+                        stopTransitions.joinToString("\n").ifBlank { "no state transitions observed" }
+                    )
+                }
 
                 val started = runCatching { startFirewallService(context) }.isSuccess
                 if (!started) return@SelfTestCheck TestOutcome.fail("Service start was refused")
 
-                val restarted = withTimeoutOrNull(6_000) {
-                    while (!NetGateVpnService.runtimeState.value.isServiceRunning) delay(100)
-                    true
-                } ?: false
+                val startTransitions = mutableListOf<String>()
+                var lastStartSig = ""
+                val restartStartMs = System.currentTimeMillis()
+                var restarted = false
+                while (System.currentTimeMillis() - restartStartMs < 12_000) {
+                    val state = NetGateVpnService.runtimeState.value
+                    val sig = "${state.isServiceRunning}/${state.isTunnelActive}"
+                    if (sig != lastStartSig) {
+                        startTransitions += "${System.currentTimeMillis() - restartStartMs} ms: isServiceRunning=${state.isServiceRunning}, isTunnelActive=${state.isTunnelActive}"
+                        lastStartSig = sig
+                    }
+                    if (state.isServiceRunning) { restarted = true; break }
+                    delay(100)
+                }
                 if (restarted) TestOutcome.pass("Stopped and restarted cleanly")
-                else TestOutcome.fail("Service did not come back within 6 s")
+                else TestOutcome.fail(
+                    "Service did not come back within 12 s",
+                    startTransitions.joinToString("\n").ifBlank { "no state transitions observed" }
+                )
             } finally {
                 runCatching { appContext.selftestDataStore.edit { it.remove(SELFTEST_FIREWALL_WAS_RUNNING) } }
                 // Whatever happened above, leave the firewall in the state it started in.

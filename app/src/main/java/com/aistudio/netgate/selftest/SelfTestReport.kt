@@ -52,8 +52,16 @@ data class SelfTestReportMetadata(
 object SelfTestReport {
 
     private val IPV4 = Regex("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b")
-    private val IPV6 = Regex("(?i)\\b(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}\\b")
-    private val PACKAGE_NAME = Regex("\\b(?:[A-Za-z][A-Za-z0-9_]*\\.){2,}[A-Za-z][A-Za-z0-9_]*\\b")
+    // Require a real IPv6 shape: a full 8-group address or a `::` compressed form. A bare
+    // HH:mm:ss / HH:mm:ss.SSS timestamp has only two colons and must not be redacted as an IP.
+    private val IPV6 = Regex(
+        "(?i)\\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\\b|" +
+            "\\b(?:[0-9a-f]{0,4}:){2,}:[0-9a-f]{0,4}\\b|" +
+            "\\b::(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4}\\b"
+    )
+    // A hyphenated prefix (e.g. "amazon-tam-") must not let the trailing dotted suffix be
+    // redacted on its own, leaving "amazon-tam-<package>" behind.
+    private val PACKAGE_NAME = Regex("(?<!-)\\b(?:[A-Za-z][A-Za-z0-9_]*\\.){2,}[A-Za-z][A-Za-z0-9_]*\\b")
     private val HOSTNAME = Regex(
         "\\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,24}\\b",
         RegexOption.IGNORE_CASE
