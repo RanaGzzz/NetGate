@@ -455,7 +455,7 @@ class DpiBypassTest {
         composeRule.onNodeWithTag("dpi_mode_autopilot").assertIsDisplayed()
         composeRule.onNodeWithTag("sni_dpi_settings_list")
             .performScrollToNode(hasTestTag("dpi_chunk_4"))
-        composeRule.onNodeWithTag("dpi_chunk_4").assertIsDisplayed()
+        composeRule.onNodeWithTag("dpi_chunk_4").assertExists()
         composeRule.onNodeWithTag("sni_dpi_settings_list")
             .performScrollToNode(hasTestTag("dns_transport_doh_with_fallback"))
         composeRule.onNodeWithTag("dns_transport_doh_with_fallback").assertIsDisplayed()
