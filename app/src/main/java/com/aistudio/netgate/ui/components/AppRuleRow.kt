@@ -90,10 +90,10 @@ fun AppRuleRow(
         activeTimer != null -> WarningAmber
         else -> null
     }
-    val glassTint = when {
-        isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.56f)
-        else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+    val glassTint = if (isSelected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+    } else {
+        null
     }
 
     val rowInteraction = remember { MutableInteractionSource() }
