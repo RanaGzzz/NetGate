@@ -33,7 +33,9 @@ class SelfTestChecksTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val checks = SelfTestChecks.all(context).filter { it.group in deterministicGroups && !it.active }
 
-        val results = SelfTestRunner().run(checks).toList()
+        // A generous timeout here: this test validates the checks themselves, and a cold CI
+        // runner can spend seconds opening the Room schema for the first time.
+        val results = SelfTestRunner(timeoutMs = 30_000).run(checks).toList()
 
         assertEquals(checks.size, results.size)
         val failures = results.filter { it.status == TestStatus.FAIL }

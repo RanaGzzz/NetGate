@@ -31,6 +31,21 @@ jobs:
       - name: Run unit & Robolectric tests
         run: gradle :app:testDebugUnitTest
 
+      # Actions logs need a signed-in account, but check-run annotations are public. Emit the
+      # failing test names and first failure line so a red run is diagnosable without the artifact.
+      - name: Report failing unit tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          for path in glob.glob('app/build/test-results/testDebugUnitTest/*.xml'):
+              for case in ET.parse(path).getroot().iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      message = (failure.get('message') or 'failed').strip().splitlines()
+                      first = message[0][:400] if message else 'failed'
+                      print(f"::error title={case.get('classname')}.{case.get('name')}::{first}")
+          PY
+
       # A failing test used to leave no evidence in the run, and Actions logs are only
       # readable by signed-in users, so publish the per-test XML/HTML reports instead.
       - name: Upload test reports
