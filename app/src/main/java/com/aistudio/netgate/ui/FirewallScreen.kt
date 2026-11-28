@@ -151,7 +151,9 @@ import com.aistudio.netgate.ui.components.VpnGuardContent
 import com.aistudio.netgate.ui.components.rememberBottomNavClearancePadding
 import com.aistudio.netgate.ui.components.websiteManagementItems
 import com.aistudio.netgate.service.AppLogCollector
+import com.aistudio.netgate.ui.theme.BlockedRed
 import com.aistudio.netgate.ui.theme.BlurEngine.blurEngineModalDepth
+import com.aistudio.netgate.ui.theme.EmeraldPrimary
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.LocalOverlayLiquidState
 import com.aistudio.netgate.ui.theme.LocalThemeStyle
@@ -1152,6 +1154,7 @@ fun FirewallScreen(
                         modifier = Modifier.align(Alignment.BottomCenter)
                     ) {
                         FloatingFrostedNavBar(
+                            accentColor = if (isFirewallActive) EmeraldPrimary else BlockedRed,
                             currentDestination = uiState.currentDestination,
                             isConnectionInfoOpen = uiState.isConnectionInfoOpen,
                             onSelectFirewall = { selectAppDestination(AppDestination.FIREWALL) },
