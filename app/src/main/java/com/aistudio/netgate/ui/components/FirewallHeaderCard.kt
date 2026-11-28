@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.vectorResource
@@ -62,11 +63,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aistudio.netgate.R
 import com.aistudio.netgate.data.model.ActiveNetworkType
+import com.aistudio.netgate.data.model.BlurEngineStyle
 import com.aistudio.netgate.data.model.ConnectionDetails
 import com.aistudio.netgate.data.model.LiveNetworkTelemetry
+import com.aistudio.netgate.data.model.NetGateThemeStyle
 import com.aistudio.netgate.data.model.formatDataBytes
 import com.aistudio.netgate.data.model.formatSpeedBytesPerSec
 import com.aistudio.netgate.ui.theme.BlockedRed
+import com.aistudio.netgate.ui.theme.LocalBlurEngineConfig
 import com.aistudio.netgate.ui.theme.LocalExpressiveMotion
 import com.aistudio.netgate.ui.theme.LocalIsDarkTheme
 import com.aistudio.netgate.ui.theme.LocalThemeStyle
@@ -105,6 +109,7 @@ fun FirewallHeaderCard(
 ) {
     val isDark = LocalIsDarkTheme.current
     val themeStyle = LocalThemeStyle.current
+    val blurConfig = LocalBlurEngineConfig.current
     val motionSpec = LocalExpressiveMotion.current
     val primaryColor = MaterialTheme.colorScheme.primary
     val accentColor by animateColorAsState(
@@ -112,12 +117,28 @@ fun FirewallHeaderCard(
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "firewallAccent"
     )
+    val baseSurface = if (isDark) {
+        MaterialTheme.colorScheme.surfaceContainer
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    val activeAlpha = when {
+        themeStyle == NetGateThemeStyle.MATERIAL_YOU_LITE -> if (isDark) 0.92f else 0.95f
+        themeStyle == NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> if (isDark) 0.84f else 0.90f
+        blurConfig.style == BlurEngineStyle.OFF -> if (isDark) 0.88f else 0.92f
+        else -> if (isDark) 0.54f else 0.70f
+    }
+    val pausedAlpha = when {
+        themeStyle == NetGateThemeStyle.MATERIAL_YOU_LITE -> if (isDark) 0.90f else 0.94f
+        themeStyle == NetGateThemeStyle.MATERIAL_3_EXPRESSIVE -> if (isDark) 0.84f else 0.90f
+        blurConfig.style == BlurEngineStyle.OFF -> if (isDark) 0.88f else 0.92f
+        else -> if (isDark) 0.62f else 0.74f
+    }
     val glassTint by animateColorAsState(
-        targetValue = when {
-            isFirewallActive && isDark -> primaryColor.copy(alpha = 0.14f)
-            isFirewallActive -> primaryColor.copy(alpha = 0.10f)
-            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f)
-            else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
+        targetValue = if (isFirewallActive) {
+            lerp(baseSurface, primaryColor, if (isDark) 0.24f else 0.14f).copy(alpha = activeAlpha)
+        } else {
+            baseSurface.copy(alpha = pausedAlpha)
         },
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "firewallGlassTint"
@@ -323,12 +344,12 @@ fun FirewallHeaderCard(
             val innerTileColor = if (isDark) {
                 Color.Black.copy(alpha = 0.22f)
             } else {
-                Color.White.copy(alpha = 0.62f)
+                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.80f)
             }
             val innerTileBorder = if (isDark) {
                 Color.White.copy(alpha = 0.10f)
             } else {
-                Color.White.copy(alpha = 0.85f)
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
             }
             Surface(
                 shape = RoundedCornerShape(14.dp),
@@ -584,7 +605,7 @@ private fun RadioStatusChip(
         } else if (isDark) {
             Color.White.copy(alpha = 0.05f)
         } else {
-            Color.White.copy(alpha = 0.52f)
+            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.75f)
         },
         border = BorderStroke(
             1.dp,
@@ -593,7 +614,7 @@ private fun RadioStatusChip(
             } else if (isDark) {
                 Color.White.copy(alpha = 0.10f)
             } else {
-                Color.White.copy(alpha = 0.80f)
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
             }
         )
     ) {
@@ -633,10 +654,18 @@ private fun StatMetricTile(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
-        color = if (isDark) Color.Black.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.62f),
+        color = if (isDark) {
+            Color.Black.copy(alpha = 0.22f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.80f)
+        },
         border = BorderStroke(
             1.dp,
-            if (isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.85f)
+            if (isDark) {
+                Color.White.copy(alpha = 0.10f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
+            }
         )
     ) {
         Column(
@@ -679,14 +708,14 @@ private fun QuickInfoPill(
         color = when {
             highlighted -> accent.copy(alpha = if (isDark) 0.14f else 0.12f)
             isDark -> Color.Black.copy(alpha = 0.20f)
-            else -> Color.White.copy(alpha = 0.62f)
+            else -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.80f)
         },
         border = BorderStroke(
             1.dp,
             when {
                 highlighted -> accent.copy(alpha = 0.55f)
                 isDark -> Color.White.copy(alpha = 0.12f)
-                else -> Color.White.copy(alpha = 0.85f)
+                else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
             }
         ),
         modifier = modifier
