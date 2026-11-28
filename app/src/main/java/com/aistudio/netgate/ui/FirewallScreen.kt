@@ -1610,7 +1610,7 @@ private fun SearchAndFiltersBlock(
                                 borderColor = if (isDark) {
                                     Color.White.copy(alpha = 0.18f)
                                 } else {
-                                    Color.White.copy(alpha = 0.90f)
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
                                 },
                                 selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
                             ),
