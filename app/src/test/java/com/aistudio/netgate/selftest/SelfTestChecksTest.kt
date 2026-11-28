@@ -29,10 +29,17 @@ class SelfTestChecksTest {
         SelfTestChecks.GROUP_SERVICE
     )
 
+    private val networkDependentCheckIds = setOf("dns-resolver", "dns-leak")
+
+    private fun deterministicChecks(context: Context) =
+        SelfTestChecks.all(context).filter {
+            it.group in deterministicGroups && !it.active && it.id !in networkDependentCheckIds
+        }
+
     @Test
     fun `deterministic checks all pass`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val checks = SelfTestChecks.all(context).filter { it.group in deterministicGroups && !it.active }
+        val checks = deterministicChecks(context)
 
         // A generous timeout here: this test validates the checks themselves, and a cold CI
         // runner can spend seconds opening the Room schema for the first time.
@@ -58,7 +65,7 @@ class SelfTestChecksTest {
     @Test
     fun `results never contain a real host or package name`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val checks = SelfTestChecks.all(context).filter { it.group in deterministicGroups && !it.active }
+        val checks = deterministicChecks(context)
         val results = SelfTestRunner().run(checks).toList()
 
         // The suite may only mention its own synthetic example.test fixtures.

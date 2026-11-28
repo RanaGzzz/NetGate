@@ -27,6 +27,7 @@ class ProxyTunnelThreadBoundTest {
 
     @Test
     fun `many tunnels are relayed and every worker thread is released`() {
+        val existingWorkers = liveWorkerThreads().toSet()
         val upstream = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         val served = AtomicInteger(0)
         val upstreamThread = thread(isDaemon = true) {
@@ -96,7 +97,7 @@ class ProxyTunnelThreadBoundTest {
 
             // Two relay threads per tunnel; the old latch design needed three. Client-handler
             // threads exit as soon as the relay is submitted, so a small slack is enough.
-            val live = liveWorkerThreads().size
+            val live = liveWorkerThreads().count { it !in existingWorkers }
             assertTrue(
                 "expected at most ${tunnelCount * 2 + 8} worker threads for $tunnelCount tunnels, saw $live",
                 live <= tunnelCount * 2 + 8
@@ -109,10 +110,10 @@ class ProxyTunnelThreadBoundTest {
         }
 
         val deadline = System.currentTimeMillis() + 5_000
-        var leaked = liveWorkerThreads()
+        var leaked = liveWorkerThreads().filter { it !in existingWorkers }
         while (leaked.isNotEmpty() && System.currentTimeMillis() < deadline) {
             Thread.sleep(50)
-            leaked = liveWorkerThreads()
+            leaked = liveWorkerThreads().filter { it !in existingWorkers }
         }
         assertTrue(
             "worker threads outlived the tunnels: ${leaked.map { it.name }}",
