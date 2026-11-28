@@ -9,4 +9,7 @@
     <cache-path
         name="exported_logs"
         path="logs/" />
+    <cache-path
+        name="selftest_reports"
+        path="selftest/" />
 </paths>

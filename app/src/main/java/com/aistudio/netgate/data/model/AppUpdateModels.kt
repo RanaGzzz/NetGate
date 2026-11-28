@@ -72,7 +72,8 @@ object BundledChangelog {
                     heading = "Diagnostics",
                     bullets = listOf(
                         "Tunnel establish, VPN Guard connect and proxy start failures are written to a local log with the exception type and stack frames only; no domains, IPs, package names or keys, and nothing is uploaded.",
-                        "The log rotates at 512 KB and keeps one previous copy in private app storage."
+                        "The log rotates at 512 KB and keeps one previous copy in private app storage.",
+                        "An in-app self-test runs the real policy, DNS, DPI, firewall, WireGuard, ad-list, preference and in-memory Room checks, plus read-only live checks; active tunnel, speed-test and hotspot checks are opt-in and restore the previous state. Reports are redacted and shared through the app's FileProvider."
                     )
                 ),
                 ChangelogSection(

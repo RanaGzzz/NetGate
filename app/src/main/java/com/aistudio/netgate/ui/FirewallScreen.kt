@@ -175,6 +175,9 @@ fun FirewallScreen(
     val context = LocalContext.current
     var showBackgroundSheet by rememberSaveable { mutableStateOf(false) }
     var showAdvancedProtection by rememberSaveable { mutableStateOf(false) }
+    var showSelfTest by rememberSaveable { mutableStateOf(false) }
+    val selfTestViewModel: com.example.selftest.SelfTestViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel()
     var isSniDpiSelected by rememberSaveable { mutableStateOf(false) }
     var selectedFirewallTab by rememberSaveable { mutableStateOf(FirewallContentTab.ALL_APPS) }
     var areAppFiltersExpanded by rememberSaveable { mutableStateOf(false) }
@@ -1270,6 +1273,7 @@ fun FirewallScreen(
             onOpenVpnDpiLogs = { viewModel.openVpnDpiLogs(VpnDpiLogCategory.ALL) },
             onExportSettings = viewModel::exportSettingsTo,
             onImportSettings = viewModel::importSettingsFrom,
+            onOpenSelfTest = { showSelfTest = true },
             onClearAllRules = viewModel::clearAllRules,
             onDismiss = viewModel::closeSettings
         )
@@ -1299,6 +1303,14 @@ fun FirewallScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    if (showSelfTest) {
+        com.aistudio.netgate.ui.components.SelfTestSheet(
+            viewModel = selfTestViewModel,
+            speedTestInProgress = uiState.speedTestState.isRunning,
+            onDismiss = { showSelfTest = false }
         )
     }
 

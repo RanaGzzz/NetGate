@@ -118,6 +118,7 @@ fun FirewallSettingsSheet(
     onOpenVpnDpiLogs: () -> Unit = {},
     onExportSettings: (Uri) -> Unit = {},
     onImportSettings: (Uri) -> Unit = {},
+    onOpenSelfTest: () -> Unit = {},
     onClearAllRules: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -528,6 +529,28 @@ fun FirewallSettingsSheet(
                                             } else {
                                                 "Open Diagnostics Logs"
                                             },
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    FilledTonalButton(
+                                        onClick = onOpenSelfTest,
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("settings_open_self_test_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Shield,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Run in-app self-test",
                                             style = MaterialTheme.typography.labelLarge,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
